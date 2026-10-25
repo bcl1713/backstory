@@ -45,6 +45,25 @@ if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
 if _local and any(host not in {"localhost", "127.0.0.1", "[::1]", "testserver"} for host in ALLOWED_HOSTS):
     raise ImproperlyConfigured("localhost cookie mode requires loopback hosts")
 
+# Trust is explicit and applies only to the actual TCP peer. Never use Django's
+# independent forwarding switches: the middleware validates before setting HTTPS.
+BACKSTORY_PROXY_MODE = os.environ.get('BACKSTORY_PROXY_MODE', 'off')
+BACKSTORY_TRUSTED_PROXY_IPS = tuple(value.strip() for value in os.environ.get(
+    'BACKSTORY_TRUSTED_PROXY_IPS', '').split(',')) if os.environ.get('BACKSTORY_TRUSTED_PROXY_IPS') else ()
+BACKSTORY_PROXY_CLIENT_IP_HEADER = os.environ.get('BACKSTORY_PROXY_CLIENT_IP_HEADER', 'none')
+CSRF_TRUSTED_ORIGINS = [value.strip() for value in os.environ.get('BACKSTORY_CSRF_TRUSTED_ORIGINS', '').split(',') if value.strip()]
+SECURE_PROXY_SSL_HEADER = None
+USE_X_FORWARDED_HOST = False
+USE_X_FORWARDED_PORT = False
+BACKSTORY_BIND_ADDRESS = os.environ.get('BACKSTORY_BIND_ADDRESS', '127.0.0.1')
+from backstory.checks import proxy_configuration_errors, safe_origin_bind
+if not safe_origin_bind(BACKSTORY_BIND_ADDRESS, BACKSTORY_COOKIE_MODE):
+    raise ImproperlyConfigured('BACKSTORY_BIND_ADDRESS must be a literal IP; localhost cookies require a loopback bind')
+_proxy_errors = proxy_configuration_errors(BACKSTORY_PROXY_MODE, BACKSTORY_COOKIE_MODE,
+    ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, BACKSTORY_TRUSTED_PROXY_IPS, BACKSTORY_PROXY_CLIENT_IP_HEADER)
+if _proxy_errors:
+    raise ImproperlyConfigured('Invalid BACKSTORY proxy configuration: ' + ', '.join(_proxy_errors))
+
 BACKSTORY_DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
 
 
@@ -80,6 +99,7 @@ INSTALLED_APPS = [
 ]
 MIDDLEWARE = [
     "backstory.middleware.ResponsePolicyMiddleware",
+    "backstory.middleware.TrustedProxyMiddleware",
     "django.middleware.security.SecurityMiddleware", "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware", "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -153,11 +173,6 @@ AXES_LOCKOUT_CALLABLE = 'backstory.middleware.lockout'
 AXES_ENABLE_ACCESS_FAILURE_LOG = False
 AXES_DISABLE_ACCESS_LOG = True
 AXES_VERBOSE = False
-CSRF_TRUSTED_ORIGINS = [value.strip() for value in os.environ.get('BACKSTORY_CSRF_TRUSTED_ORIGINS', '').split(',') if value.strip()]
-BACKSTORY_PROXY_MODE = os.environ.get('BACKSTORY_PROXY_MODE', 'off')
-# Proxy authentication is deliberately unavailable; application accounts always apply.
-if BACKSTORY_PROXY_MODE != 'off':
-    raise ImproperlyConfigured('Proxy mode requires a trusted overwriting proxy and restricted origin; unsupported mode fails closed')
 LOGGING = {
     'version': 1, 'disable_existing_loggers': False,
     'filters': {'redact': {'()': 'backstory.logging.RedactRequest'}},

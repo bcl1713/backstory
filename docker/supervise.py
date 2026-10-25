@@ -44,8 +44,18 @@ def supervise(commands):
     return result
 
 
+def web_command():
+    # Django alone applies the explicit TCP peer boundary. Disable Gunicorn's
+    # independent scheme, identity/path forwarding and PROXY-protocol rewriting,
+    # including values inherited through FORWARDED_ALLOW_IPS/GUNICORN_CMD_ARGS.
+    return ['gunicorn', '--logger-class', 'backstory.logging.SafeGunicornLogger',
+        '--no-control-socket', '--forwarded-allow-ips', '', '--forwarder-headers', '',
+        '--proxy-protocol', 'off', 'backstory.wsgi:application', '--bind', '0.0.0.0:8000',
+        '--workers', '1', '--threads', '4', '--timeout', '30', '--access-logfile', '/dev/null']
+
+
 if __name__ == '__main__':
     sys.exit(supervise([
-        ['gunicorn', '--logger-class', 'backstory.logging.SafeGunicornLogger', '--no-control-socket', 'backstory.wsgi:application', '--bind', '0.0.0.0:8000', '--workers', '1', '--threads', '4', '--timeout', '30', '--access-logfile', '/dev/null'],
+        web_command(),
         [sys.executable, 'manage.py', 'run_indexer'],
     ]))
