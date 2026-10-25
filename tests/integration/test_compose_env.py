@@ -15,6 +15,9 @@ KEYS = (
     'BACKSTORY_IDENTITY_PATH', 'BACKSTORY_IDENTITY_SHA256',
     'BACKSTORY_DATA_HOST_PATH', 'BACKSTORY_WIKI_READ_ONLY',
     'BACKSTORY_EXCLUSIONS', 'BACKSTORY_REVISION_QUOTA_BYTES',
+    'BACKSTORY_BIND_ADDRESS', 'BACKSTORY_COOKIE_MODE', 'BACKSTORY_ALLOWED_HOSTS',
+    'BACKSTORY_PROXY_MODE', 'BACKSTORY_CSRF_TRUSTED_ORIGINS',
+    'BACKSTORY_TRUSTED_PROXY_IPS', 'BACKSTORY_PROXY_CLIENT_IP_HEADER',
 )
 
 
@@ -142,3 +145,61 @@ def test_plain_compose_discovers_dotenv_and_selects_hostdata(tmp_path):
     assert mounts['/var/lib/backstory']['source'] == str(tmp_path / 'private data')
     assert mounts['/wiki']['read_only'] is True
     assert web['environment']['BACKSTORY_EXCLUSIONS'] == 'private'
+
+
+@pytest.mark.parametrize('bind', ['192.0.2.10', '2001:db8::10'])
+@pytest.mark.parametrize('files', ['compose.yaml:compose.host-data.yaml', 'compose.portainer.yaml'])
+def test_https_proxy_values_and_private_bind_render_without_starting(tmp_path, bind, files):
+    expected = {
+        'BACKSTORY_BIND_ADDRESS': bind,
+        'BACKSTORY_COOKIE_MODE': 'https',
+        'BACKSTORY_ALLOWED_HOSTS': 'wiki.example.test',
+        'BACKSTORY_PROXY_MODE': 'trusted',
+        'BACKSTORY_CSRF_TRUSTED_ORIGINS': 'https://wiki.example.test',
+        'BACKSTORY_TRUSTED_PROXY_IPS': '192.0.2.20/32,2001:db8::20/128',
+        'BACKSTORY_PROXY_CLIENT_IP_HEADER': 'x-real-ip',
+    }
+    web = web_config(config(tmp_path, files=files, BACKSTORY_IMAGE='backstory:fixture',
+        BACKSTORY_DATA_HOST_PATH=str(tmp_path / 'data'), **expected))
+    assert web['ports'][0]['host_ip'] == bind
+    assert web['ports'][0]['target'] == 8000
+    assert web['ports'][0]['published'] == '8000'
+    assert all(web['environment'][key] == value for key, value in expected.items())
+
+
+def test_default_proxy_inputs_do_not_grant_forwarding_trust(tmp_path):
+    web = web_config(config(tmp_path))
+    expected = {
+        'BACKSTORY_BIND_ADDRESS': '127.0.0.1',
+        'BACKSTORY_COOKIE_MODE': 'localhost',
+        'BACKSTORY_ALLOWED_HOSTS': 'localhost,127.0.0.1',
+        'BACKSTORY_PROXY_MODE': 'off',
+        'BACKSTORY_CSRF_TRUSTED_ORIGINS': '',
+        'BACKSTORY_TRUSTED_PROXY_IPS': '',
+        'BACKSTORY_PROXY_CLIENT_IP_HEADER': 'none',
+    }
+    assert all(web['environment'].get(key) == value for key, value in expected.items())
+
+
+def test_trusted_mode_does_not_invent_missing_security_inputs(tmp_path):
+    # Compose only transports configuration. Application startup must reject
+    # these absent required values; it must never receive a permissive fallback.
+    web = web_config(config(tmp_path, BACKSTORY_PROXY_MODE='trusted',
+        BACKSTORY_COOKIE_MODE='https', BACKSTORY_ALLOWED_HOSTS='wiki.example.test'))
+    assert web['environment']['BACKSTORY_TRUSTED_PROXY_IPS'] == ''
+    assert web['environment']['BACKSTORY_CSRF_TRUSTED_ORIGINS'] == ''
+    assert web['environment']['BACKSTORY_PROXY_CLIENT_IP_HEADER'] == 'none'
+
+
+def test_portainer_https_configuration_matches_local_hostdata(tmp_path):
+    values = dict(
+        BACKSTORY_IMAGE='backstory:fixture', BACKSTORY_UID='1000', BACKSTORY_GID='1000',
+        BACKSTORY_DATA_HOST_PATH=str(tmp_path / 'data'), BACKSTORY_BIND_ADDRESS='192.0.2.10',
+        BACKSTORY_COOKIE_MODE='https', BACKSTORY_ALLOWED_HOSTS='wiki.example.test',
+        BACKSTORY_PROXY_MODE='trusted', BACKSTORY_CSRF_TRUSTED_ORIGINS='https://wiki.example.test',
+        BACKSTORY_TRUSTED_PROXY_IPS='192.0.2.20', BACKSTORY_PROXY_CLIENT_IP_HEADER='none',
+    )
+    standalone = web_config(config(tmp_path, files='compose.portainer.yaml', **values))
+    local = web_config(config(tmp_path, files='compose.yaml:compose.host-data.yaml', **values))
+    assert 'build' not in standalone
+    assert {key: value for key, value in local.items() if key != 'build'} == standalone
