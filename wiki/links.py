@@ -1,4 +1,4 @@
-"""Exact disk links only; indexed name fallback can extend this boundary later.
+"""Exact paths followed by bounded, policy-checked indexed identifiers.
 
 Markdown destinations are URLs decoded once. Wikilinks are literal wiki paths
 (percent signs remain filenames). Wiki paths prefer the root, then the source
@@ -18,13 +18,20 @@ from .policy import validate_path
 from .storage import open_directory, require_ready
 
 
-def heading_slug(text: str) -> str:
+def heading_slug(text: str, *, plain=False) -> str:
     """Lowercase Unicode word characters; remove punctuation, spaces -> hyphens.
 
     Rendered heading IDs have a preview- prefix to isolate them from app controls.
     Duplicate IDs append -1, -2, ...; link fragments use the same slug convention.
+    Inline markup is removed; existing underscores remain word characters.
     """
+    from markdown_it import MarkdownIt
+    tokens = MarkdownIt('commonmark', {'html': False}).parseInline(text) if not plain else []
+    def plain_text(items):
+        return ''.join(plain_text(token.children) if token.children else token.content if token.type in {'text', 'code_inline', 'image'} else '' for token in items)
+    text = plain_text(tokens) if not plain else text
     return re.sub(r"\s+", "-", re.sub(r"[^\w\s-]", "", text.lower()).strip()) or "section"
+
 
 
 def _decoded(value):
@@ -58,23 +65,23 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
         raw, separator, label = target.partition("|") if kind == "wiki" else (target, "", target)
         if not separator:
             label = raw
-        parsed = urlsplit(raw)
-        if parsed.scheme or parsed.netloc:
-            if kind != "markdown":
+        if kind == 'wiki':
+            path, _, fragment = raw.partition('#')
+        else:
+            parsed = urlsplit(raw)
+            if parsed.scheme or parsed.netloc:
+                if parsed.scheme.lower() not in {"http", "https", "mailto", ""}:
+                    return unavailable
+                href = "https:" + raw if not parsed.scheme else raw
+                return LinkResult("external", href, label)
+            if parsed.query:
                 return unavailable
-            if parsed.scheme.lower() not in {"http", "https", "mailto", ""}:
-                return unavailable
-            href = "https:" + raw if not parsed.scheme else raw
-            return LinkResult("external", href, label)
-        if parsed.query:
-            return unavailable
-        path = _decoded(parsed.path) if kind == "markdown" else parsed.path
-        fragment = _decoded(parsed.fragment) if kind == "markdown" else parsed.fragment
+            path, fragment = _decoded(parsed.path), _decoded(parsed.fragment)
         suffix = "#" + quote("preview-" + heading_slug(fragment), safe="-_") if fragment else ""
         if not path:
             return LinkResult("resolved", suffix or "#", label)
         if path.startswith("/"):
-            return unavailable
+            return LinkResult("missing", None, label)
         relative = posixpath.normpath(posixpath.join(posixpath.dirname(source_path), path))
         root_path = posixpath.normpath(path)
         # A parent-relative wikilink has no valid root-relative interpretation;
@@ -89,7 +96,10 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
                 if candidate in visited:
                     continue
                 visited.add(candidate)
-                validate_path(candidate, "content")
+                try:
+                    validate_path(candidate, "content")
+                except StorageError:
+                    continue  # excluded paths behave exactly like absent paths
                 try:
                     exists = _regular(candidate)
                 except StorageError as error:
@@ -99,6 +109,16 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
                 if exists:
                     route = "wiki:note" if candidate.lower().endswith(".md") else "wiki:attachment"
                     return LinkResult("resolved", reverse(route, args=[candidate]) + suffix, label)
+        if kind == 'wiki':
+            from indexing.search import resolve_indexed_name
+            from django.db import OperationalError
+            try:
+                state, paths = resolve_indexed_name(path)
+            except OperationalError:
+                return unavailable
+            if state == 'resolved':
+                return LinkResult(state, reverse('wiki:note', args=[paths[0]]) + suffix, label)
+            return LinkResult(state, None, label)
         return LinkResult("missing", None, label)
     except (StorageError, OSError, ValueError, UnicodeError):
         return unavailable

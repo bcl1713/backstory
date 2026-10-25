@@ -102,7 +102,7 @@ def _rewrite_links(tokens, env):
 
 
 def _plain_heading(tokens):
-    return "".join(token.content for token in tokens if token.type in {"text", "code_inline", "image", "wiki_link"})
+    return "".join((token.content.partition("|")[2] or token.content.partition("|")[0]) if token.type == "wiki_link" else token.content for token in tokens if token.type in {"text", "code_inline", "image", "wiki_link"})
 
 
 def _parser():
@@ -128,7 +128,7 @@ def render_preview(source: str, source_path: str) -> Preview:
         used = set()
         for index, token in enumerate(tokens):
             if token.type == "heading_open" and index + 1 < len(tokens):
-                slug = heading_slug(_plain_heading(tokens[index + 1].children or []))
+                slug = heading_slug(_plain_heading(tokens[index + 1].children or []), plain=True)
                 count = counts.get(slug, 0)
                 candidate = slug + (f"-{count}" if count else "")
                 while candidate in used:

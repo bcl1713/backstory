@@ -1,6 +1,6 @@
 {% load static %}<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{% block title %}Backstory{% endblock %}</title><link rel="stylesheet" href="{% static 'app.css' %}"></head>
-<body><a href="#main">Skip to content</a><header><nav aria-label="Main"><a href="/">Backstory</a> · <a href="{% url 'wiki:status' %}">Storage status</a></nav></header><main id="main">
+<body><a href="#main">Skip to content</a><header><nav aria-label="Main"><a href="/">Backstory</a> · <a href="{% url 'wiki:search' %}">Search</a> · <a href="{% url 'wiki:status' %}">Storage status</a></nav></header><main id="main">
 {% block content %}<h1>Backstory</h1><p>Signed in as {{ user.username }}.</p>
 {% if readiness.state == 'ready' %}<nav aria-label="Folder"><h2>{{ folder|default:'Wiki' }}</h2><a href="/">Wiki root</a><p><a href="{% url 'wiki:new' %}?folder={{ folder|urlencode }}">New note in this folder</a></p><ul>{% for entry in entries %}<li><a href="{{ entry.url }}">{{ entry.name }}</a>{% if entry.kind == 'folder' %} (folder){% endif %}</li>{% empty %}<li>No visible entries in this page.</li>{% endfor %}</ul>{% if next_url %}<a href="{{ next_url }}">Next page</a>{% endif %}</nav>
 {% else %}<section aria-live="polite"><h2>Storage unavailable</h2><p>{{ readiness.reason_code }}</p><p>Ask the administrator to check the wiki mount and configured storage identity. Your wiki has not been initialized or repaired.</p><a href="/">Retry storage check</a></section>{% endif %}{% endblock %}

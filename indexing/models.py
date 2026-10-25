@@ -53,3 +53,12 @@ class ScanState(models.Model):
     next_incremental = models.FloatField(default=0)
     next_verify = models.FloatField(default=0)
     backoff_until = models.FloatField(default=0)
+
+
+class IndexedName(models.Model):
+    note = models.ForeignKey(IndexedNote, on_delete=models.CASCADE)
+    name = models.TextField(db_index=True)
+    resolvable = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['note', 'name'], name='unique_note_name')]

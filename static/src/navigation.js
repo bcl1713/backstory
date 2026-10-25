@@ -30,6 +30,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   const find = selector => document.querySelector(selector);
   const parse = id => JSON.parse(find(id).textContent);
   let path = parse('#note-path');
+  mountLinkDiscovery(() => path);
   const folder = parse('#note-folder');
   let baseSource = initialSource;
   let baseRevision = isNew ? null : parse('#note-revision');
@@ -96,6 +97,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     find('[data-server-preview]').href = '/preview/' + encode(path);
     find('[data-source-download]').href = '/source/' + encode(path);
     find('[data-secondary-links]').hidden = false;
+    find('[data-link-discovery]').hidden = false;
     saveButton.textContent = 'Save';
   };
   const requestPath = () => {
@@ -326,4 +328,33 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     if (!find('[data-conflict]').hidden) find('#conflict-draft').value = value;
     say(dirty() ? 'Unsaved changes' : 'Unchanged');
   };
+}
+
+// Link lookup is explicitly requested. Editor selection/decorations never call
+// this endpoint or perform backlink, scan or index work.
+export function mountLinkDiscovery(getPath) {
+  const form = document.querySelector('[data-link-discovery]');
+  if (!form) return;
+  const output = form.querySelector('[data-link-result]');
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    output.textContent = 'Resolving link…';
+    const query = new URLSearchParams({ source: getPath(), target: form.elements.target.value, kind: form.elements.kind.value });
+    try {
+      const response = await fetch('/resolve/?' + query, { credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+      if (!response.ok) throw new Error('Link unavailable');
+      const result = await response.json();
+      output.replaceChildren(document.createTextNode(`${result.state}: `));
+      if (result.href && (/^\/(?!\/)/.test(result.href) || result.href.startsWith('#') || /^(https?:|mailto:)/i.test(result.href))) {
+        const link = document.createElement('a');
+        link.href = result.href;
+        link.textContent = result.label || 'Open link';
+        output.append(link);
+      } else {
+        output.append(document.createTextNode(result.label || 'Link unavailable'));
+      }
+    } catch {
+      output.textContent = 'Link unavailable. Check storage and index status, or sign in again.';
+    }
+  });
 }

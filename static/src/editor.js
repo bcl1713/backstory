@@ -3,6 +3,7 @@ import { EditorView, keymap, drawSelection } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
+import { installHeadingNavigation } from './heading-navigation.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
 
 export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onFailure = () => {}, nonce = '' }) {
@@ -55,6 +56,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
       ],
     }),
   });
+  const removeHeadingNavigation = installHeadingNavigation(view);
   return {
     view,
     getSource,
@@ -74,7 +76,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
       view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? createLivePreviewExtension() : []), annotations: Transaction.addToHistory.of(false) });
     },
     focus() { view.focus(); },
-    destroy() { view.destroy(); },
+    destroy() { removeHeadingNavigation(); view.destroy(); },
   };
 }
 

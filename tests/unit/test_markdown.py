@@ -73,10 +73,14 @@ def test_blocked_paths_never_disclose_candidates(wiki, settings, tmp_path):
     resolve = module("wiki.links").resolve_link
     for target in ["../../outside.md", "/absolute.md", "../AGENTS.md", "../private.md", "../alias.md"]:
         result = resolve("folder/note.md", target, "markdown")
-        assert result.state == "unavailable"
+        expected = "unavailable" if target == "../alias.md" else "missing"
+        assert result.state == expected
         assert result.href is None
-        assert result.label == "Unavailable link"
-        assert target not in repr(result)
+        if expected == "unavailable":
+            assert result.label == "Unavailable link"
+            assert target not in repr(result)
+        else:
+            assert result.label == target  # only the caller-supplied label, no candidate data
     missing = resolve("folder/note.md", "missing.md", "markdown")
     assert missing.state == "missing"
     assert missing.href is None
@@ -144,3 +148,8 @@ def test_wikilink_denied_candidate_still_blocks_optional_note(wiki, candidate_ki
     result = module("wiki.links").resolve_link("note.md", "target", "wiki")
     assert result.state == "unavailable"
     assert result.href is None
+
+
+def test_heading_code_literal_is_not_reinterpreted_as_a_link():
+    preview = module('wiki.markdown').render_preview('# `[label](target)`\n', 'note.md')
+    assert 'id="preview-labeltarget"' in preview.html

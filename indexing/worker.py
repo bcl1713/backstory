@@ -13,7 +13,7 @@ from wiki.contracts import StorageError
 from wiki.metadata import project_note
 from wiki.readiness import check_readiness
 from wiki.storage import read_note, require_ready
-from .models import IndexGeneration, IndexedNote, IndexJob, LinkEdge, ScanState
+from .models import IndexGeneration, IndexedNote, IndexedName, IndexJob, LinkEdge, ScanState
 from .scanner import file_stat, next_paths
 
 BATCH_SIZE = 20
@@ -76,6 +76,9 @@ def _commit_projection(snapshot, info, generations, token):
                                'diagnostics': [item.code for item in projection.diagnostics]},
                 'body': projection.body, 'seen': token,
             })
+            from .names import note_names
+            IndexedName.objects.filter(note=note).delete()
+            IndexedName.objects.bulk_create([IndexedName(note=note, name=name, resolvable=resolvable) for name, resolvable in note_names(note.path, note.title, note.ids, note.aliases)])
             LinkEdge.objects.filter(note=note).delete()
             LinkEdge.objects.bulk_create([LinkEdge(note=note, target=edge.target, kind=edge.kind,
                                                     fragment=edge.fragment, position=list(edge.position)) for edge in projection.edges])
