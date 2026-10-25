@@ -49,7 +49,16 @@ or credentials belong in this repository.
   preflights separately reject existing and dangling-symlink paths before copies.
 - [x] Independent Stage 4 review accepted at `71ced19`, with no mandatory
   findings. Earlier stage findings were corrected and independently rechecked.
-  This final factual checklist update changes no runtime or operator commands.
+  Runtime code and operator commands remain unchanged by the subsequent
+  Compose assertion portability correction.
+
+- [ ] Hosted CI on the corrected head: pending the next pushed workflow run.
+  Run `40226083394` / job `121267631149` failed with 499 passed and one
+  packaging-test failure because its normalized Compose JSON omitted false.
+  Correction F4-CI-001 locally passes 5 container checks, covering explicit and
+  omitted normalized false while requiring explicit false in `compose.yaml` and
+  rejecting normalized true. Local review acceptance above remains distinct from
+  this open hosted CI gate.
 
 Merge and deployment remain separate owner decisions requiring explicit approval;
 neither is part of this authorized local delivery.
@@ -65,5 +74,6 @@ Verified runtime image: `backstory:stage4`,
 `sha256:48154e34929f5950c8beada18565d6037a81eb898d8407281b51bc318e504dd0`.
 It contains the final runtime code, including public process-only health, protected
 SQLite backup and pruned development dependencies. Later changes are documentation,
-example comments and test assertions only. CI configuration is supplied; a hosted
-GitHub Actions run is not claimed by this local evidence.
+example comments and test assertions only. The unchanged 96 runtime file hashes
+continue to match that image; no rebuild is needed for this test/doc correction.
+Hosted CI evidence and its pending corrected-head gate are recorded above.

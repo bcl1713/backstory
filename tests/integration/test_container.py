@@ -1,10 +1,12 @@
 """Packaging contracts; exact built-image lifecycle is also a release walkthrough."""
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 
 import pytest
+import yaml
 from tests.fixtures.generate import generate_fixture
 from tests.integration.test_storage import wiki
 from tests.integration.test_worker_lifecycle import (
@@ -13,7 +15,8 @@ from tests.integration.test_worker_lifecycle import (
 )
 
 
-def test_compose_is_loopback_and_never_creates_host_wiki(tmp_path):
+@pytest.mark.parametrize('omit_false', [False, True], ids=['native-config', 'omitted-false-config'])
+def test_compose_is_loopback_and_never_creates_host_wiki(tmp_path, omit_false):
     if not shutil.which('docker'):
         pytest.skip('Docker Compose unavailable; exact container gate remains open')
     fixture = generate_fixture(tmp_path / 'container-fixture', 'small', for_containers=True)
@@ -25,7 +28,18 @@ def test_compose_is_loopback_and_never_creates_host_wiki(tmp_path):
     assert all(port['host_ip'] == '127.0.0.1' for port in web['ports'])
     bind = next(m for m in web['volumes'] if m['type'] == 'bind')
     assert bind['source'] == str(fixture.wiki_root)
-    assert bind['bind']['create_host_path'] is False
+    # Exercise the hosted Compose serializer's omission of a literal false.
+    # Never remove a true value: that would hide a real configuration failure.
+    if omit_false and bind.get('bind', {}).get('create_host_path') is False:
+        del bind['bind']['create_host_path']
+    # Source policy is explicit: Compose defaults must never enable creation.
+    source = yaml.safe_load(Path('compose.yaml').read_text())
+    source_bind = next(m for m in source['services']['web']['volumes']
+                       if m['type'] == 'bind' and m['target'] == '/wiki')
+    assert source_bind.get('bind', {}).get('create_host_path') is False
+    # Some Compose versions omit false in normalized JSON. Source policy above
+    # makes that omission safe to accept; an explicit normalized true still fails.
+    assert bind.get('bind', {}).get('create_host_path', False) is False
     assert 'no-new-privileges:true' in web['security_opt'] and web['cap_drop'] == ['ALL']
 
 
