@@ -62,6 +62,13 @@ This local record does not imply a hosted pass.
   rejecting normalized true. Local review acceptance above remains distinct from
   the hosted CI result.
 
+- [x] [Initial setup and existing-wiki entry](../setup.md) is linked prominently
+  from the README. A generated existing-folder rehearsal verified direct use
+  without import/conversion: read-only Save refused with 503, then deliberate
+  same-project write enablement retained the login session; Save returned 200,
+  source reopened exactly and a stale revision returned 412. No private wiki
+  was used for this verification.
+
 Merge and deployment remain separate owner decisions requiring explicit approval;
 neither is part of this authorized local delivery.
 
