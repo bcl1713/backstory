@@ -11,12 +11,13 @@ from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods
 
 from .attachments import serve_attachment
-from .contracts import StorageError
+from .contracts import SaveResult, StorageError
 from .formatting import format_source
 from .markdown import render_preview
 from .policy import authorize_content
 from .readiness import check_readiness
 from .storage import list_folder, read_note, require_ready
+from .saves import format_with_recovery, parse_precondition, save_note
 
 
 def diagnostic(request, error):
@@ -66,7 +67,7 @@ def note(request, path):
     try:
         authorize_content(request, path)
         snapshot = read_note(path)
-        response = render(request, "wiki/note.html", {"note": snapshot, "preview": render_preview(snapshot.source, path)})
+        response = render(request, "wiki/note.html", {"note": snapshot})
         response["ETag"] = snapshot.revision
         return response
     except StorageError as error:
@@ -134,6 +135,13 @@ def format_note(request, path):
             raise StorageError("invalid_format_request") from None
         if len(source_bytes) > settings.BACKSTORY_NOTE_MAX_BYTES:
             raise StorageError("note_too_large", 413)
+        if "If-Match" in request.headers or "If-None-Match" in request.headers:
+            base = parse_precondition(request.headers.get("If-Match"), request.headers.get("If-None-Match"))
+            result = format_with_recovery(request.user, path, source, base)
+            if isinstance(result, SaveResult):
+                return JsonResponse(asdict(result), status=result.status)
+            formatted, token = result
+            return JsonResponse({**asdict(formatted), "recovery_token": token})
         return JsonResponse(asdict(format_source(path, source, None)))
     except StorageError as error:
         return JsonResponse({"reason_code": error.reason_code}, status=error.status)
@@ -156,3 +164,28 @@ def attachment(request, path):
 @require_GET
 def status(request):
     return render(request, "wiki/status.html", {"readiness": check_readiness()})
+
+
+@login_required
+@require_http_methods(["POST"])
+def save(request, path):
+    try:
+        authorize_content(request, path)
+        base = parse_precondition(request.headers.get("If-Match"), request.headers.get("If-None-Match"))
+        if request.content_type != "application/json":
+            raise StorageError("invalid_save_request")
+        try:
+            body = json.loads(request.body)
+            if not isinstance(body, dict) or not isinstance(body.get("source"), str):
+                raise ValueError
+        except RequestDataTooBig:
+            raise StorageError("note_too_large", 413) from None
+        except (ValueError, UnicodeError):
+            raise StorageError("invalid_save_request") from None
+        result = save_note(request.user, path, body["source"], base, body.get("mode", "formatted"), body.get("recovery_token"))
+        response = JsonResponse(asdict(result), status=result.status)
+        if result.revision:
+            response["ETag"] = result.revision
+        return response
+    except StorageError as error:
+        return JsonResponse({"state": "error", "reason_code": error.reason_code}, status=error.status)

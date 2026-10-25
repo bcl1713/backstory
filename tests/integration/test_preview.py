@@ -60,8 +60,10 @@ def test_preview_parse_failure_keeps_source_visible(reader, wiki, monkeypatch):
     response = reader.get("/notes/note.md")
     assert response.status_code == 200
     assert b"synthetic original source" in response.content
-    assert b"preview_unavailable" in response.content
     assert reader.get("/source/note.md").content == b"synthetic original source"
+    secondary = reader.get("/preview/note.md")
+    assert secondary.status_code == 200
+    assert b"preview_unavailable" in secondary.content
 
 
 @pytest.mark.django_db
@@ -85,3 +87,14 @@ def test_attachment_http_auth_policy_range_and_folder_navigation(reader, wiki):
     assert active["Content-Disposition"].startswith("attachment;")
     active.close()
     assert b'href="/attachments/image.png"' in reader.get("/").content
+
+
+@pytest.mark.django_db
+def test_note_open_does_not_render_secondary_preview(reader, wiki, monkeypatch):
+    from wiki import views
+    (wiki / "note.md").write_bytes(b"# Synthetic source\n")
+    monkeypatch.setattr(views, "render_preview", lambda *args: pytest.fail("opening source rendered the secondary preview"))
+    response = reader.get("/notes/note.md")
+    assert response.status_code == 200
+    assert b"Synthetic source" in response.content
+    assert b"/preview/note.md" in response.content

@@ -86,3 +86,15 @@ class FormatResult:
     diff: str
     outcome: str
     config_digest: str
+
+
+@dataclass(frozen=True)
+class SaveResult:
+    state: str
+    source: str
+    revision: str | None
+    diagnostics: tuple[Diagnostic, ...] = ()
+    diff: str = ""
+    recovery_token: str | None = None
+    reason_code: str | None = None
+    status: int = 200
