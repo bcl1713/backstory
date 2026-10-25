@@ -83,6 +83,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: direct and
   await page.getByLabel('Link target', { exact: true }).fill('Heading#Café heading-1|Second heading');
   await page.getByRole('button', { name: 'Resolve link', exact: true }).click();
   await page.locator('[data-link-result] a').click();
+  await page.waitForFunction(() => document.querySelector('[data-markdown-editor]')?.markdownEditor);
   await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);
   expect(await readFile(path, 'utf8')).toBe(source);
@@ -134,6 +135,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: resolved r
   await page.getByLabel('Link target', { exact: true }).fill('References#Label|Reference heading');
   await page.getByRole('button', { name: 'Resolve link', exact: true }).click();
   await page.locator('[data-link-result] a').click();
+  await page.waitForFunction(() => document.querySelector('[data-markdown-editor]')?.markdownEditor);
   await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
   await page.getByRole('button', { name: presentation === 'source' ? 'Raw source' : 'Live preview', exact: true }).click();
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);

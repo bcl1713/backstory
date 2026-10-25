@@ -119,6 +119,7 @@ test('JavaScript unavailable leaves a labeled editable source fallback', async (
   const fallback = page.getByRole('textbox', { name: 'Markdown source (plain text fallback)' });
   await expect(fallback).toBeVisible();
   await expect(fallback).toBeEditable();
+  await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeHidden();
   await context.close();
 });
 

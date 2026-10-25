@@ -9,6 +9,7 @@ async function login(page, route = '/notes/Editable.md') {
   await page.getByLabel('Username', { exact: true }).fill('slice');
   await page.getByLabel('Password', { exact: true }).fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.waitForURL('/');
   return page.goto(route);
 }
 const readSource = page => page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource());
@@ -57,7 +58,11 @@ for (const presentation of ['live', 'source']) {
     const saved = await action(page, 'Save');
     expect(saved.status()).toBe(200);
     await expect(page.locator('[data-editor-status]')).toContainText('Saved');
-    await expect(page.locator('[data-editor-status]')).toContainText('delayed');
+    // Queue availability changes after the representative indexing workflow.
+    // The UI must report the actual backend save state in either case.
+    const state = (await saved.json()).state;
+    expect(['saved', 'saved_index_delayed']).toContain(state);
+    await expect(page.locator('[data-editor-status]')).toHaveText(state === 'saved_index_delayed' ? 'Saved. Discovery update delayed.' : 'Saved.');
     expect(await readFile(target)).toEqual(Buffer.from('\ufeff' + await readSource(page)));
     await page.reload();
     expect(await readSource(page)).toBe(formatted);
@@ -253,7 +258,8 @@ for (const presentation of ['live', 'source']) test(`${presentation}: expired au
   const draft = await readSource(page);
   await context.clearCookies();
   const response = await action(page, 'Save');
-  expect([200, 403]).toContain(response.status());
+  expect(response.status()).toBe(302);
+  expect(response.headers().location).toContain('/accounts/login/');
   await expect(page.locator('[data-reauth]')).toBeVisible();
   expect(await readSource(page)).toBe(draft);
   await page.getByLabel('Username for sign-in').fill('slice');

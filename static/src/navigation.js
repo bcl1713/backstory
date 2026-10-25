@@ -246,6 +246,11 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     say(dirty() ? 'Formatting applied to draft. Unsaved changes.' : 'Formatting applied. Unchanged on disk.');
   });
   find('[data-dismiss-format]').addEventListener('click', () => { clearProposal(); say(dirty() ? 'Unsaved changes' : 'Unchanged'); });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !find('[data-format-proposal]').hidden) {
+      clearProposal(); say(dirty() ? 'Unsaved changes' : 'Unchanged'); formatButton.focus();
+    }
+  });
   const acceptConflictRevision = () => {
     path = conflict.path;
     baseRevision = conflict.revision;
@@ -348,6 +353,8 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   if (Array.isArray(retainedDiagnostics)) diagnostics(retainedDiagnostics);
   installDraftGuards(dirty);
   find('[data-editor-actions]').hidden = false;
+  saveButton.hidden = false;
+  formatButton.hidden = false;
   syncButtons();
   return value => {
     if (proposalSource !== null && value !== proposalSource) clearProposal();
