@@ -32,8 +32,13 @@ Verify canonical host roots are distinct and neither contains the other. Run
 after creating the data directory below, and inspect mount provenance with
 `findmnt -T` for each path. Different printed paths can still alias through bind
 mounts: verify the actual sources. Container paths `/wiki` and `/var/lib/backstory`
-cannot prove that the host roots are disjoint. Do not bind a wiki subdirectory,
-alias or application checkout as private data.
+cannot prove that the host roots are disjoint. The provided host-data manifests
+also pass their actual bind-source values to an early startup guard: equal or
+nested roots are rejected before private state is created. Use absolute canonical
+POSIX paths without `.`/`..`, repeated separators or trailing slashes; alternate
+spellings are rejected. This lexical check cannot detect host symlink or bind-mount
+aliases, so the host provenance checks above remain required. Do not bind a wiki
+subdirectory, alias or application checkout as private data.
 The `.env` in this checkout is ignored by Git and excluded from the image build.
 Keep it private; do not put passwords, authentication-file contents or application
 signing secrets in it. Each installation needs its own stable project name and

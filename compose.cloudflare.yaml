@@ -6,6 +6,9 @@ services:
     user: "${BACKSTORY_UID:-10001}:${BACKSTORY_GID:-10001}"
     init: true
     environment:
+      BACKSTORY_STORAGE_SOURCE_MODE: host-bind
+      BACKSTORY_WIKI_HOST_SOURCE: ${BACKSTORY_WIKI_ROOT:?Set the approved existing host wiki directory}
+      BACKSTORY_DATA_HOST_SOURCE: ${BACKSTORY_DATA_HOST_PATH:?Set an existing private host application-data directory}
       BACKSTORY_WIKI_ROOT: /wiki
       BACKSTORY_DATA_DIR: /var/lib/backstory
       BACKSTORY_IDENTITY_PATH: ${BACKSTORY_IDENTITY_PATH:?Set the approved wiki-relative identity file}

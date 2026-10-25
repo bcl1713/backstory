@@ -1,6 +1,7 @@
 import ipaddress
 import re
 import sqlite3
+from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 from django.core.checks import Error, register
 
@@ -12,6 +13,33 @@ def sqlite_fts5(app_configs, **kwargs):
             connection.execute("CREATE VIRTUAL TABLE fts_check USING fts5(content)")
     except sqlite3.DatabaseError:
         return [Error("SQLite FTS5 support is required", id="backstory.E001")]
+    return []
+
+
+def host_source_configuration_errors(mode, wiki_source, data_source):
+    """Compare host provenance lexically; container realpath cannot resolve it.
+
+    Provided host-bind manifests derive these values from their actual sources.
+    Host symlink/bind aliases remain an operator-verified administrative boundary.
+    """
+    if mode == 'native':
+        return [] if wiki_source is None and data_source is None else ['invalid_host_source_metadata']
+    if mode != 'host-bind':
+        return ['invalid_host_source_metadata']
+    paths = []
+    for source in (wiki_source, data_source):
+        if (not isinstance(source, str) or not source.startswith('/') or source.startswith('//')
+                or '\\' in source or any(ord(char) < 32 or ord(char) == 127 for char in source)):
+            return ['invalid_host_source_metadata']
+        path = PurePosixPath(source)
+        # Reject alternate spellings rather than normalizing through unknown host
+        # symlinks. Repeated separators, dot components and trailing slash fail.
+        if '..' in path.parts or str(path) != source:
+            return ['invalid_host_source_metadata']
+        paths.append(path)
+    wiki, data = paths
+    if wiki.is_relative_to(data) or data.is_relative_to(wiki):
+        return ['host_source_overlap']
     return []
 
 
@@ -110,4 +138,8 @@ def deployment_security(app_configs, **kwargs):
             or not settings.SECURE_SSL_REDIRECT or not settings.ALLOWED_HOSTS
             or not all(exact_host(host) for host in settings.ALLOWED_HOSTS)
             or not all(exact_https_origin(origin, settings.ALLOWED_HOSTS) for origin in settings.CSRF_TRUSTED_ORIGINS))
-    return [Error('Insecure production cookie/host/origin/proxy configuration', id='backstory.E002')] if unsafe else []
+    errors = [Error('Insecure production cookie/host/origin/proxy configuration', id='backstory.E002')] if unsafe else []
+    if host_source_configuration_errors(settings.BACKSTORY_STORAGE_SOURCE_MODE,
+            settings.BACKSTORY_WIKI_HOST_SOURCE, settings.BACKSTORY_DATA_HOST_SOURCE):
+        errors.append(Error('Invalid or overlapping host storage source configuration', id='backstory.E003'))
+    return errors

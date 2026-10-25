@@ -27,6 +27,17 @@ BACKSTORY_WIKI_ROOT = root("BACKSTORY_WIKI_ROOT")
 BACKSTORY_DATA_DIR = root("BACKSTORY_DATA_DIR")
 if BACKSTORY_WIKI_ROOT.is_relative_to(BACKSTORY_DATA_DIR) or BACKSTORY_DATA_DIR.is_relative_to(BACKSTORY_WIKI_ROOT):
     raise ImproperlyConfigured("Wiki and application data roots must not overlap")
+# Host bind sources are provenance, not paths accessible inside this container.
+# Validate before creating private application state at the separate mount target.
+BACKSTORY_STORAGE_SOURCE_MODE = os.environ.get('BACKSTORY_STORAGE_SOURCE_MODE', 'native')
+BACKSTORY_WIKI_HOST_SOURCE = os.environ.get('BACKSTORY_WIKI_HOST_SOURCE')
+BACKSTORY_DATA_HOST_SOURCE = os.environ.get('BACKSTORY_DATA_HOST_SOURCE')
+from backstory.checks import host_source_configuration_errors
+_source_errors = host_source_configuration_errors(BACKSTORY_STORAGE_SOURCE_MODE,
+    BACKSTORY_WIKI_HOST_SOURCE, BACKSTORY_DATA_HOST_SOURCE)
+if _source_errors:
+    raise ImproperlyConfigured('Invalid BACKSTORY host storage sources: ' + ', '.join(_source_errors))
+
 BACKSTORY_IDENTITY_PATH = required("BACKSTORY_IDENTITY_PATH")
 BACKSTORY_IDENTITY_SHA256 = required("BACKSTORY_IDENTITY_SHA256").lower()
 if len(BACKSTORY_IDENTITY_SHA256) != 64 or any(c not in "0123456789abcdef" for c in BACKSTORY_IDENTITY_SHA256):
