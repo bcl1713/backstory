@@ -121,6 +121,46 @@ def test_approved_nested_config_data_refs_and_absence_are_revalidated(wiki):
     assert not snap.revalidate()
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_package_config_references_are_rejected_before_any_reader_call(wiki, monkeypatch, nested):
+    f = formatter()
+    if nested:
+        (wiki / "styles").mkdir()
+        (wiki / ".prettierrc").write_text('{"extends":"./styles/base.json"}')
+        (wiki / "styles/base.json").write_text('{"extends":"./package.json"}')
+        forbidden = "styles/package.json"
+    else:
+        (wiki / ".prettierrc").write_text('{"extends":"./package.json"}')
+        forbidden = "package.json"
+    (wiki / forbidden).write_text('{}')
+    attempted = []
+    real_reader = f.read_regular
+    def observed_reader(path, **kwargs):
+        attempted.append(path)
+        return real_reader(path, **kwargs)
+    monkeypatch.setattr(f, "read_regular", observed_reader)
+    source = "# Synthetic\r\n* draft\nlast"
+    result = f.format_source("note.md", source, None)
+    assert forbidden not in attempted
+    assert result.outcome == "failed" and result.source == source
+    assert result.diagnostics[0].code == "config_reference_denied"
+
+
+def test_real_helper_editorconfig_unset_restores_defaults_and_prettier_precedence(wiki):
+    (wiki / "nested").mkdir()
+    (wiki / ".editorconfig").write_text("root=true\n[*.md]\nend_of_line=crlf\nmax_line_length=24\n")
+    (wiki / "nested/.editorconfig").write_text("[*.md]\nend_of_line=unset\nmax_line_length=unset\n")
+    source = "# Synthetic\n\none two three four five six seven eight nine ten eleven twelve thirteen fourteen"
+    result = formatter().format_source("nested/note.md", source, None)
+    assert result.outcome == "ok"
+    assert "\r" not in result.source
+    assert result.source.splitlines()[2] == "one two three four five six seven eight nine ten eleven twelve thirteen fourteen"
+    (wiki / ".prettierrc").write_text('{"endOfLine":"crlf","printWidth":30,"proseWrap":"always"}')
+    explicit = formatter().format_source("nested/note.md", source, None)
+    assert explicit.outcome == "ok" and "\r\n" in explicit.source
+    assert max(map(len, explicit.source.splitlines()[2:])) <= 30
+
+
 def test_yaml_prettierrc_is_data_and_reference_bytes_are_revalidated(wiki):
     (wiki / ".prettierrc").write_text("extends: ./style.yaml\n")
     (wiki / "style.yaml").write_text("printWidth: 42\n")

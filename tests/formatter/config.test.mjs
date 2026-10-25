@@ -48,6 +48,31 @@ test('EditorConfig overrides application defaults only while explicit Prettier t
   assert.equal(resolveConfiguration('note.md', {[editor]:text,'.prettierrc':'{"endOfLine":"lf"}'}).prettier.endOfLine,'lf');
 });
 
+test('EditorConfig unset removes inherited settings across files and matching sections', () => {
+  const settings = 'end_of_line=crlf\nmax_line_length=24\nindent_style=tab\nindent_size=6\ntab_width=8\n';
+  const unset = 'end_of_line=unset\nmax_line_length=unset\nindent_style=unset\nindent_size=unset\ntab_width=unset\n';
+  for (const files of [
+    {'.editorconfig':`root=true\n[*.md]\n${settings}`, 'nested/.editorconfig':`[*.md]\n${unset}`},
+    {'.editorconfig':`root=true\n[*.md]\n${settings}[nested/*.md]\n${unset}`},
+  ]) {
+    const config = resolveConfiguration('nested/note.md', files).prettier;
+    assert.equal(config.endOfLine, 'auto');
+    assert.equal(config.printWidth, 80);
+    assert.equal(config.useTabs, undefined);
+    assert.equal(config.tabWidth, undefined);
+    const explicit = resolveConfiguration('nested/note.md', {...files,'.prettierrc':'{"endOfLine":"lf","printWidth":42,"tabWidth":3,"useTabs":false}'}).prettier;
+    assert.equal(explicit.endOfLine, 'lf');
+    assert.equal(explicit.printWidth, 42);
+    assert.equal(explicit.tabWidth, 3);
+    assert.equal(explicit.useTabs, false);
+  }
+});
+
+test('unsetting one numeric EditorConfig property retains another effective property', () => {
+  const files = {'.editorconfig':'root=true\n[*.md]\ntab_width=8\nindent_size=6\n[nested/*.md]\nindent_size=unset\n'};
+  assert.equal(resolveConfiguration('nested/note.md', files).prettier.tabWidth, 8);
+});
+
 test('snapshot caps, missing references and arbitrary note files fail closed', () => {
   assert.throws(()=>resolveConfiguration('note.md',{'.prettierrc':' '.repeat(65537)}));
   assert.throws(()=>resolveConfiguration('note.md',Object.fromEntries(Array.from({length:33},(_,i)=>[`c${i}.json`,'{}']))));

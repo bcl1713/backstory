@@ -96,6 +96,7 @@ def _unique_pairs(pairs):
 def _read_config(path):
     purpose = "config" if posixpath.basename(path) in CONFIG_NAMES else "config-reference"
     try:
+        validate_path(path, purpose)
         return read_regular(path, purpose=purpose, max_bytes=_CONFIG_BYTES, too_large_code="config_size_limit")
     except StorageError as error:
         if error.reason_code == "not_found":

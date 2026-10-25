@@ -112,9 +112,9 @@ function ancestry(note) {
   }
   return dirs;
 }
-function parseEditor(text, noteRelative, base) {
+function parseEditor(text, noteRelative, base, inherited) {
   let section = true;
-  const result = {};
+  const result = {...inherited};
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('#') || line.startsWith(';')) continue;
@@ -123,19 +123,31 @@ function parseEditor(text, noteRelative, base) {
     if (!match) fail(`Invalid EditorConfig data in ${base}.`);
     const key = match[1].trim().toLowerCase(); const val = match[2].toLowerCase();
     if (key === 'root' || !section) continue;
+    if (!['end_of_line','indent_style','indent_size','tab_width','max_line_length'].includes(key)) continue;
+    if (val === 'unset') { delete result[key]; continue; }
+    let value;
     if (key === 'end_of_line') {
-      if (!['lf','crlf','cr','unset'].includes(val)) fail('Invalid EditorConfig end_of_line.');
-      if (val !== 'unset') result.endOfLine = val; else delete result.endOfLine;
+      if (!['lf','crlf','cr'].includes(val)) fail('Invalid EditorConfig end_of_line.');
+      value = val;
     } else if (key === 'indent_style') {
-      if (!['space','tab','unset'].includes(val)) fail('Invalid EditorConfig indent_style.');
-      if (val !== 'unset') result.useTabs = val === 'tab'; else delete result.useTabs;
+      if (!['space','tab'].includes(val)) fail('Invalid EditorConfig indent_style.');
+      value = val === 'tab';
     } else if (['indent_size','tab_width','max_line_length'].includes(key)) {
-      if (['unset','off','tab'].includes(val)) continue;
+      if (['off','tab'].includes(val)) continue;
       const n = Number(val);
       if (!Number.isInteger(n) || n < 1 || n > 1000) fail(`Invalid EditorConfig ${key}.`);
-      result[key === 'max_line_length' ? 'printWidth' : 'tabWidth'] = n;
+      value = n;
     }
+    // Keep properties distinct until inheritance/unset is resolved. Preserve
+    // assignment order when properties map to the same Prettier option.
+    delete result[key]; result[key] = value;
   }
+  return result;
+}
+function editorOptions(properties) {
+  const names = {end_of_line:'endOfLine',indent_style:'useTabs',indent_size:'tabWidth',tab_width:'tabWidth',max_line_length:'printWidth'};
+  const result = {};
+  for (const [key,value] of Object.entries(properties)) result[names[key]] = value;
   return result;
 }
 export function resolveConfiguration(note, files) {
@@ -192,7 +204,7 @@ export function resolveConfiguration(note, files) {
     const ec = p.join(dir,'.editorconfig');
     if (has(files,ec)) {
       if (/^\s*root\s*[=:]\s*true\s*$/im.test(files[ec])) editor = {};
-      editor = {...editor,...parseEditor(files[ec],relative,ec)};
+      editor = parseEditor(files[ec],relative,ec,editor);
     }
     for (const [name,tool] of [['.prettierignore','prettier'],['.markdownlintignore','lint']]) {
       const file = p.join(dir,name);
@@ -232,7 +244,8 @@ export function resolveConfiguration(note, files) {
     }
   }
   let prettier = prettierFile ? read(prettierFile) : {printWidth:80,proseWrap:'always',endOfLine:'auto'};
-  let options = prettierFile ? {...editor,...prettierOptions(prettier)} : {...prettierOptions(prettier),...editor};
+  const editorSettings = editorOptions(editor);
+  let options = prettierFile ? {...editorSettings,...prettierOptions(prettier)} : {...prettierOptions(prettier),...editorSettings};
   if (has(prettier,'overrides')) {
     if (!Array.isArray(prettier.overrides) || prettier.overrides.length > 200) fail('Invalid Prettier overrides.');
     const base = prettierFile ? p.dirname(prettierFile) : '.';

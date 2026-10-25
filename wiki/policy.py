@@ -72,6 +72,8 @@ def validate_path(path: str, purpose: str):
             validate_path("/".join(parts[:-1]), "folder")
         return path
     if purpose == "config-reference":
+        if parts[-1].casefold() == "package.json":
+            raise PathDenied()
         if parts[-1] in CONFIG_NAMES:
             return validate_path(path, "config")
         if not path.lower().endswith((".json", ".jsonc", ".yaml", ".yml")):
