@@ -1,0 +1,107 @@
+# Local development
+
+Task 1 provides the runtime, login and interactive accounts. Browsing, editing,
+formatting and indexing arrive in subsequent tasks. Develop against generated
+synthetic storage only. Never use a private wiki or authentication file as a fixture.
+
+Install Python 3.14, uv 0.12.19 and Node 22 LTS (22.12 or newer). Dependencies are
+pinned in `pyproject.toml` and `package.json`, including transitive lockfiles.
+The container pins Python 3.14.9 and Node 22.23.4. Use an explicitly disposable,
+previously nonexistent directory outside the checkout:
+
+```sh
+uv sync --frozen
+npm ci
+npm run build
+uv run python -m tests.fixtures.generate /tmp/backstory-demo --profile small
+set -a
+. /tmp/backstory-demo/fixture.env
+set +a
+uv run python manage.py check
+uv run python manage.py migrate
+uv run python manage.py collectstatic --noinput
+uv run python manage.py create_account
+uv run gunicorn backstory.wsgi:application --bind 127.0.0.1:8000 --access-logfile /dev/null
+```
+
+Visit <http://127.0.0.1:8000/accounts/login/>. Account creation prompts for a
+username and a password twice. Password entry is hidden; a terminal is required.
+There is no password argument, default account or registration endpoint. Repeat
+`create_account` for a separately revocable ordinary assistant account. Passwords
+use Argon2 and Django's validators. A failed login returns a generic error.
+
+`small` creates 12 synthetic Markdown notes in `notes/`, `projects/active/`,
+`projects/archive/`, `reference/`, `templates/` and `daily/2026/`, with an empty
+`attachments/` directory. `representative` currently creates 1,000 basic notes,
+including exactly 299 dailies; Task 6 adds the varied preservation corpus and
+699,000-byte note. `Home.md` is the synthetic identity file; leave it unchanged
+in ordinary edit tests. Fixture generation refuses every existing destination.
+Its configuration and manifest are outside the wiki. Neither fixture profile
+contains copied authentication files or private content.
+
+The wiki root is never created by application startup. Wiki and data roots must
+be absolute, distinct and non-overlapping, including through symlinks. Missing
+wiki storage still permits login; the storage readiness layer in Task 2 will
+refuse reads/writes until the configured identity check succeeds. Identity
+configuration is a relative file path plus its expected SHA-256, set outside the
+wiki. Never enroll storage automatically or select a sensitive identity file.
+
+SQLite accounts/sessions and the generated `application-secret` live in the data
+root. The application publishes a new secret atomically only when absent, with
+mode 0600, and reuses it across restart. Keep this state on local storage and
+protect it together with future revisions/drafts. Do not copy it into an image
+or commit it. Restoring accounts/sessions requires the same secret.
+
+## Local Compose
+
+The initial Compose service is web-only, using Gunicorn as UID/GID 10001 and a
+named application-data volume. It binds only `127.0.0.1:8000`. The explicit bind
+mount refuses to create a missing source (`create_host_path: false`). Load the
+generated fixture configuration as above, then:
+
+```sh
+docker compose config --quiet
+docker compose build
+docker compose run --rm web python manage.py migrate
+docker compose run --rm web python manage.py create_account
+docker compose up -d
+```
+
+Use the same login URL. Restart with `docker compose restart`; the volume keeps
+accounts, sessions and secret material. `docker compose down` retains that volume.
+Use `down --volumes` only when intentionally discarding this disposable project.
+The wiki's existing host permissions must permit UID/GID 10001 to read it and,
+when editing is introduced, write it. Backstory never changes wiki ownership or
+permissions. Task 7 adds the supervised index worker.
+
+Managed build environments may require their proxy CA. Preserve the configured
+Docker endpoint and proxy defaults, then build with the public CA bundle mounted
+as a BuildKit secret (no certificate or credentials are copied into image layers):
+
+```sh
+docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt -t backstory:local .
+```
+
+This secret is optional on ordinary networks. Keep TLS verification enabled.
+
+## Configuration and checks
+
+`BACKSTORY_COOKIE_MODE=localhost` explicitly enables HTTP cookies and permits
+only loopback hosts. This mode is for disposable local use. The default `https`
+mode uses Secure cookies, HTTPS redirection and HSTS. Both modes require explicit
+allowed hosts; wildcard hosts are rejected. No forwarded proxy headers are
+trusted by default. A future owner-authorized HTTPS deployment must validate
+its proxy boundary and run `python manage.py check --deploy --fail-level WARNING`.
+The supplied Compose workflow deliberately selects localhost mode.
+
+Run `uv run pytest tests/integration/test_bootstrap.py` for root/fixture/auth
+contracts. `uv run pytest` currently runs the same suite. Runtime checks validate
+SQLite FTS5 support. Browser and formatter commands are reserved as
+`npm run test:browser` and `npm run test:formatter`; those suites and the
+Playwright dependency are introduced by their owning tasks and are not yet
+available. No service worker or note cache is installed.
+
+Do not enable access logs containing content URLs or log request bodies, cookies,
+passwords, secret material or note text. The documented Gunicorn command disables
+access logs. This synthetic local workflow cannot establish NFS/TrueNAS durability
+or coordination guarantees against uncooperative external writers.

@@ -1,16 +1,17 @@
 # Backstory
 
-A lightweight, self-hosted Markdown wiki browser and source editor for one shared
-directory of plain files.
+A self-hosted Markdown wiki browser and source editor for one shared directory
+of plain files. The first runtime slice is runnable: Django, SQLite FTS5 checks,
+interactive Argon2 accounts, protected login/logout and bundled local assets.
+Browsing and editing are being added through the staged plan.
 
-**Status: implementation-plan review.** Application implementation has not started.
+Start with the [local development guide](docs/development.md), which generates a
+synthetic wiki outside the checkout, installs locked dependencies and starts
+Gunicorn on localhost. It also documents the non-root Compose workflow and
+persistent application-data volume. No private notes or default accounts ship
+with the application.
 
 Read the [agreed design](docs/superpowers/specs/2026-10-25-backstory-design.md)
-and the [staged implementation plan](docs/superpowers/plans/2026-10-25-backstory-implementation.md).
-
-The proposed stack is Django, SQLite FTS5 and CodeMirror, packaged for Docker
-Compose. The server indexes the authorized wiki through low-priority background
-jobs; browsers fetch only requested content and bounded search results.
-
-Development will use disposable synthetic fixtures. This repository contains
-project documentation only, with no wiki snapshot, private notes or credentials.
+and [implementation plan](docs/superpowers/plans/2026-10-25-backstory-implementation.md)
+for the remaining preservation, indexing and recovery work. Application state is
+separate from wiki files; absent wiki storage is never initialized automatically.

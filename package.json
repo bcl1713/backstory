@@ -1,0 +1,17 @@
+{
+  "name": "backstory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0 <23"
+  },
+  "scripts": {
+    "build": "node scripts/build-assets.mjs",
+    "test:formatter": "node --test tests/formatter/*.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

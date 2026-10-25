@@ -1,0 +1,29 @@
+services:
+  web:
+    build: .
+    image: backstory:local
+    init: true
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      BACKSTORY_WIKI_ROOT: /wiki
+      BACKSTORY_DATA_DIR: /var/lib/backstory
+      BACKSTORY_IDENTITY_PATH: ${BACKSTORY_IDENTITY_PATH:?Generate a disposable fixture and load its configuration}
+      BACKSTORY_IDENTITY_SHA256: ${BACKSTORY_IDENTITY_SHA256:?Load the fixture identity hash}
+      BACKSTORY_COOKIE_MODE: localhost
+      BACKSTORY_ALLOWED_HOSTS: localhost,127.0.0.1
+    volumes:
+      - type: bind
+        source: ${BACKSTORY_WIKI_ROOT:?Choose an existing disposable wiki directory}
+        target: /wiki
+        bind:
+          create_host_path: false
+      - type: volume
+        source: backstory-data
+        target: /var/lib/backstory
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  backstory-data:

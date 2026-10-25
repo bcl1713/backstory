@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+node_modules/
+staticfiles/
+.env
+.env.*
+!.env.example
+*.sqlite3*
+data/
+fixtures/
+!tests/fixtures/
+application-secret
