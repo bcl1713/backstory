@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 import hashlib
 import json
+import os
 from pathlib import Path
 import shlex
+import stat
 import struct
 from typing import Literal
 import zlib
@@ -105,11 +107,35 @@ def _attachments(wiki: Path) -> None:
     (wiki / 'attachments/sample.pdf').write_bytes(pdf)
 
 
-def generate_fixture(destination: Path, profile: Literal["small", "representative"]) -> FixtureManifest:
+def _publish_container_wiki(wiki: Path) -> None:
+    """Publish only the just-built public test tree, using no-follow descriptors."""
+    for _, directories, files, directory_fd in os.fwalk(wiki, topdown=False, follow_symlinks=False):
+        for name in directories:
+            if not stat.S_ISDIR(os.stat(name, dir_fd=directory_fd, follow_symlinks=False).st_mode):
+                raise ValueError("Unexpected non-directory in synthetic fixture")
+        for name in files:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise ValueError("Unexpected non-regular synthetic fixture file")
+                os.fchmod(fd, 0o666)
+            finally:
+                os.close(fd)
+        os.fchmod(directory_fd, 0o777)
+
+
+def generate_fixture(destination: Path, profile: Literal["small", "representative"],
+                     *, for_containers: bool = False) -> FixtureManifest:
     if profile not in {"small", "representative"}:
         raise ValueError("Unknown fixture profile")
     destination = destination.absolute()
-    destination.mkdir(parents=True, exist_ok=False)
+    destination.mkdir(parents=True, exist_ok=False, mode=0o700 if for_containers else 0o777)
+    if for_containers:
+        fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fchmod(fd, 0o700)
+        finally:
+            os.close(fd)
     wiki = destination / "wiki"
     wiki.mkdir()
     identity_path = "Home.md"
@@ -154,6 +180,16 @@ def generate_fixture(destination: Path, profile: Literal["small", "representativ
         "identity_path": identity_path, "identity_sha256": digest,
         "folder_counts": dict(zip(directories, counts)), "files": files, **values,
     }, indent=2) + "\n", encoding="utf-8")
+    if for_containers:
+        for path in (config, manifest_path):
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                os.fchmod(fd, 0o600)
+            finally:
+                os.close(fd)
+        # The private outer directory stays 0700; only wiki is bind-mounted.
+        # Never apply this operation to an existing destination or application data.
+        _publish_container_wiki(wiki)
     return FixtureManifest(wiki, destination / "data", config, manifest_path, identity_path, digest)
 
 
@@ -161,8 +197,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destination", type=Path)
     parser.add_argument("--profile", choices=["small", "representative"], default="small")
+    parser.add_argument("--for-containers", action="store_true",
+                        help="Make only newly generated public synthetic wiki files container-writable")
     args = parser.parse_args()
-    result = generate_fixture(args.destination, args.profile)
+    result = generate_fixture(args.destination, args.profile, for_containers=args.for_containers)
     print(f"Synthetic fixture created. Configuration: {result.config_path}")
 
 

@@ -3,6 +3,10 @@ from collections import Counter
 from datetime import date
 import hashlib
 import json
+import os
+import stat
+import subprocess
+import sys
 
 import pytest
 
@@ -82,7 +86,8 @@ def test_small_profile_keeps_twelve_notes_and_stable_identity(tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["empty", "nonempty", "file", "symlink", "dangling"])
-def test_existing_destinations_are_never_reused(tmp_path, kind):
+@pytest.mark.parametrize("for_containers", [False, True])
+def test_existing_destinations_are_never_reused(tmp_path, kind, for_containers):
     destination = tmp_path / "existing"
     if kind in {"empty", "nonempty"}:
         destination.mkdir()
@@ -96,5 +101,41 @@ def test_existing_destinations_are_never_reused(tmp_path, kind):
             target.mkdir()
         destination.symlink_to(target, target_is_directory=True)
     with pytest.raises(FileExistsError):
-        generate_fixture(destination, "representative")
+        generate_fixture(destination, "representative", for_containers=for_containers)
     assert not (destination / "wiki").exists()
+
+
+def test_container_permissions_are_explicit_exact_and_keep_wrapper_private(tmp_path):
+    previous = os.umask(0o027)
+    try:
+        ordinary = generate_fixture(tmp_path / "ordinary", "representative")
+        fixture = generate_fixture(tmp_path / "container", "representative", for_containers=True)
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(ordinary.wiki_root.stat().st_mode) == 0o750
+    assert stat.S_IMODE((ordinary.wiki_root / "Home.md").stat().st_mode) == 0o640
+    assert stat.S_IMODE(fixture.wiki_root.parent.stat().st_mode) == 0o700
+    for path in [fixture.wiki_root, *fixture.wiki_root.rglob("*")]:
+        assert stat.S_IMODE(path.stat().st_mode) == (0o777 if path.is_dir() else 0o666)
+        assert path.stat().st_uid == os.getuid()
+    for path in [fixture.manifest_path, fixture.config_path]:
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert not fixture.data_dir.exists()
+    baseline = json.loads(ordinary.manifest_path.read_text())
+    published = json.loads(fixture.manifest_path.read_text())
+    assert published["files"] == baseline["files"]
+    assert published["note_count"] == 1000
+    assert published["daily_count"] == 299
+    assert fixture.identity_sha256 == ordinary.identity_sha256
+
+
+def test_container_cli_flag_generates_new_public_synthetic_wiki(tmp_path):
+    destination = tmp_path / "cli"
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.fixtures.generate", str(destination), "--for-containers"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE((destination / "wiki/notes").stat().st_mode) == 0o777
+    assert stat.S_IMODE((destination / "wiki/Home.md").stat().st_mode) == 0o666
+    assert len(list((destination / "wiki").rglob("*.md"))) == 12

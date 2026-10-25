@@ -31,10 +31,10 @@ There is no password argument, default account or registration endpoint. Repeat
 use Argon2 and Django's validators. A failed login returns a generic error.
 
 `small` creates 12 synthetic Markdown notes in `notes/`, `projects/active/`,
-`projects/archive/`, `reference/`, `templates/` and `daily/2026/`, with an empty
-`attachments/` directory. `representative` currently creates 1,000 basic notes,
-including exactly 299 dailies; Task 6 adds the varied preservation corpus and
-699,000-byte note. `Home.md` is the synthetic identity file; leave it unchanged
+`projects/archive/`, `reference/`, `templates/` and `daily/2026/`, with generated
+inert PNG/PDF samples in `attachments/`. `representative` creates exactly 1,000
+notes, including 299 dailies, varied YAML/Markdown preservation cases and a
+699,000-byte `reference/Large.md`. `Home.md` is the synthetic identity file; leave it unchanged
 in ordinary edit tests. Fixture generation refuses every existing destination.
 Its configuration and manifest are outside the wiki. Neither fixture profile
 contains copied authentication files or private content.
@@ -57,10 +57,14 @@ or commit it. Restoring accounts/sessions requires the same secret.
 
 The initial Compose service is web-only, using Gunicorn as UID/GID 10001 and a
 named application-data volume. It binds only `127.0.0.1:8000`. The explicit bind
-mount refuses to create a missing source (`create_host_path: false`). Load the
-generated fixture configuration as above, then:
+mount refuses to create a missing source (`create_host_path: false`). Generate a
+**new** disposable fixture specifically for containers, then load its configuration:
 
 ```sh
+uv run python -m tests.fixtures.generate /tmp/backstory-compose-demo --profile small --for-containers
+set -a
+. /tmp/backstory-compose-demo/fixture.env
+set +a
 docker compose config --quiet
 docker compose build
 docker compose run --rm web python manage.py migrate
@@ -71,9 +75,26 @@ docker compose up -d
 Use the same login URL. Restart with `docker compose restart`; the volume keeps
 accounts, sessions and secret material. `docker compose down` retains that volume.
 Use `down --volumes` only when intentionally discarding this disposable project.
-The wiki's existing host permissions must permit UID/GID 10001 to read it and,
-when editing is introduced, write it. Backstory never changes wiki ownership or
-permissions. Task 7 adds the supervised index worker.
+`--for-containers` is only for newly generated public synthetic test data. It
+creates wiki directories with mode 0777 and files with mode 0666 so an arbitrary
+non-root container UID can read and write the bind-mounted wiki, including with
+rootless UID mapping. It preserves file bytes and ownership. Construction stays
+inside a private mode-0700 outer directory; configuration and manifest use mode
+0600. Only the wiki is made public. The flag refuses every existing destination
+and cannot repair or change an existing fixture or live wiki. Ordinary generation
+without the flag keeps its usual permissions.
+
+The runtime UID/GID 10001 is separate from the host Docker group: Docker access
+does not grant that runtime process write access to bind-mounted host files.
+Keep application data private and writable by the container's mapped runtime
+UID; the Compose named application-data volume is separate from this fixture
+preparation. A successful storage identity check proves the configured bytes
+were readable, and does not prove that saving is writable.
+
+For a production wiki, compatible UID/GID and filesystem permissions are an
+administrator prerequisite outside this disposable workflow's authorization.
+Backstory does not automatically chmod/chown live storage or run the web process
+as root to bypass permissions. Task 7 adds the supervised index worker.
 
 Managed build environments may require their proxy CA. Preserve the configured
 Docker endpoint and proxy defaults, then build with the public CA bundle mounted
