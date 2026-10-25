@@ -52,13 +52,15 @@ or credentials belong in this repository.
   Runtime code and operator commands remain unchanged by the subsequent
   Compose assertion portability correction.
 
-- [ ] Hosted CI on the corrected head: pending the next pushed workflow run.
+Hosted CI results for the corrected head are published in the
+[feature branch workflow runs](https://github.com/bcl1713/backstory/actions?query=branch%3Afeat%2Fbackstory-release-one).
+This local record does not imply a hosted pass.
   Run `40226083394` / job `121267631149` failed with 499 passed and one
   packaging-test failure because its normalized Compose JSON omitted false.
   Correction F4-CI-001 locally passes 5 container checks, covering explicit and
   omitted normalized false while requiring explicit false in `compose.yaml` and
   rejecting normalized true. Local review acceptance above remains distinct from
-  this open hosted CI gate.
+  the hosted CI result.
 
 Merge and deployment remain separate owner decisions requiring explicit approval;
 neither is part of this authorized local delivery.
@@ -76,4 +78,4 @@ It contains the final runtime code, including public process-only health, protec
 SQLite backup and pruned development dependencies. Later changes are documentation,
 example comments and test assertions only. The unchanged 96 runtime file hashes
 continue to match that image; no rebuild is needed for this test/doc correction.
-Hosted CI evidence and its pending corrected-head gate are recorded above.
+Hosted CI results are linked above and evaluated separately from local evidence.
