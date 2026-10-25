@@ -47,7 +47,12 @@ or credentials belong in this repository.
 - [x] Final focused restart/backup-restore/container command: 10 passed.
 - [x] Backup/restore destinations refuse existing paths; shell restoration
   preflights separately reject existing and dangling-symlink paths before copies.
-- [ ] Independent Stage 4 review and final owner-approved merge/deployment.
+- [x] Independent Stage 4 review accepted at `71ced19`, with no mandatory
+  findings. Earlier stage findings were corrected and independently rechecked.
+  This final factual checklist update changes no runtime or operator commands.
+
+Merge and deployment remain separate owner decisions requiring explicit approval;
+neither is part of this authorized local delivery.
 
 Physical mobile hardware, screen-reader interaction, other browser engines and
 real NFS/TrueNAS behavior are unavailable locally. No claims cover those checks.
