@@ -69,6 +69,17 @@ This local record does not imply a hosted pass.
   source reopened exactly and a stale revision returned 412. No private wiki
   was used for this verification.
 
+- [x] Environment-driven packaging preserves the base UID10001/named-volume
+  configuration and selects UID1000/fresh host data through an opt-in overlay.
+  Real Compose tests cover automatic `.env` discovery, port, read-only wiki,
+  writable app data, exclusions/quota and build-free Standalone parity. A
+  generated-volume UID1000 runtime proof saved existing 644 notes without owner
+  drift, created new 600 notes, retained login/secret across restart, rejected a
+  stale revision and read-only save, and refused missing bind sources. All owned
+  resources were removed. The local daemon is rootless: the volume proof does
+  not establish host UID1000 bind mapping on a rootful deployment. No live wiki
+  or Portainer UI was used.
+
 Merge and deployment remain separate owner decisions requiring explicit approval;
 neither is part of this authorized local delivery.
 
@@ -82,7 +93,8 @@ owner authorization, storage identity enrollment and deployment verification.
 Verified runtime image: `backstory:stage4`,
 `sha256:48154e34929f5950c8beada18565d6037a81eb898d8407281b51bc318e504dd0`.
 It contains the final runtime code, including public process-only health, protected
-SQLite backup and pruned development dependencies. Later changes are documentation,
-example comments and test assertions only. The unchanged 96 runtime file hashes
-continue to match that image; no rebuild is needed for this test/doc correction.
+SQLite backup and pruned development dependencies. Later changes include Compose packaging, `.env` examples, documentation and
+tests; application runtime sources remain unchanged. The prior 96-runtime-file
+comparison to that image remains applicable to those unchanged sources.
+The new Compose metadata was exercised with that existing image.
 Hosted CI results are linked above and evaluated separately from local evidence.

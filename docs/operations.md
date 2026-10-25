@@ -51,7 +51,10 @@ Keep TLS verification enabled. The CA is optional on ordinary networks and never
 copied to image layers. Runtime includes local compiled editor assets and pinned
 formatter dependencies; development browser/build packages are pruned.
 
-Runtime UID/GID is 10001. A host's Docker-group membership grants no wiki write
+The default image/named-volume runtime UID/GID is 10001. The
+[setup guide](setup.md#match-the-owner-and-create-fresh-private-application-data)
+covers selecting a matching host UID/GID with fresh private host data. A host's
+Docker-group membership grants no wiki write
 permission to that UID, especially under rootless mapping. Existing wiki/data
 ownership, mode/ACL and compatible UID/GID access are operator prerequisites;
 Backstory never chmods/chowns an existing wiki or runs web as root to bypass it.
@@ -119,9 +122,9 @@ not write access. A denied sibling-stage write reports `wiki_write_denied`.
 SQLite must stay on local storage, outside the wiki (never on NFS). Recovery
 contains private source, originals, drafts and diagnostics. Default retention is
 30 days (the `BACKSTORY_REVISION_RETENTION_DAYS` Django setting) and logical
-quota 64 MiB. The native runtime accepts `BACKSTORY_REVISION_QUOTA_BYTES`;
-the supplied Compose service uses defaults unless its service environment is
-explicitly extended. Retention has no environment override in this release. Required
+quota 64 MiB. The native runtime and supplied Compose manifests accept
+`BACKSTORY_REVISION_QUOTA_BYTES`; set it in `.env` for Compose. Retention has no
+environment override in this release. Required
 backup/quota failure refuses a changed save. `prune_recovery` removes expired
 rows and safely cleans registered abandoned stages; it never replays writes.
 Pruning does not promise immediate SQLite filesystem reclamation.

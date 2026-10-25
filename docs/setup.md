@@ -1,374 +1,299 @@
 # Set up Backstory
 
 **Already have a wiki? [Connect the existing folder](#2b-start-with-an-existing-wiki).**
-Backstory reads your Markdown files where they are: there is no import,
-conversion, move, or whole-wiki formatting step. Your paths, assets and external
-editors remain part of your workflow. A backup and read-only rehearsal are
-recommended before enabling writes; the same setup supports your actual wiki
-folder after deliberate operator configuration.
+Backstory edits Markdown files where they are; no import or conversion is needed.
+The main workflow is a private `.env` and ordinary `docker compose` commands.
+A [disposable demo](#2a-try-a-clean-disposable-demo) is also available.
 
-For a first look without your own files, try the [optional disposable demo](#2a-try-a-clean-disposable-demo).
-
-This guide runs one container on <http://127.0.0.1:8000>. Public exposure,
-production HTTPS and reverse proxies are outside this guide; proxy trust is
-currently unsupported. See [limitations](limitations.md) before using network
-storage or relying on ownership, ACLs or extended attributes.
+These manifests publish only on the Docker host's `127.0.0.1`, with localhost
+cookies and proxy trust off. Open <http://127.0.0.1:8000> on that host. A browser
+on another computer cannot use its own `127.0.0.1` to reach the server. Remote
+browser access, HTTPS and proxy trust need a separately agreed deployment setup;
+changing a port or using Portainer does not enable them.
 
 ## 1. Get the application
 
-These commands use Linux and Bash. Install Git and [Docker Engine](https://docs.docker.com/engine/install/)
-with the [Compose plugin](https://docs.docker.com/compose/install/), with permission
-to use the Docker daemon. Check `git --version`, `docker version` and
-`docker compose version`. Python, Node and the formatter run inside the image;
-you do not need them on the host to connect an existing wiki. The generated demo
-below additionally needs host Python 3.14 and [uv 0.12.19](https://docs.astral.sh/uv/getting-started/installation/).
+Use Linux, Git, Docker Engine and the Docker Compose plugin. Check
+`git --version`, `docker version` and `docker compose version`. Connecting an
+existing wiki needs no host Python or Node: they run inside the image.
 
-The implemented application currently lives on `feat/backstory-release-one`;
-`main` does not yet contain this release. Until it is merged, clone that branch:
+Until this release is merged, clone the feature branch:
 
 ```sh
 git clone --branch feat/backstory-release-one https://github.com/bcl1713/backstory.git
 cd backstory
 ```
 
-If you already have this branch checked out, use that checkout. Build commands
-need access to the pinned dependency registries. See [operations](operations.md#build-and-start-on-localhost)
-if your managed build network requires a CA bundle; keep TLS verification enabled.
-
-Three locations have different purposes:
-
-| Location | What belongs there |
-| --- | --- |
-| Wiki source directory, bound to `/wiki` | Your existing Markdown files and assets, outside the application checkout/build context. Startup never creates or repairs this directory. |
-| Private application data, `/var/lib/backstory` | SQLite users, sessions, index, protected drafts, revision history and the generated signing secret. Compose keeps these in the project's `backstory-data` named volume on local storage, outside the wiki. |
-| Private configuration directory, outside the wiki and checkout | The dotenv configuration, identity path/hash and any Compose overrides. Do not put configuration or application backups in the wiki. |
-
-Use one stable configuration file and Compose project name for each installation.
-A different project name creates a different application volume: it can look like
-accounts and history have disappeared. Reuse the same project and configuration
-for every start, stop, account and backup command. Use a **fresh project name**
-for each rehearsal so you do not reuse another demo's users, sessions or secret.
-
-## 2A. Try a clean disposable demo
-
-Choose a fixture directory, config filename and project name you have not used
-before; replace the example names below if necessary. The generator refuses existing
-paths and creates only synthetic notes and inert assets. `--for-containers` makes
-only this new public test wiki container-writable; it is not a permission repair
-command for existing files.
-
-```sh
-BS_CONFIG="$HOME/.config/backstory/demo-first.env"
-BS_PROJECT=backstory-demo-first
-BACKSTORY_REPO="$PWD"
-BS_COMPOSE="$BACKSTORY_REPO/compose.yaml"
-bs() {
-  env -u BACKSTORY_WIKI_ROOT -u BACKSTORY_IDENTITY_PATH -u BACKSTORY_IDENTITY_SHA256 \
-    docker compose --env-file "$BS_CONFIG" -p "$BS_PROJECT" -f "$BS_COMPOSE" "$@"
-}
-prepare_demo() (
-  umask 077
-  test ! -e "$BS_CONFIG" &&
-  test ! -L "$BS_CONFIG" &&
-  uv sync --frozen &&
-  uv run python -m tests.fixtures.generate /tmp/backstory-first-demo --profile small --for-containers &&
-  mkdir -p "$HOME/.config/backstory" &&
-  (set -C; cat /tmp/backstory-first-demo/fixture.env > "$BS_CONFIG")
-)
-prepare_demo &&
-  bs config --quiet &&
-  bs build &&
-  bs run --rm web python manage.py migrate &&
-  bs run --rm web python manage.py create_account &&
-  bs run --rm web python manage.py create_account &&
-  bs up -d --no-build &&
-  bs exec web id &&
-  bs exec web python manage.py storage_status
-```
-
-Preparation and startup stop on failure. Use a new config filename too; if it
-already exists, choose another rather than reusing it. The no-clobber copy refuses
-a destination created concurrently. Keep the generated `Home.md` unchanged: it
-is this fixture's identity.
-The fixture's `BACKSTORY_DATA_DIR` is for native development. The supplied Compose
-service overrides it with its private named volume.
-
-Create a named human account and a separate ordinary assistant account at the
-interactive prompts. Use unique strong passwords of at least 12 characters.
-Password input is hidden; there are no default accounts, password arguments or
-registration page. Run account creation in a terminal, without piping passwords.
-Human and assistant accounts have the same access to eligible shared wiki
-content; there are no per-note or per-folder user permissions. Protected drafts
-are account-private; authenticated note history is shared. Choose your source
-tree and exclusions accordingly before connecting an existing wiki.
-
-Expect `id` to show UID/GID 10001 inside the container, and status to say
-`ready: identity_verified`. **Read the status text**: `storage_status` can exit
-successfully while reporting `unavailable`. Continue at [first use](#3-sign-in-and-check-the-workflow).
-Stop this demo with `bs stop` before starting another installation: the supplied
-Compose file uses the fixed localhost port 8000.
+Keep the wiki and application data outside this checkout: the image build copies
+checkout files. Use local storage for application SQLite data, outside the wiki.
+The `.env` in this checkout is ignored by Git and excluded from the image build.
+Keep it private; do not put passwords, authentication-file contents or application
+signing secrets in it. Each installation needs its own stable project name and
+configuration. Run the commands below from that same checkout.
 
 ## 2B. Start with an existing wiki
 
-### Prepare the source and its identity
+### Verify the source and stable identity
 
-Take an operator-managed backup or snapshot of the wiki, **including assets**.
-Prefer a private rehearsal copy and a fresh application project first. Keep both
-the wiki and its rehearsal copy outside the application checkout/Docker build
-context: the image build copies checkout files into the image. Do not move or
-convert the original wiki. Backstory does not configure mounts, sync or
-permissions for you. Verify independently that the chosen directory is the
-intended storage, with the expected notes and assets, before enrolling it.
+Take a backup or snapshot including assets. Prefer a rehearsal copy first.
+Verify the intended mount and source directory before recording its identity.
+Backstory never creates a missing wiki or repairs its permissions.
 
-Storage needs an operator-approved, stable, non-secret identity file already in
-the wiki. It must be a regular file, at most 64 KiB, with a wiki-relative path.
-Neither it nor a path component can be a symlink or hidden. It must pass the
-[storage policy](storage.md): credential/auth/key files, agent rules, config and
-other excluded names cannot be identities. Use identity bytes that distinguish the
-intended mounted storage from a fallback directory, and verify the mount
-independently before recording them.
-Never hash an empty fallback directory or choose an authentication file.
+Choose an approved existing stable non-secret regular file in the wiki, at most
+64 KiB, with a relative non-hidden path and no symlink components. It must pass
+[storage policy](storage.md): authentication files, keys, configuration and agent
+rules cannot be identities. Backstory refuses to edit the chosen identity.
+`identity.txt` is suitable when deliberately reserved for that purpose; `Home.md`
+is unsuitable if an editor will change it. If no suitable identity exists,
+creating one is a separate deliberate enrollment decision outside Backstory.
 
-Choose a file whose bytes will remain unchanged. Backstory refuses to edit its
-identity file. `Home.md` is suitable only if you deliberately reserve it as
-immutable; an ordinary home note that you or another editor updates is unsuitable.
-Do not use a hidden marker. If no suitable file exists, deliberate administrator
-enrollment outside Backstory needs explicit authorization before creating a
-stable non-hidden, non-secret identity file. Backstory neither creates a marker
-nor chooses a file for you.
-
-After verifying the intended storage and approving that particular file, compute
-its hash read-only. For example, **only if `Storage identity.txt` is the approved
-file** in your rehearsal copy:
+Only after verifying the storage and approving that particular file, hash it
+read-only. For example, if `identity.txt` is the approved file:
 
 ```sh
-sha256sum -- /absolute/path/to/wiki-rehearsal/Storage\ identity.txt
+sha256sum -- /absolute/path/to/testwiki/identity.txt
 ```
 
-Record the SHA-256 with the approved wiki-relative path outside the wiki. If the
-expected identity later disappears or differs, restore/verify the intended
-storage. Do not reset the expected hash just to make status green.
+An empty regular identity file is accepted by the current policy. Its hash cannot
+distinguish two empty files, so independently verifying the intended mount is
+especially necessary. Never use an authentication file as the identity or reset
+the hash merely to make readiness green.
 
-### Write private configuration
+### Match the owner and create fresh private application data
 
-Create a private directory outside both the wiki and checkout, then edit a new
-file there with your editor:
+For ordinary **rootful Docker without user-namespace remapping**, a process with
+container UID/GID `1000:1000` accesses bind mounts as host `1000:1000`. If your
+wiki directories are `755`, notes are `644`, and both are owned by `1000:1000`,
+run Backstory as `1000:1000`. The owner can read the notes and write their parent
+directories for safe replacement. No wiki `chmod` or `chown` is needed.
+
+Check on the **Docker endpoint host**, as the owner of the wiki:
 
 ```sh
-umask 077
-mkdir -p "$HOME/.config/backstory"
-BS_CONFIG="$HOME/.config/backstory/wiki-rehearsal.env"
+id -u
+id -g
+stat -c '%u:%g %a %n' /absolute/path/to/testwiki /absolute/path/to/testwiki/example.md
+docker info --format '{{json .SecurityOptions}}'
 ```
 
-Save the following dotenv content to that file, replacing the three source and
-identity values with your approved absolute source directory, relative identity
-path and complete 64-character hash. Single quotes allow spaces in paths. These
-are configuration data, not shell commands: do not `source` or `eval` this file.
+The following concrete example assumes both `id` commands print `1000` and the
+Docker security options do **not** contain `rootless` or `userns`. For other
+owners use their positive numeric non-root UID/GID. Docker-group membership does
+not grant the app file access. Rootless Docker and user-namespace remapping have
+different host mappings; this `1000:1000` recipe does not establish their access.
+
+Create a **new**, private local application-data directory as that host owner:
+
+```sh
+mkdir -m 700 "$HOME/backstory-wikitest-data"
+stat -c '%u:%g %a %n' "$HOME/backstory-wikitest-data"
+```
+
+For this example expect `1000:1000 700`. The command intentionally fails if the
+directory exists; choose another fresh name instead of changing an existing one.
+Put its full absolute path in `.env` below. This new directory holds users,
+sessions, the index, drafts, history and the generated signing secret. It remains
+writable even while the **wiki** mount is read-only.
+
+Do not reuse an existing `10001`-owned application volume with a `1000` process:
+that is a different storage configuration and may be unwritable. This fresh-data
+path starts with no accounts or history and leaves the old volume intact. To
+retain old application state, keep its original project, UID and named-volume
+configuration until you have a separately planned backup/migration.
+
+### Put configuration in .env
+
+Create a private new `.env` from the example. The no-clobber copy refuses an
+existing file so it cannot overwrite another installation's configuration:
+
+```sh
+(umask 077; set -C; cat .env.example > .env)
+```
+
+Edit `.env`, replacing paths and hash with the approved values. Host paths must
+be absolute, with no `~`; single quotes allow spaces. This is dotenv data, not a
+shell script: do not `source` or `eval` it.
 
 ```dotenv
-BACKSTORY_WIKI_ROOT='/absolute/path/to/wiki-rehearsal'
-BACKSTORY_IDENTITY_PATH='Storage identity.txt'
-BACKSTORY_IDENTITY_SHA256='REPLACE_WITH_APPROVED_64_CHARACTER_SHA256'
-BACKSTORY_COOKIE_MODE=localhost
-BACKSTORY_ALLOWED_HOSTS=localhost,127.0.0.1
-BACKSTORY_PROXY_MODE=off
+COMPOSE_PROJECT_NAME=backstory-wikitest
+COMPOSE_FILE=compose.yaml:compose.host-data.yaml
+BACKSTORY_IMAGE=backstory:local
+BACKSTORY_UID=1000
+BACKSTORY_GID=1000
+BACKSTORY_WIKI_ROOT='/absolute/path/to/testwiki'
+BACKSTORY_DATA_HOST_PATH='/home/YOUR_USER/backstory-wikitest-data'
+BACKSTORY_IDENTITY_PATH=identity.txt
+BACKSTORY_IDENTITY_SHA256=REPLACE_WITH_APPROVED_64_CHARACTER_SHA256
+BACKSTORY_WIKI_READ_ONLY=true
+BACKSTORY_PORT=8000
+BACKSTORY_EXCLUSIONS=
+BACKSTORY_REVISION_QUOTA_BYTES=67108864
 ```
 
-The supplied Compose service explicitly sets `/wiki`, `/var/lib/backstory`,
-localhost cookies and allowed hosts inside the container. `BACKSTORY_WIKI_ROOT`
-in the dotenv file selects the host bind source; it is not the container path.
-Do not set `BACKSTORY_DATA_DIR` to your wiki: this Compose service always uses the
-project's local named volume. A dotenv entry alone does not pass an arbitrary
-setting into the container. For example, optional `BACKSTORY_EXCLUSIONS` requires
-an explicit Compose service `environment` override; see [storage policy](storage.md).
-Exclusions only add denies. If extending this recipe, keep policy overrides
-separate from the temporary read-only mount override and include them on every
-command, including after enabling writes.
+`COMPOSE_FILE` selects the host-data overlay automatically on every ordinary
+Compose command. Both required bind sources use `create_host_path: false`: a
+missing wiki or data directory stops the container instead of creating a folder.
+The host wiki maps to `/wiki`; host application data maps to `/var/lib/backstory`.
+Do not set `BACKSTORY_DATA_DIR` for Compose: that key is for native development.
 
-### Check permissions, then start with a read-only wiki
+Exclusions are comma-separated additional deny patterns, for example
+`private,work/*.md`; they cannot weaken built-in policy. Quota is logical recovery
+payload accounting, not SQLite file size. These settings are explicitly forwarded
+by the manifests. Cookie mode, allowed hosts and proxy mode stay fixed to the
+local setup. Exported shell variables override `.env`; start in a clean shell or
+unset previously exported `BACKSTORY_*` and `COMPOSE_*` values before using it.
 
-The default process is UID/GID 10001 **inside the container**. Docker-socket or
-Docker-group access says nothing about its access to wiki files. Rootless Docker
-maps IDs differently; verify the effective mapping on your host. Reads require
-file read access and directory traversal. A safe save also needs write access to
-the note's parent directory to stage and replace a sibling file; file write bits
-alone are insufficient.
+### Build, create accounts and start
 
-Resolve access deliberately with your administrator. Do not apply blanket
-`chmod 777`, recursive ownership changes or a wiki permission repair script.
-Changing Compose's `user` alone can make the private application volume unwritable.
-New notes are mode 0600, owned by the app's effective host identity; external
-editors may need planned access. Replacement preserves basic mode bits, but
-creates a new inode and does not copy ownership, ACLs, xattrs or hard-link
-relationships. See [write limitations](limitations.md).
-
-Start a rehearsal with the wiki bind read-only. Application metadata still
-changes in SQLite: accounts, sessions and indexing need the writable private
-application volume. Save this override as
-`$HOME/.config/backstory/wiki-readonly.yaml`:
-
-```yaml
-services:
-  web:
-    volumes:
-      - type: bind
-        source: ${BACKSTORY_WIKI_ROOT:?Set the approved existing wiki directory}
-        target: /wiki
-        read_only: true
-        bind:
-          create_host_path: false
-```
-
-The source bind uses long syntax so a typo cannot create a replacement host
-folder. Compose merges mounts by container target; this replaces the `/wiki`
-bind while retaining the separate application volume.
-
-Choose a project name never used for another installation; the example below
-uses `backstory-wiki-rehearsal-first`. Use the same explicit files and project on
-every later command. This helper clears
-three exported variables which could otherwise override `--env-file` with stale
-storage from another terminal session. It does not execute the dotenv file.
-Run from the application checkout:
+First inspect `docker compose config`: confirm the approved sources, user
+`1000:1000`, wiki `read_only: true`, writable data and loopback port. Keep the
+resolved paths private. Some Compose versions omit explicit false values when
+normalizing; the source manifests explicitly refuse host-path creation.
 
 ```sh
-BS_CONFIG="$HOME/.config/backstory/wiki-rehearsal.env"
-BS_PROJECT=backstory-wiki-rehearsal-first
-BACKSTORY_REPO="$PWD"
-BS_COMPOSE="$BACKSTORY_REPO/compose.yaml"
-BS_READONLY="$HOME/.config/backstory/wiki-readonly.yaml"
-bs() {
-  env -u BACKSTORY_WIKI_ROOT -u BACKSTORY_IDENTITY_PATH -u BACKSTORY_IDENTITY_SHA256 \
-    docker compose --env-file "$BS_CONFIG" -p "$BS_PROJECT" \
-    -f "$BS_COMPOSE" -f "$BS_READONLY" "$@"
-}
-bs config
+docker compose config
+docker compose build &&
+  docker compose run --rm web python manage.py migrate &&
+  docker compose run --rm web python manage.py create_account &&
+  docker compose run --rm web python manage.py create_account &&
+  docker compose up -d --build &&
+  docker compose exec web id &&
+  docker compose exec web python manage.py storage_status
 ```
 
-Before starting, inspect `bs config`: `/wiki` must show your approved source and
-`read_only: true`. Confirm `create_host_path: false` in both source Compose files;
-some Compose normalizers omit explicit false values from their output. Keep
-resolved paths private.
-If port 8000 is occupied, stop the earlier demo or local server before proceeding.
-Then build and start, creating a human and a separate assistant interactively
-with unique strong passwords of at least 12 characters (hidden terminal input).
-Both accounts share access to eligible wiki content and history; there are no
-per-note or per-folder user permissions. Protected drafts are account-private:
+Use the interactive terminal prompts for a named human account and a separate
+ordinary assistant account. Passwords are hidden, must be at least 12 characters,
+and have no command-line argument or default. Do not pipe passwords. Both accounts
+can access eligible shared notes and history; protected drafts are account-private.
+There are no per-note or per-folder account permissions, so select the source and
+exclusions deliberately. Keep private authentication files mode `600`; never put
+their contents into this configuration or terminal commands.
+
+Expect the selected UID/GID and the actual text `ready: identity_verified`.
+`storage_status` can exit zero while reporting unavailable; read the text.
+Readiness proves a readable identity, not permission to save. Sign in locally,
+browse notes and assets, and wait for the automatic background index to fill search.
+Opening a note reads current disk without waiting for indexing.
+
+### Enable writes
+
+After the read-only rehearsal and backup, edit just this value in `.env`:
+
+```dotenv
+BACKSTORY_WIKI_READ_ONLY=false
+```
+
+Then recreate using the same configuration, project name and data path:
 
 ```sh
-bs build &&
-  bs run --rm web python manage.py migrate &&
-  bs run --rm web python manage.py create_account &&
-  bs run --rm web python manage.py create_account &&
-  bs up -d --no-build &&
-  bs exec web id &&
-  bs exec web python manage.py storage_status
+docker compose config
+docker compose up -d --build
+docker compose exec web python manage.py storage_status
 ```
 
-Expect UID/GID 10001 and the actual text `ready: identity_verified`; an exit code
-of zero alone is insufficient. Readiness verifies readable identity bytes,
-**not** permission to save. The read-only wiki should refuse a save; copy or
-Store protected draft before leaving an edited page. Do not test by editing the
-identity file.
+This preserves accounts, sessions, secret and history. It changes the wiki mount
+mode; it does not change host permissions. Test a disposable ordinary note, never
+the identity. Existing-note replacement preserves basic mode bits but makes a
+new inode owned by the app's effective host user; matching UID `1000` retains that
+owner in this rootful example. New notes are `600`, readable by that same host
+owner. Ownership, ACLs, xattrs and hard-link relationships are not copied; review
+[write limitations](limitations.md) for other filesystems or shared-editor needs.
 
-Sign in, browse folders, open ordinary notes and inspect assets. Search fills in
-as the background index worker runs automatically. Partial results are expected
-at first; opening a note reads current disk without waiting for indexing. Check
-Storage status for readiness and index progress.
+## 2A. Try a clean disposable demo
 
-### Enable writing deliberately
-
-Enable writes only when the operator chooses to proceed, has a ready backup,
-and has verified directory/file access and the filesystem limitations. Keep
-using the rehearsal copy until confident. Removing the read-only override is an
-explicit transition; it does not repair permissions or change the source.
-
-Keep `BS_CONFIG`, `BS_PROJECT` and `BS_COMPOSE` unchanged. Replace the helper with
-the following, then recreate the web container. If you added a separate persistent
-exclusion override, retain its `-f` argument here too.
+This alternative keeps the original image UID/GID `10001:10001` and private named
+volume. It needs host Python 3.14 and uv 0.12.19 for synthetic fixture generation.
+Use a fresh directory/project and a fresh checkout without the host-data `.env`
+above. `--for-containers` grants access only when generating new public synthetic
+files; never apply it to an existing wiki.
 
 ```sh
-bs() {
-  env -u BACKSTORY_WIKI_ROOT -u BACKSTORY_IDENTITY_PATH -u BACKSTORY_IDENTITY_SHA256 \
-    docker compose --env-file "$BS_CONFIG" -p "$BS_PROJECT" -f "$BS_COMPOSE" "$@"
-}
-bs config
-bs up -d --no-build --force-recreate
-bs exec web python manage.py storage_status
+uv sync --frozen
+uv run python -m tests.fixtures.generate /tmp/backstory-first-demo --profile small --for-containers
+(umask 077; set -C; cat /tmp/backstory-first-demo/fixture.env > .env)
 ```
 
-Confirm `/wiki` now permits writing in the resolved configuration and status
-still verifies the same identity. The same project retains its application
-volume, accounts, secret, sessions, drafts and history. Changing from rehearsal
-to original storage is a separate operator decision: verify and back up that
-storage and deliberately configure its approved identity before connecting it.
+Append `COMPOSE_PROJECT_NAME=backstory-demo-first` to that new `.env`, then use the
+build/account/start commands above. Leave `COMPOSE_FILE`, UID/GID and host-data
+path unset: the base `compose.yaml` keeps the named volume and user `10001:10001`.
+Its native fixture `BACKSTORY_DATA_DIR` is intentionally ignored by Compose.
+Keep the generated `Home.md` identity unchanged. Use a different `BACKSTORY_PORT`
+or stop the other installation before starting another demo.
+
+## Portainer on a Docker Standalone endpoint
+
+`compose.portainer.yaml` is a self-contained, build-free **Docker Standalone**
+manifest. It is not a Swarm deployment recipe. Before using it, the selected
+Docker endpoint needs the built `BACKSTORY_IMAGE` locally, or an image you have
+published to an accessible registry. No public Backstory registry image is
+promised. A Portainer web-editor stack cannot build this checkout from `build: .`.
+Build on the selected endpoint with this checkout's `docker compose build`, using
+the same image tag, or arrange image distribution separately.
+
+The wiki and fresh private data directories must exist on the **Docker endpoint
+host**, with the verified ownership above. They are not paths on your browser
+computer or inside the Portainer container. Use absolute paths. Supply the
+`BACKSTORY_*` variables from the example as stack environment variables; the
+manifest explicitly interpolates the settings it accepts. CLI `COMPOSE_FILE`
+selects local files and is not needed when submitting this standalone manifest.
+Keep one stable stack name. Create accounts through an interactive terminal on
+the endpoint as described above, using this manifest and the same stack/project
+identity; UI account-console steps depend on the selected Portainer environment.
+
+The manifest retains a host-loopback publication. Portainer does not itself make
+the application reachable from a remote browser. Actual Portainer deployment and
+remote-browser routing are separate from this local setup; the provided packaging
+has been checked with Compose, not a live Portainer UI.
 
 ## 3. Sign in and check the workflow
 
-Open <http://127.0.0.1:8000/accounts/login/> and use the same hostname throughout
-for cookies. Sign in as the human; use a separate browser context for the
-assistant. There are no privileged assistant accounts.
+Open <http://127.0.0.1:8000/accounts/login/> (or your configured local port) on the
+Docker host. Use the same hostname throughout for cookies. Use a separate browser
+context for the assistant. After enabling writes, create a disposable `.md` note
+in an existing writable folder, save and reopen it. Startup and opening a note do
+not format the wiki. Save runs the [formatting pipeline](formatting.md).
 
-After deliberately enabling writes, use **New note** to create a disposable
-`.md` note in an existing writable folder, save it and reopen it. Keep the
-identity unchanged. Startup does not recursively format notes; opening a note
-does not format it either. Save runs the [formatting pipeline](formatting.md),
-which can change whitespace/newlines while preserving supported meaningful front
-matter. Optional formatting configuration is described there; try your own
-formats on the rehearsal copy first.
+For a conflict check, open that note in two signed-in browser contexts. Save one
+edit, then try the other: HTTP 412 offers base/current/draft for manual comparison.
+Copy/download your draft or explicitly **Store protected draft** before refreshing.
+Accept the current revision, merge manually and save. Backstory never blindly
+retries a draft. Formatter failure retains source and diagnostics; deliberately
+choose **Save source without formatting** for recovery, with the same storage,
+conflict and backup protections. See [operations](operations.md#normal-and-recovery-walkthrough).
 
-For an optional conflict check, open that disposable note in two signed-in
-browser contexts. Save one edit, then try the other: HTTP 412 offers
-base/current/draft for manual comparison. Copy/download your draft or explicitly
-**Store protected draft** before refresh. Accept the displayed current revision,
-merge manually and save. Backstory never automatically retries or replays a
-draft when storage returns. Formatter failure keeps the source and diagnostics;
-review them and deliberately choose **Save source without formatting** if needed.
-That recovery still enforces storage, conflict and backup checks.
+## 4. Daily commands and backup
 
-Use [operations](operations.md#normal-and-recovery-walkthrough) for per-note
-history, restoration, protected drafts and session revocation.
-
-## 4. Stop, restart and back up
-
-Keep the same helper/configuration/project for daily commands, including any
-active read-only or exclusion overrides:
+From the same checkout with the same `.env`:
 
 ```sh
-bs stop
-bs up -d --no-build
-bs restart
+docker compose up -d --build
+docker compose stop
+docker compose up -d
+docker compose restart
 ```
 
-`bs down` removes containers/network and retains the named application volume.
-Do not add `--volumes` to normal shutdown: that deletes accounts, sessions,
-signing secret, protected drafts and history. Back up application data and wiki
-files separately; follow [application backup and separate wiki backup](operations.md#application-backup-and-separate-wiki-backup)
-and verify restores in disposable storage first. Use `bs` in place of
-`docker compose` for this installation; the operations walkthrough uses its own
-disposable example paths. The default recovery retention
-is 30 days with a 64 MiB logical quota. Saves and protected-draft storage prune
-expired recovery rows too; the explicit `prune_recovery` command supports
-maintenance. Pruning is not a substitute for
-backups. See the operations guide for retention and pruning.
+`docker compose down` keeps application data. Do not remove the host data directory
+or use `down --volumes` on the named-volume alternative: accounts, sessions, signing
+secret, drafts and history live there. Changing the project or data path can look
+like lost accounts. Back up application data and wiki separately using
+[operations](operations.md#application-backup-and-separate-wiki-backup), and verify
+restores in disposable storage. Recovery retention is 30 days; quota defaults to
+64 MiB. Pruning is not a substitute for backups.
 
 ## Troubleshooting
 
-Preserve an unsaved draft by copying/downloading or explicitly storing it before
-refreshing or restarting. Diagnose the intended storage rather than resetting
-its expected identity hash.
+Preserve a draft before refreshing. Diagnose the intended storage instead of
+resetting its expected identity.
 
 | Symptom | What to check |
 | --- | --- |
-| `identity_missing`, `identity_mismatch`, `root_missing` or `identity_unreadable` | Confirm the intended mount/source and approved identity path/hash, policy, size and read/traversal access. Restore the expected storage; do not enroll whatever is visible. A missing bind source can also stop Compose before the app starts. |
-| `ready` but Save gives `wiki_write_denied` or `storage_io_error` / HTTP 503 | Identity readiness only proves a read. Check whether the wiki bind is deliberately read-only, parent-directory access and filesystem health. Do not retry an uncertain save blindly; compare the current note first. |
-| `staging_cleanup_required` after repeated read-only Save | Preserve the draft and avoid further read-only saves. During the deliberate writable recreation above, startup performs guarded cleanup of registered stages once storage is ready. Compare the current note before explicitly saving again; do not delete the staging registry or wiki files by hand. |
-| Application data permission error after changing `user` | The named volume was prepared for UID/GID 10001. Review the effective host mapping and application-volume access with the administrator; a user override alone is insufficient. |
-| Wrong wiki, missing accounts or apparently new history | Check `BS_CONFIG`, the resolved bind and exact `BS_PROJECT`. Keep the helper's `env -u` entries to clear stale exported source/identity values. Reconnect the original intended project; do not delete volumes. |
-| Search has partial/stale results | Check index progress in Storage status. The automatic worker catches up; Refresh index queues maintenance, and Rebuild index explicitly replaces the projection. Direct note opening remains available. |
-| Format/Save fails on source | Keep the draft and inspect diagnostics. Explicit source recovery skips formatting only; it does not bypass conflicts or storage safety checks. |
-| HTTP 412 | Another writer changed the file. Compare base/current/draft, explicitly accept the current revision and merge manually. |
-| Login/cookies seem inconsistent | Stay on either `127.0.0.1` or `localhost` consistently. The supplied Compose recipe uses localhost HTTP cookies; it is not a proxy configuration. |
-| Port 8000 already bound | Stop the earlier demo or local server. Both example projects use the supplied fixed localhost port. |
+| Missing-bind error before startup | Both absolute host directories must already exist on the Docker endpoint; no automatic replacement directory is created. |
+| Application-data permission error with UID 1000 | Confirm the host-data overlay is selected, the fresh data directory is owned by the mapped user, and a previous UID10001 named volume is not being reused. |
+| Ready but Save returns `wiki_write_denied` / HTTP 503 | Check `BACKSTORY_WIKI_READ_ONLY`, actual UID mapping and write/traversal access on the note's parent directory. File write bits alone are insufficient for atomic replacement. |
+| `identity_missing`, `identity_mismatch`, `root_missing`, `identity_unreadable` | Verify the intended source, mount and approved identity path/hash. Restore expected storage rather than enrolling whatever is visible. |
+| Wrong wiki or apparently new accounts/history | Inspect resolved `.env`, exported overrides, exact project/stack name and application-data path. Keep existing data; reconnect the intended configuration. |
+| `staging_cleanup_required` after read-only Save | Preserve the draft and stop retrying. Deliberate writable recreation performs guarded cleanup once storage is ready; compare the current note before saving again. |
+| Search is incomplete | Check index progress in Storage status. Refresh index queues maintenance; Rebuild creates a new projection while retaining the previous usable generation. |
 
-For native development and generated test profiles, see [development](development.md).
-For excluded paths and UTF-8/source-size limits, see [storage](storage.md).
+The [storage policy](storage.md), [limitations](limitations.md) and
+[operations guide](operations.md) describe the remaining boundaries.

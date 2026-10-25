@@ -8,7 +8,9 @@ non-root container supervises Gunicorn and background SQLite indexing.
 
 Start here: [initial setup](docs/setup.md). **Already have a wiki?
 [Connect the existing folder](docs/setup.md#2b-start-with-an-existing-wiki).**
-The Compose-first guide also includes an optional disposable demo.
+Configure a private `.env`, then use ordinary `docker compose up -d --build`.
+The guide covers matching the wiki owner with fresh private application data,
+a build-free Portainer Standalone manifest, and an optional disposable demo.
 [Local development](docs/development.md) covers the native synthetic workflow;
 [operations](docs/operations.md) covers recovery and backup/restore.
 No private notes, default passwords or production configuration ship here.
