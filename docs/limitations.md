@@ -12,7 +12,8 @@ administrator change.
 Every changed save first stores exact original bytes and submitted UTF-8 source
 in the protected local application SQLite database. The default revision quota
 is 64 MiB (`BACKSTORY_REVISION_QUOTA_BYTES`) and retention is 30 days
-(`BACKSTORY_REVISION_RETENTION_DAYS`); expired entries are pruned on changed saves.
+(the `BACKSTORY_REVISION_RETENTION_DAYS` Django setting, without an environment
+override in this release); expired entries are pruned on changed saves.
 Insufficient quota or backup I/O refuses the write. Keep the application data
 directory private and back it up consistently with SQLite's backup API or while
 stopped. Formatting recovery grants expire after 30 minutes and bind the actor,
@@ -92,3 +93,12 @@ consistent SQLite backup covers their data; separately retain the application
 secret and separately back up wiki files. Local process and filesystem tests
 cover interruptions before replacement, after replacement before indexing, and
 after commit before response; none provides NFS durability or atomic CAS proof.
+
+The first release does not support trusting reverse-proxy headers. Explicit
+proxy mode is rejected; direct HTTPS configuration checks pass independently.
+The supplied Compose recipe is loopback HTTP only and is not a production proxy
+recipe. Physical devices, screen readers and real NFS behavior require separate
+operator verification. Four low npm audit entries originate in the transitive
+KaTeX advisory GHSA-238p-pmpm-9mq7 through markdownlint; no arbitrary graph override
+was applied. The isolated helper returns no HTML and rejects prototype keys, but
+this is a retained dependency limitation, not an audit-zero result.
