@@ -31,7 +31,7 @@ def store_required_backup(actor, path, base_revision, original, submitted):
     try:
         with application_lock("revision-quota"), transaction.atomic():
             _prune(timezone.now())
-            _check_quota(len(original) + len(submitted))
+            _check_quota(_record_charge(path, base_revision, original, submitted))
             SavedRevision.objects.create(actor=actor, path=path, base_revision=base_revision, original=original, submitted=submitted)
     except (DatabaseError, OSError):
         raise StorageError("backup_unavailable", 503) from None
@@ -75,12 +75,28 @@ def _prune(timestamp):
     FormatRecovery.objects.filter(expires_at__lte=timestamp).delete()
 
 
+# Logical quota: fixed overhead bounds empty/tiny rows; every variable stored
+# payload is charged in bytes. This is not SQLite physical-page/VACUUM accounting.
+_RECORD_OVERHEAD = 256
+
+
+def _record_charge(path, base_revision, *payloads):
+    return (_RECORD_OVERHEAD + len(path.encode('utf-8'))
+        + len((base_revision or '').encode('utf-8')) + sum(len(value) for value in payloads))
+
+
 def _check_quota(extra):
     from .models import RecoveryDraft
-    from django.db.models import BigIntegerField, Sum
-    from django.db.models.functions import Length
-    total = SavedRevision.objects.aggregate(total=Sum(Length('original') + Length('submitted'), output_field=BigIntegerField()))['total'] or 0
-    total += RecoveryDraft.objects.aggregate(total=Sum(Length('source') + Length('base_source'), output_field=BigIntegerField()))['total'] or 0
+    from django.db.models import BigIntegerField, BinaryField, Sum, Value
+    from django.db.models.functions import Cast, Coalesce, Length
+    # SQLite length(TEXT) counts code points, so cast text/JSON to BLOB first.
+    metadata = (Value(_RECORD_OVERHEAD) + Length(Cast('path', BinaryField()))
+        + Coalesce(Length(Cast('base_revision', BinaryField())), Value(0)))
+    revision_charge = metadata + Length('original') + Length('submitted')
+    draft_charge = (metadata + Length('source') + Length('base_source')
+        + Length(Cast('diagnostics', BinaryField())) + Length(Cast('newline', BinaryField())) + Value(1))
+    total = SavedRevision.objects.aggregate(total=Sum(revision_charge, output_field=BigIntegerField()))['total'] or 0
+    total += RecoveryDraft.objects.aggregate(total=Sum(draft_charge, output_field=BigIntegerField()))['total'] or 0
     if total + extra > settings.BACKSTORY_REVISION_QUOTA_BYTES:
         raise StorageError('backup_quota_exceeded', 503)
 
@@ -142,7 +158,7 @@ def store_draft(actor, path, base_revision, source, diagnostics, *, base_source=
     try:
         with application_lock('revision-quota'), transaction.atomic():
             _prune(timezone.now())
-            _check_quota(len(raw) + len(base))
+            _check_quota(_record_charge(path, base_revision, raw, base, serialized.encode('utf-8'), newline.encode('utf-8'), b'1'))
             return RecoveryDraft.objects.create(actor=actor, path=path, base_revision=base_revision, source=raw, base_source=base, diagnostics=diagnostics, bom=bom, newline=newline)
     except (OSError, DatabaseError):
         raise StorageError('recovery_unavailable', 503) from None

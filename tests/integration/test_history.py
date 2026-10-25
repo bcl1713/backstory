@@ -114,3 +114,127 @@ def test_history_is_shared_but_drafts_and_diagnostics_are_actor_scoped(reader,wi
     other=Client(); other.force_login(get_user_model().objects.create_user('second-reader'))
     assert other.get('/history/note.md').status_code==200
     assert other.get(f'/revisions/{SavedRevision.objects.get().pk}/').status_code==200
+
+
+def test_diagnostic_heavy_empty_drafts_cannot_bypass_shared_quota(reader,wiki,settings):
+    """F3-002: exact independent probe, no partial row on any refusal."""
+    from wiki.models import RecoveryDraft
+    settings.BACKSTORY_REVISION_QUOTA_BYTES=1024
+    payload={'path':'note.md','source':'','base_source':'','diagnostics':[{'message':'x'*60000}]}
+    for _ in range(3):
+        response=reader.post('/drafts/',data=json.dumps(payload),content_type='application/json')
+        assert response.status_code==503
+        assert not RecoveryDraft.objects.exists()
+
+
+def test_empty_drafts_and_empty_backups_have_bounded_record_charge(reader,wiki,settings):
+    from wiki.revisions import store_draft,store_required_backup
+    from wiki.contracts import StorageError
+    from wiki.models import RecoveryDraft,SavedRevision
+    actor=get_user_model().objects.get(username='synthetic-reader')
+    settings.BACKSTORY_REVISION_QUOTA_BYTES=1024
+    successes=0
+    for _ in range(20):
+        try: store_draft(actor,'note.md',None,'',[])
+        except StorageError as error:
+            assert error.reason_code=='backup_quota_exceeded'; break
+        successes+=1
+    assert 0 < successes <= 4
+    assert RecoveryDraft.objects.count()==successes
+    count=SavedRevision.objects.count()
+    with pytest.raises(StorageError,match='backup_quota_exceeded'):
+        for _ in range(20): store_required_backup(actor,'note.md',None,b'',b'')
+    assert SavedRevision.objects.count()-count <= 4
+    assert RecoveryDraft.objects.count()==successes
+
+
+@pytest.mark.parametrize('draft_first',[True,False])
+def test_draft_diagnostics_and_required_backups_share_budget_without_eviction(reader,wiki,settings,draft_first):
+    from wiki.revisions import store_draft,store_required_backup
+    from wiki.contracts import StorageError
+    from wiki.models import RecoveryDraft,SavedRevision
+    actor=get_user_model().objects.get(username='synthetic-reader')
+    settings.BACKSTORY_REVISION_QUOTA_BYTES=2000
+    diagnostics=[{'message':'x'*900}]
+    if draft_first:
+        row=store_draft(actor,'note.md',None,'',diagnostics)
+        with pytest.raises(StorageError,match='backup_quota_exceeded'):
+            store_required_backup(actor,'note.md',None,b'a'*600,b'b'*400)
+        assert RecoveryDraft.objects.filter(pk=row.pk).exists()
+        assert SavedRevision.objects.count()==0
+    else:
+        store_required_backup(actor,'note.md',None,b'a'*600,b'b'*400)
+        with pytest.raises(StorageError,match='backup_quota_exceeded'):
+            store_draft(actor,'note.md',None,'',diagnostics)
+        assert SavedRevision.objects.count()==1
+        assert RecoveryDraft.objects.count()==0
+
+
+def test_unicode_path_json_serialization_and_metadata_are_charged(reader,wiki,settings):
+    from wiki.revisions import store_draft
+    from wiki.contracts import StorageError
+    from wiki.models import RecoveryDraft
+    actor=get_user_model().objects.get(username='synthetic-reader')
+    # UTF-8 path bytes and persisted JSON's escaped representation both count.
+    path=('\u754c'*70+'/')*3+'note.md'
+    settings.BACKSTORY_REVISION_QUOTA_BYTES=600
+    with pytest.raises(StorageError,match='backup_quota_exceeded'):
+        store_draft(actor,path,None,'',[])
+    settings.BACKSTORY_REVISION_QUOTA_BYTES=1024
+    with pytest.raises(StorageError,match='backup_quota_exceeded'):
+        store_draft(actor,'note.md',None,'',[{'message':'\U0001f600'*100}])
+    assert RecoveryDraft.objects.count()==0
+
+
+def test_empty_required_backups_are_bounded_without_evicting_fresh_records(reader,wiki,settings):
+    from wiki.revisions import store_required_backup
+    from wiki.models import SavedRevision
+    from wiki.contracts import StorageError
+    actor=get_user_model().objects.get(username='synthetic-reader')
+    settings.BACKSTORY_REVISION_QUOTA_BYTES=1024
+    accepted=0
+    for _ in range(20):
+        try: store_required_backup(actor,'note.md',None,b'',b'')
+        except StorageError as error:
+            assert error.reason_code=='backup_quota_exceeded'; break
+        accepted+=1
+    assert 0 < accepted <= 4
+    assert SavedRevision.objects.count()==accepted
+
+
+def test_existing_unicode_metadata_and_json_bytes_remain_charged(reader,wiki,settings):
+    from wiki.revisions import store_draft,store_required_backup
+    from wiki.models import RecoveryDraft,SavedRevision
+    from wiki.contracts import StorageError
+    actor=get_user_model().objects.get(username='synthetic-reader')
+    path=('\u754c'*70+'/')*3+'note.md'
+    settings.BACKSTORY_REVISION_QUOTA_BYTES=1200
+    row=store_draft(actor,path,None,'',[])
+    with pytest.raises(StorageError,match='backup_quota_exceeded'):
+        store_required_backup(actor,'note.md',None,b'x'*100,b'')
+    assert RecoveryDraft.objects.filter(pk=row.pk).exists()
+    assert not SavedRevision.objects.exists()
+    RecoveryDraft.objects.all().delete()
+    settings.BACKSTORY_REVISION_QUOTA_BYTES=2000
+    row=store_draft(actor,'note.md',None,'',[{'message':'\U0001f600'*100}])
+    with pytest.raises(StorageError,match='backup_quota_exceeded'):
+        store_draft(actor,'note.md',None,'x'*400,[])
+    assert RecoveryDraft.objects.count()==1
+
+
+def test_quota_refusal_rolls_back_prune_and_leaves_existing_recovery_intact(reader,wiki,settings):
+    from wiki.revisions import store_draft,store_required_backup
+    from wiki.models import RecoveryDraft,SavedRevision
+    from wiki.contracts import StorageError
+    actor=get_user_model().objects.get(username='synthetic-reader')
+    expired=store_draft(actor,'note.md',None,'old',[])
+    RecoveryDraft.objects.filter(pk=expired.pk).update(created_at=timezone.now()-timedelta(days=31))
+    store_required_backup(actor,'note.md',None,b'current',b'submitted')
+    # Recreate an aged row: its deletion belongs to the failed atomic operation.
+    expired=RecoveryDraft.objects.create(actor=actor,path='note.md',source=b'old',diagnostics=[])
+    RecoveryDraft.objects.filter(pk=expired.pk).update(created_at=timezone.now()-timedelta(days=31))
+    settings.BACKSTORY_REVISION_QUOTA_BYTES=1
+    with pytest.raises(StorageError,match='backup_quota_exceeded'):
+        store_draft(actor,'note.md',None,'new',[])
+    assert RecoveryDraft.objects.filter(pk=expired.pk).exists()
+    assert SavedRevision.objects.count()==1

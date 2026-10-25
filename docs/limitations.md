@@ -76,6 +76,14 @@ ordinary Format/Save controls; restoration is disabled while it differs from
 the selected original.
 
 History and explicit drafts share the default 64 MiB quota and 30-day retention.
+Quota measures logical stored payload: source/original/base blobs, UTF-8 path and
+base-revision metadata, the persisted JSON diagnostics representation, and draft
+newline/BOM metadata, plus 256 bytes per row for fixed overhead. Empty rows still
+consume that charge. Quota checks aggregate byte lengths in SQLite under the
+same lock and transaction as insertion; a refusal creates no partial row and
+never evicts nonexpired recovery material. This is not a measurement of SQLite
+physical pages, free pages or filesystem allocation; pruning does not promise
+immediate disk reclamation.
 `python manage.py prune_recovery` prunes expired protected rows and checks
 readiness before cleaning registered abandoned transient siblings. It does not
 scan or purge wiki notes. Protected rows are pruned during subsequent writes

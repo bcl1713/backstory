@@ -18,6 +18,12 @@ def idle(remembered):
 @receiver(user_logged_in)
 def register_device(sender, request, user, **kwargs):
     timestamp = now()
+    # Django keeps the same key on same-account credential login. Always rotate
+    # the authenticated session before associating its new device record.
+    previous = request.session.session_key
+    if previous:
+        SessionDevice.objects.filter(session_key_digest=digest(previous), revoked_at=None).update(revoked_at=timestamp)
+    request.session.cycle_key()
     remembered = request.POST.get('remember') == 'on'
     absolute = timedelta(seconds=settings.BACKSTORY_REMEMBERED_ABSOLUTE_SECONDS if remembered else settings.BACKSTORY_SESSION_ABSOLUTE_SECONDS)
     SessionDevice.objects.create(user=user, session_key_digest=digest(request.session.session_key), created_at=timestamp,

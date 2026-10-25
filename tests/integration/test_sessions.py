@@ -79,3 +79,40 @@ def test_cleanup_and_interactive_disable(monkeypatch):
     SessionDevice.objects.update(absolute_expires_at=timezone.now() - timedelta(seconds=1))
     call_command('cleanup_sessions')
     assert not SessionDevice.objects.exists()
+
+
+@pytest.mark.parametrize('first_remembered,second_remembered', [(False,False),(False,True),(True,False),(True,True)])
+def test_repeated_same_account_credentials_rotate_and_revoke_each_device(monkeypatch, caplog, first_remembered, second_remembered):
+    """F3-001: actual LoginView posts must rotate even if Django reuses the key."""
+    from accounts.models import SessionDevice
+    from accounts.sessions import digest
+    from django.contrib.sessions.models import Session
+    now = timezone.now()
+    monkeypatch.setattr('accounts.sessions.now',lambda:now)
+    password = 'Synthetic login-secret-canary 928!'
+    user = get_user_model().objects.create_user('repeat-reader',password=password)
+    client = Client(raise_request_exception=False)
+    previous = None
+    for remembered in [first_remembered,second_remembered,second_remembered]:
+        payload = {'username':user.username,'password':password}
+        if remembered: payload['remember']='on'
+        response = client.post('/accounts/login/',payload)
+        assert response.status_code==302
+        current = client.session.session_key
+        assert current != previous
+        row = SessionDevice.objects.get(session_key_digest=digest(current))
+        assert row.remembered == remembered
+        assert row.absolute_expires_at == now + timedelta(days=90 if remembered else 1)
+        assert client.session.get_expiry_age() <= (14*86400 if remembered else 12*3600)
+        if previous is not None:
+            assert not Session.objects.filter(session_key=previous).exists()
+            assert SessionDevice.objects.get(session_key_digest=digest(previous)).revoked_at is not None
+            old_browser=Client(); old_browser.cookies['sessionid']=previous
+            assert old_browser.get('/status/').status_code==302
+        assert SessionDevice.objects.filter(user=user,revoked_at=None).count()==1
+        previous=current
+        now += timedelta(seconds=1)
+    assert client.post('/accounts/devices/',{'device':str(row.pk)}).status_code==302
+    assert client.get('/status/').status_code==302
+    assert 'login-secret-canary' not in caplog.text
+    assert previous not in caplog.text
