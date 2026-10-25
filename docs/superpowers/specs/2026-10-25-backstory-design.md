@@ -1,23 +1,28 @@
 # Backstory: first-release design and staged delivery
 
-Status: revised for review; no application code or dependencies installed.
-This revision authorizes documentation changes only, not implementation,
-deployment, service exposure or changes to live notes or mounts.
+Status: implementation authorized by the owner after the planning baseline.
+Tasks 1–4 are implemented on the feature branch. The owner's subsequent editor
+direction supersedes the earlier source-plus-separate-preview primary UI.
+Implementation remains limited to disposable synthetic storage and localhost;
+production deployment, public exposure and live-storage changes are unauthorized.
 
 ## Purpose and boundaries
 
-Backstory is a small, self-hosted browser and source editor for one existing
+Backstory is a small, self-hosted browser and Markdown editor for one existing
 Markdown directory. Named people and a separately revocable assistant account
 share the same files. Plain files and existing paths remain authoritative.
 Other tools may edit them. The browser fetches only requested folders, notes,
 attachments and bounded search results; it has no whole-wiki synchronization,
-offline wiki cache, browser index, automatic backlinks or graph work.
+offline wiki cache, browser index, automatic backlinks or graph work. Backlinks
+may be requested explicitly against server-indexed edges; their UI is optional
+and never gates note opening.
 
 Development uses generated, disposable content only. The supplied collection
 statistics guide synthetic fixtures; no private snapshot, authentication file,
 or live note becomes test content. No production deployment, mount/permission
 changes, Cloudflare setup, migration or changes to existing tools are authorized.
-Delete, rename, bulk operations, attachment upload, WYSIWYG, MCP, collaboration
+Delete, rename, bulk operations, attachment upload, rich-text/HTML round-trip
+editing or WYSIWYG feature parity, MCP, collaboration
 CRDTs and graph UI are outside the first release.
 
 ## Approaches and selected default
@@ -121,12 +126,54 @@ Source access remains available when metadata or Markdown parsing fails.
 Default note limit is 2 MiB, comfortably above the 699 KB sample maximum. Show
 an explanatory size/encoding diagnostic rather than truncating an editable file.
 
-Release one uses CodeMirror source editing with preview, not WYSIWYG. Users edit
-Markdown syntax directly; preview is rendered output and never round-trips the
-document. This trades visual editing convenience for Markdown fidelity. Keep
-the source/save interface separate from rendering so future visual editing can
-be evaluated without changing file storage or adding it to this release. Any
-future editor must meet the same preservation requirements.
+Release one uses Obsidian-style **inline live preview** as the primary editing
+experience, with an explicit **Raw source** toggle. CodeMirror's Markdown text
+is the authoritative document in both modes. Source-preserving decorations and
+small inert widgets change presentation only; rendered HTML never becomes an
+editor document and is never serialized back to Markdown. Keep the existing
+safe server preview as a secondary read/inspection option and retain its
+security tests and attachment handling. A separate preview pane is not the
+primary editing layout.
+
+### Inline interaction and source fidelity
+
+Use CodeMirror 6 with its Markdown syntax tree and a small decoration extension;
+this builds on the selected editor rather than adding an editor framework or
+service. This implementation choice follows the owner's inline direction.
+Decorate familiar headings, emphasis, inline code, list markers and link labels
+when inactive. Reveal the original syntax for the active cursor/selection
+context; when a selection intersects a decorated block, reveal that whole
+relevant block instead of leaving partially hidden syntax. Keep ordinary clicks
+for placing the cursor and selection; activating a link is a deliberate action.
+Keyboard movement, selection across markup and undo/redo must stay predictable.
+
+The Raw source toggle reconfigures presentation on the same document/selection
+and preserves undo history. Opening a note, changing mode, moving the selection
+or computing decorations must dispatch no document changes, create no dirty
+state and invoke neither formatting nor saving. Only explicit edits, accepted
+Format output, confirmed reload or manual merge replace source. Unedited mode
+round trips retain original bytes/revision, including BOM/newline handling at
+the established server boundary. An explicit source/plain-text fallback remains
+available if CodeMirror or its decorations fail.
+
+Treat front matter, tables, code fences and unfamiliar constructs conservatively.
+Keep front matter accessible as verbatim source (a visually distinct source
+region is sufficient), without a metadata form. Initially keep tables and code
+fences as visible, styled source rather than introducing interactive replacement
+widgets. Unsupported or ambiguous syntax remains visible and editable verbatim.
+Small link widgets must use escaped text/inert DOM; they never render raw HTML,
+execute document code or automatically load remote images. Resolve navigation
+through the existing authenticated path/link policy only on explicit activation.
+No cursor/decoration work requests backlinks, scans, or whole-wiki data.
+
+Before expanding the editing UI, demonstrate a small synthetic-note slice with
+front matter, headings/emphasis, wikilinks/aliases/fragments, relative links, a
+table and fenced code. Browser evidence must show live/source toggling without
+document/byte changes, active syntax reveal, multi-line selections, ordinary
+navigation, undo/redo and unsupported-source fallback. Then integrate the same
+editor with the established Format/Save/create/conflict/recovery contracts and
+verify those outcomes are independent of presentation mode. No numerical
+performance targets, editor-parity project or storage-model change is introduced.
 
 Keep front matter in the editor. Parse it into a separate typed projection for
 indexing, with a safe YAML parser and bounded depth/aliases/input. Never serialize
@@ -344,14 +391,16 @@ logs, URLs, prompts or checked-in environment examples.
 
 ## Interface and accessibility
 
-Desktop: folder sidebar, search and note title/breadcrumb, CodeMirror source
-editing and preview views (no WYSIWYG), and persistent Save/Format/status
-controls. Mobile: collapsible navigation and
-one primary reading/editing pane. Use a calm, readable design with visible focus,
+Desktop: folder sidebar, search and note title/breadcrumb, one primary inline
+live-preview editor, a labeled Raw source toggle, and persistent Save/Format/status
+controls. Safe server preview is a secondary option, not a required split pane.
+Mobile: collapsible navigation and one primary editing pane with the same raw
+source escape hatch. Use a calm, readable design with visible focus,
 adequate contrast, semantic forms, explicit labels and touch targets. Provide
 skip navigation, keyboard folder/search/note access, Escape to close dialogs and
-focus restoration. Source editor has an accessible label and a plain-textarea
-fallback. Do not require drag/drop or icon interpretation.
+focus restoration. Markdown editor and mode controls have accessible labels and a plain-textarea
+fallback. Mode changes preserve focus, selection and undo; decorative widgets
+never trap keyboard or touch navigation. Do not require drag/drop or icon interpretation.
 
 States: clean, dirty, formatting/saving, saved, warning, error and conflict.
 Expose status via a polite live region. Warn on browser unload and intercept
@@ -366,11 +415,13 @@ neither normal Save nor source-save recovery can override it.
 
 1. **Foundation and local vertical slice.** Scaffold Django, locked dependencies,
    disposable fixture generator and separate storage; interactive accounts,
-   protected lazy browsing, CodeMirror source editing with preview, explicit
+   protected lazy browsing, a demonstrated CodeMirror inline-live-preview/source
+   slice, explicit
    conflict-checked save and create. Include the read-only storage identity check,
    formatting helper and explicit source-save recovery before claiming the save
    flow is complete. Demonstrate login -> open -> edit -> save -> reopen,
    two-editor conflict, no-op save and failed-format recovery with diagnostics.
+   Live/source mode changes must not alter any save outcome or disk bytes.
    Keep an immediately runnable localhost workflow.
 2. **Preservation and indexed discovery.** Expand fixtures to at least 1,000
    notes in the supplied directory structure, 299 dailies and a roughly 699 KB
@@ -406,7 +457,8 @@ Correctness, security and data-preservation tests remain required.
 Tests must exercise real workflows, not mirror implementation details. Use
 pytest/Django tests for filesystem, metadata, concurrency and authorization;
 real packaged formatter subprocesses for preservation/idempotence; Playwright
-for two browser contexts, responsive layouts, keyboard control, safe preview and
+for two browser contexts, live/source byte fidelity, selection/undo, responsive
+layouts, keyboard control, safe preview and
 no whole-wiki browser storage/network. Record executed commands/results and
 explicitly identify checks unavailable in the environment. Real TrueNAS/NFS
 durability/latency and uncoordinated-writer guarantees cannot be established by
@@ -426,12 +478,12 @@ revokes the assistant and removes the disposable environment safely.
 ## Remaining decisions
 
 No unresolved product decisions block this documentation revision. Keep the
-architecture and staged delivery above; routine implementation details remain
-with the builder. A stable existing storage-check file and its expected hash must
+architecture and staged delivery above, with the owner's inline-live-preview
+revision applied; routine implementation details remain with the builder. A stable existing storage-check file and its expected hash must
 be configured before enabling writes against a real wiki; that is a deployment
 prerequisite, not permission to inspect or alter live storage now. This revision
-does not authorize implementation, deployment, public service exposure or changes
-to live notes or mounts.
+does not authorize deployment, public service exposure or changes to live notes
+or mounts. Implementation authorization is active for the staged local work.
 
 ## Primary references consulted
 
