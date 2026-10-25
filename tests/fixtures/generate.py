@@ -6,7 +6,9 @@ import hashlib
 import json
 from pathlib import Path
 import shlex
+import struct
 from typing import Literal
+import zlib
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,90 @@ class FixtureManifest:
     manifest_path: Path
     identity_path: str
     identity_sha256: str
+
+
+def _note_source(number: int, case: int | None = None) -> bytes:
+    """Public, deterministic test strings; no disk-derived content."""
+    duplicate = case in {0, 7}
+    metadata = (
+        f'title: "Synthetic note {number}: café"\n'
+        f'id: {"synthetic-duplicate" if duplicate else f"synthetic-{number}"}\n'
+        'aliases: ["Shared synthetic alias", "Quoted: alias"]\n'
+        'tags: [fixture, "synthetic/nested", "東京"]\n'
+        'unknown_fixture:\n'
+        '  enabled: true\n  disabled: false\n  count: 7\n  ratio: 1.25\n  absent: null\n'
+        '  date_text: "2026-01-02"\n  date_like: 2026-01-03\n'
+        '  quoted_boolean: "false"\n  quoted_number: "007"\n'
+        '  nested:\n    - label: "A \\"quoted\\" value"\n      values: [null, true, 4, "four"]\n'
+        '  literal: |\n    Synthetic multiline text.\n    A second public test line.\n'
+    )
+    if not duplicate:
+        metadata = metadata.replace('"Shared synthetic alias"', f'"Synthetic alias {number}"')
+    if case == 5:
+        metadata += 'broken: [unterminated\n'
+    elif case == 6:
+        metadata += 'duplicate_key: first\nduplicate_key: second\n'
+    elif case == 8:
+        metadata += 'unsupported: !synthetic inert-public-string\n'
+    elif case == 9:
+        metadata += 'cycle: &fixture_cycle [*fixture_cycle]\n'
+    body = (
+        f'# Synthetic note {number}\n\n'
+        '## Synthetic heading\n\n'
+        'Disposable café content: 東京, naïve, Ελληνικά, and 🧪. **Strong** and *emphasis*.\n\n'
+        '[[notes/Note 0001#synthetic-heading|Synthetic alias]] and [[synthetic-duplicate]].\n\n'
+        '[relative](../reference/Note%200000.md#synthetic-heading) and '
+        '[public external](https://example.invalid/synthetic?q=fixture#fragment).\n\n'
+        '![sample](../attachments/sample.png) [PDF](../attachments/sample.pdf)\n\n'
+        '![missing](../attachments/missing.png) and [[missing synthetic note]].\n\n'
+        '| Column | Value |\n| --- | --- |\n| café | `literal` |\n| 東京 | 7 |\n\n'
+        '- [ ] Synthetic unfinished task\n- [x] Synthetic complete task\n'
+        '  - Nested synthetic item\n    1. Nested ordered item\n\n'
+        '> A synthetic quotation.\n\n'
+        '`[[inline-false-positive]]` and `[inline fake](not-a-real-edge.md)`.\n\n'
+        '```text\n[[fenced-false-positive]]\n[fenced fake](not-a-real-edge.md)\n```\n'
+    )
+    source = f'---\n{metadata}---\n\n{body}'
+    if case == 10:
+        source = '---\nbroken: "unterminated\n\n' + body
+    if case == 1:
+        source = source.replace('\n', '\r\n')
+    elif case == 2:
+        source = '\ufeff' + source
+    elif case == 3:
+        source = source.replace('\n', '\r\n', 4)
+    elif case == 4:
+        source = source.rstrip('\n')
+    return source.encode('utf-8')
+
+
+def _attachments(wiki: Path) -> None:
+    """Construct inert raster/PDF samples rather than copying assets."""
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return (struct.pack('!I', len(payload)) + kind + payload
+                + struct.pack('!I', zlib.crc32(kind + payload)))
+
+    png = (b'\x89PNG\r\n\x1a\n'
+           + chunk(b'IHDR', struct.pack('!2I5B', 1, 1, 8, 2, 0, 0, 0))
+           + chunk(b'IDAT', zlib.compress(b'\x00\x40\x80\xc0')) + chunk(b'IEND', b''))
+    (wiki / 'attachments/sample.png').write_bytes(png)
+    stream = b'BT /F1 12 Tf 20 100 Td (Synthetic public fixture) Tj ET\n'
+    objects = [b'<< /Type /Catalog /Pages 2 0 R >>',
+               b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+               b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 140] '
+               b'/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+               b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+               f'<< /Length {len(stream)} >>\nstream\n'.encode() + stream + b'endstream']
+    pdf = b'%PDF-1.4\n'
+    offsets = [0]
+    for index, obj in enumerate(objects, 1):
+        offsets.append(len(pdf))
+        pdf += f'{index} 0 obj\n'.encode() + obj + b'\nendobj\n'
+    xref = len(pdf)
+    pdf += b'xref\n0 6\n0000000000 65535 f \n'
+    pdf += b''.join(f'{offset:010d} 00000 n \n'.encode() for offset in offsets[1:])
+    pdf += f'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n'.encode()
+    (wiki / 'attachments/sample.pdf').write_bytes(pdf)
 
 
 def generate_fixture(destination: Path, profile: Literal["small", "representative"]) -> FixtureManifest:
@@ -38,11 +124,17 @@ def generate_fixture(destination: Path, profile: Literal["small", "representativ
         (wiki / folder).mkdir(parents=True)
         for index in range(folder_count):
             name = f"{date(2026, 1, 1) + timedelta(days=index)}.md" if folder.startswith("daily/") else f"Note {index:04}.md"
-            (wiki / folder / name).write_text(
-                f"---\ntitle: Synthetic note {count}\nid: synthetic-{count}\ntags: [fixture]\n---\n\n"
-                f"# Synthetic note {count}\n\nDisposable café content. [[notes/Note 0000]]\n\n"
-                "- A synthetic list item\n  - A nested item\n", encoding="utf-8")
+            raw = _note_source(count, index if folder == "notes" else None)
+            if profile == "representative" and folder == "reference" and index == folder_count - 1:
+                name = "Large.md"
+                # ASCII padding keeps the UTF-8 byte count exact without splitting Unicode.
+                prefix = raw + b'\n'
+                paragraph = b'Synthetic large-note paragraph for bounded source editing.\n\n'
+                remaining = 699000 - len(prefix)
+                raw = prefix + (paragraph * (remaining // len(paragraph))) + b'x' * (remaining % len(paragraph))
+            (wiki / folder / name).write_bytes(raw)
             count += 1
+    _attachments(wiki)
     config = destination / "fixture.env"
     values = {
         "BACKSTORY_WIKI_ROOT": str(wiki), "BACKSTORY_DATA_DIR": str(destination / "data"),
@@ -51,7 +143,17 @@ def generate_fixture(destination: Path, profile: Literal["small", "representativ
     }
     config.write_text("".join(f"{key}={shlex.quote(value)}\n" for key, value in values.items()))
     manifest_path = destination / "manifest.json"
-    manifest_path.write_text(json.dumps({"profile": profile, "note_count": count, **values}, indent=2) + "\n")
+    files = []
+    for path in sorted(wiki.rglob("*")):
+        if path.is_file():
+            raw = path.read_bytes()
+            files.append({"path": path.relative_to(wiki).as_posix(), "bytes": len(raw),
+                          "sha256": hashlib.sha256(raw).hexdigest()})
+    manifest_path.write_text(json.dumps({
+        "profile": profile, "note_count": count, "daily_count": counts[-1],
+        "identity_path": identity_path, "identity_sha256": digest,
+        "folder_counts": dict(zip(directories, counts)), "files": files, **values,
+    }, indent=2) + "\n", encoding="utf-8")
     return FixtureManifest(wiki, destination / "data", config, manifest_path, identity_path, digest)
 
 

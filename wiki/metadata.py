@@ -134,3 +134,65 @@ def parse_front_matter(source):
                 raise MetadataError(diagnostic.code, diagnostic.line + 1 if diagnostic.line else None, diagnostic.column) from None
             return FrontMatter(tree, "".join(lines[index + 1:]), True)
     raise MetadataError("metadata_unclosed")
+
+
+@dataclass(frozen=True)
+class NoteProjection:
+    path: str
+    revision: str
+    title: str
+    ids: tuple[str, ...]
+    aliases: tuple[str, ...]
+    tags: tuple[str, ...]
+    typed_metadata: object
+    edges: tuple
+    diagnostics: tuple
+    body: str
+
+
+def project_note(snapshot):
+    """Disposable projection only: no serializer, constructors or save path."""
+    from pathlib import PurePosixPath
+    from .links import extract_links
+    from .markdown import _parser, _plain_heading
+    diagnostics = []
+    tree = None
+    body = snapshot.source.removeprefix('\ufeff')
+    try:
+        matter = parse_front_matter(snapshot.source)
+        tree, body = matter.tree, matter.body
+    except MetadataError as error:
+        diagnostics.append(error.diagnostic)
+        # Locate a closing delimiter independently of YAML parse/size success.
+        lines = body.splitlines(keepends=True)
+        for index, line in enumerate(lines[1:], 1):
+            if line.rstrip('\r\n') in {'---', '...'}:
+                body = ''.join(lines[index + 1:])
+                break
+    values = {}
+    if tree and tree[0] == 'mapping':
+        values = {key[2]: value for key, value in tree[1] if key[1] == _PREFIX + 'str'}
+
+    def strings(name):
+        node = values.get(name)
+        nodes = node[1] if node and node[0] == 'sequence' else [node]
+        return tuple(value[2] for value in nodes if value and value[0] == 'scalar' and value[1] == _PREFIX + 'str')
+
+    title = next(iter(strings('title')), '')
+    try:
+        if not title:
+            tokens = _parser().parse(body, {})
+            for index, token in enumerate(tokens[:-1]):
+                if token.type == 'heading_open':
+                    title = _plain_heading(tokens[index + 1].children or [])
+                    break
+        edges = tuple(extract_links(body))
+        offset = snapshot.source.count('\n') - body.count('\n')
+        from dataclasses import replace
+        edges = tuple(replace(edge, position=(edge.position[0] + offset, edge.position[1])) for edge in edges)
+    except (ValueError, RecursionError):
+        edges = ()
+        diagnostics.append(Diagnostic('projection_parse_failed', 'Body projection unavailable. Source remains available.'))
+    return NoteProjection(snapshot.path, snapshot.revision, title or PurePosixPath(snapshot.path).stem,
+                          strings('id') + strings('ids'), strings('aliases') + strings('alias'),
+                          strings('tags'), tree, edges, tuple(diagnostics), body)

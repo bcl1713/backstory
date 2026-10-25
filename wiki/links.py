@@ -102,3 +102,50 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
         return LinkResult("missing", None, label)
     except (StorageError, OSError, ValueError, UnicodeError):
         return unavailable
+
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class LinkEdge:
+    target: str
+    kind: str
+    fragment: str
+    position: tuple[int, int]
+
+
+def extract_links(source: str) -> list[LinkEdge]:
+    """Syntax tokens only; code is deliberately absent from the edge stream.
+
+    Positions point to the containing source line for reference destinations,
+    which may be declared elsewhere. Tokens retain literal wiki spelling.
+    """
+    from .markdown import _parser
+    parser = _parser()
+    parser.validateLink = lambda value: True
+    tokens = parser.parse(source, {})
+    edges = []
+    count = 0
+
+    def walk(items, line=1, content=''):
+        nonlocal count
+        for token in items:
+            count += 1
+            if count > 100000:
+                raise ValueError('link_structure_limit')
+            current = token.map[0] + 1 if token.map else line
+            target = None
+            if token.type == 'wiki_link':
+                target, kind = token.content.partition('|')[0], 'wiki'
+            elif token.type in {'link_open', 'image'}:
+                target, kind = token.attrGet('href' if token.type == 'link_open' else 'src'), 'markdown'
+            if target is not None:
+                path, _, fragment = target.partition('#')
+                # Column is advisory for normalized/reference Markdown tokens.
+                column = max(1, content.find(target) + 1)
+                edges.append(LinkEdge(path, kind, fragment, (current, column)))
+            if token.children:
+                walk(token.children, current, token.content)
+    walk(tokens)
+    return edges
