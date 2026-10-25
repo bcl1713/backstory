@@ -11,6 +11,8 @@ Start here: [initial setup](docs/setup.md). **Already have a wiki?
 Configure a private `.env`, then use ordinary `docker compose up -d --build`.
 The guide covers matching the wiki owner with fresh private application data,
 a build-free Portainer Standalone manifest, and an optional disposable demo.
+The [HTTPS proxy guide](docs/reverse-proxy.md) defines the shared contract for
+Caddy, Nginx Proxy Manager and other compatible frontends.
 [Local development](docs/development.md) covers the native synthetic workflow;
 [operations](docs/operations.md) covers recovery and backup/restore.
 No private notes, default passwords or production configuration ship here.

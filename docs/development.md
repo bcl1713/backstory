@@ -57,9 +57,12 @@ wiki. Python tests create and clean their own temporary roots. Formatter tests
 invoke the real packaged helper. There are no latency gates or benchmarks.
 
 Default production configuration is HTTPS with Secure cookies, HSTS and explicit
-hosts/origins. Local fixtures explicitly select localhost mode. No proxy headers
-are trusted; proxy mode is currently unsupported and fails closed. Future HTTPS
-deployment must satisfy `python manage.py check --deploy --fail-level WARNING`.
+hosts/origins. Local fixtures explicitly select localhost mode and proxy mode
+`off`, which ignores forwarded headers. Opt-in `trusted` mode follows the
+[generic HTTPS proxy contract](reverse-proxy.md); focused backend checks and a
+generated TLS fixture passed, with combined review/rebuilt-image acceptance still
+pending. HTTPS deployment must satisfy
+`python manage.py check --deploy --fail-level WARNING`.
 Never enable access logs of private paths/search terms or log request bodies,
 cookies, credentials or source. See [limitations](limitations.md) for NFS and
 external-writer boundaries and the retained low npm advisory.

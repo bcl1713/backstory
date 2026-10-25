@@ -5,11 +5,12 @@ Backstory edits Markdown files where they are; no import or conversion is needed
 The main workflow is a private `.env` and ordinary `docker compose` commands.
 A [disposable demo](#2a-try-a-clean-disposable-demo) is also available.
 
-These manifests publish only on the Docker host's `127.0.0.1`, with localhost
-cookies and proxy trust off. Open <http://127.0.0.1:8000> on that host. A browser
-on another computer cannot use its own `127.0.0.1` to reach the server. Remote
-browser access, HTTPS and proxy trust need a separately agreed deployment setup;
-changing a port or using Portainer does not enable them.
+The defaults publish on the Docker host's `127.0.0.1`, with localhost cookies
+and proxy trust off. Open <http://127.0.0.1:8000> on that host. For a server behind
+an existing HTTPS proxy, use the [generic proxy setup](reverse-proxy.md) after
+preparing storage below. The same app supports compatible Nginx Proxy Manager,
+Caddy and other proxies through one explicit header/peer contract. Portainer is
+an alternative way to manage the same Docker Standalone service.
 
 ## 1. Get the application
 
@@ -26,6 +27,13 @@ cd backstory
 
 Keep the wiki and application data outside this checkout: the image build copies
 checkout files. Use local storage for application SQLite data, outside the wiki.
+Verify canonical host roots are distinct and neither contains the other. Run
+`realpath -e -- /absolute/path/to/testwiki /absolute/path/to/backstory-wikitest-data`
+after creating the data directory below, and inspect mount provenance with
+`findmnt -T` for each path. Different printed paths can still alias through bind
+mounts: verify the actual sources. Container paths `/wiki` and `/var/lib/backstory`
+cannot prove that the host roots are disjoint. Do not bind a wiki subdirectory,
+alias or application checkout as private data.
 The `.env` in this checkout is ignored by Git and excluded from the image build.
 Keep it private; do not put passwords, authentication-file contents or application
 signing secrets in it. Each installation needs its own stable project name and
@@ -125,7 +133,14 @@ BACKSTORY_DATA_HOST_PATH='/home/YOUR_USER/backstory-wikitest-data'
 BACKSTORY_IDENTITY_PATH=identity.txt
 BACKSTORY_IDENTITY_SHA256=REPLACE_WITH_APPROVED_64_CHARACTER_SHA256
 BACKSTORY_WIKI_READ_ONLY=true
+BACKSTORY_BIND_ADDRESS=127.0.0.1
 BACKSTORY_PORT=8000
+BACKSTORY_COOKIE_MODE=localhost
+BACKSTORY_ALLOWED_HOSTS=localhost,127.0.0.1
+BACKSTORY_PROXY_MODE=off
+BACKSTORY_CSRF_TRUSTED_ORIGINS=
+BACKSTORY_TRUSTED_PROXY_IPS=
+BACKSTORY_PROXY_CLIENT_IP_HEADER=none
 BACKSTORY_EXCLUSIONS=
 BACKSTORY_REVISION_QUOTA_BYTES=67108864
 ```
@@ -139,8 +154,10 @@ Do not set `BACKSTORY_DATA_DIR` for Compose: that key is for native development.
 Exclusions are comma-separated additional deny patterns, for example
 `private,work/*.md`; they cannot weaken built-in policy. Quota is logical recovery
 payload accounting, not SQLite file size. These settings are explicitly forwarded
-by the manifests. Cookie mode, allowed hosts and proxy mode stay fixed to the
-local setup. Exported shell variables override `.env`; start in a clean shell or
+by the manifests. The security defaults above are for host-local HTTP. Change the
+security settings together using the [HTTPS proxy guide](reverse-proxy.md), rather
+than exposing localhost cookie mode to a network interface. Exported shell
+variables override `.env`; start in a clean shell or
 unset previously exported `BACKSTORY_*` and `COMPOSE_*` values before using it.
 
 ### Build, create accounts and start
@@ -222,34 +239,62 @@ or stop the other installation before starting another demo.
 
 ## Portainer on a Docker Standalone endpoint
 
-`compose.portainer.yaml` is a self-contained, build-free **Docker Standalone**
-manifest. It is not a Swarm deployment recipe. Before using it, the selected
-Docker endpoint needs the built `BACKSTORY_IMAGE` locally, or an image you have
-published to an accessible registry. No public Backstory registry image is
-promised. A Portainer web-editor stack cannot build this checkout from `build: .`.
-Build on the selected endpoint with this checkout's `docker compose build`, using
-the same image tag, or arrange image distribution separately.
+`compose.portainer.yaml` is self-contained and build-free for **Docker Standalone**.
+It is not a Swarm recipe. Prepare the storage and `.env` above on the selected
+Docker endpoint; for a remote browser also prepare the [HTTPS proxy settings](reverse-proxy.md).
+All bind paths refer to that **endpoint host**, not your browser computer or the
+Portainer container. Use absolute canonical paths, verified owners and disjoint
+wiki/data roots outside the checkout.
 
-The wiki and fresh private data directories must exist on the **Docker endpoint
-host**, with the verified ownership above. They are not paths on your browser
-computer or inside the Portainer container. Use absolute paths. Supply the
-`BACKSTORY_*` variables from the example as stack environment variables; the
-manifest explicitly interpolates the settings it accepts. CLI `COMPOSE_FILE`
-selects local files and is not needed when submitting this standalone manifest.
-Keep one stable stack name. Create accounts through an interactive terminal on
-the endpoint as described above, using this manifest and the same stack/project
-identity; UI account-console steps depend on the selected Portainer environment.
+The image must already exist on the selected endpoint or in an accessible
+registry. No public Backstory registry image is promised. On that endpoint, from
+this checkout with the configured `.env`, run `docker compose build`. Keep the
+same `BACKSTORY_IMAGE` tag in Portainer. A web-editor stack cannot build this
+checkout from `build: .`; the standalone file therefore has no build context.
+Distributing an image to a different endpoint is a separate operator step.
 
-The manifest retains a host-loopback publication. Portainer does not itself make
-the application reachable from a remote browser. Actual Portainer deployment and
-remote-browser routing are separate from this local setup; the provided packaging
-has been checked with Compose, not a live Portainer UI.
+When proceeding with your own deployment, select the intended Standalone
+environment, then **Stacks → Add stack** and a stable installation name. Paste
+`compose.portainer.yaml` into **Web editor**, or upload that file. Under environment
+variables, use **Load variables from .env file** or enter the `BACKSTORY_*` fields.
+Every supported value is explicitly interpolated by this manifest. The CLI-only
+`COMPOSE_FILE` and `COMPOSE_PROJECT_NAME` do not select files or the stack name in
+this form; use the standalone manifest and stable stack name explicitly. No
+`stack.env` or host-side `env_file` path is required. These UI steps follow the
+[Portainer stack documentation](https://docs.portainer.io/user/docker/stacks/add).
+Review the resolved paths, image, user, binding and security values before deploying.
+
+Startup applies database migrations. Once running, select **Containers → this
+stack's web container → Console**, choose `/bin/sh` and the configured non-root
+user (for example `1000:1000`), then **Connect**. Follow
+[Portainer's console instructions](https://docs.portainer.io/user/docker/containers/console)
+and run interactively:
+
+```sh
+id
+python manage.py create_account
+python manage.py create_account
+python manage.py storage_status
+```
+
+Use hidden terminal password prompts for the human and assistant; never put
+passwords in environment fields. Check the UID and actual readiness text. For
+HTTPS proxy mode, also run `python manage.py check --deploy --fail-level WARNING`.
+Update the stack's environment and redeploy to change the wiki-readonly flag;
+keep its name and data path unchanged. Open the approved HTTPS hostname from your
+browser. With the default localhost configuration, open the local URL on the
+Docker host instead: Portainer does not make loopback reachable remotely.
+
+Actual Portainer UI deployment and the operator's proxy/network/firewall setup
+are not part of the local synthetic verification. The combined trusted-proxy
+release gate is recorded separately in the [release checklist](testing/release-checklist.md).
 
 ## 3. Sign in and check the workflow
 
-Open <http://127.0.0.1:8000/accounts/login/> (or your configured local port) on the
-Docker host. Use the same hostname throughout for cookies. Use a separate browser
-context for the assistant. After enabling writes, create a disposable `.md` note
+For the default local setup, open <http://127.0.0.1:8000/accounts/login/> (or your
+configured local port) on the Docker host. In HTTPS proxy mode, use only the
+configured `https://` hostname. Use the same hostname throughout for cookies.
+Use a separate browser context for the assistant. After enabling writes, create a disposable `.md` note
 in an existing writable folder, save and reopen it. Startup and opening a note do
 not format the wiki. Save runs the [formatting pipeline](formatting.md).
 

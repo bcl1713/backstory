@@ -36,7 +36,8 @@ or credentials belong in this repository.
   checks passed; the unchanged formatter/editor/storage evidence is reused.
 - [x] Task 12 final Django system checks and HTTPS
   `check --deploy --fail-level WARNING`: no issues; migrations: no changes.
-  Unsupported proxy mode explicitly rejected. Compose configuration valid.
+  At that baseline, unsupported proxy modes were explicitly rejected. Compose
+  configuration valid.
 - [x] Task 12 actual non-root final-runtime Compose walkthrough: hidden-input
   human/assistant accounts, two-context conflict, source recovery, protected draft,
   assistant revocation with human active, unavailable identity, clean restart
@@ -80,6 +81,15 @@ This local record does not imply a hosted pass.
   not establish host UID1000 bind mapping on a rootful deployment. No live wiki
   or Portainer UI was used.
 
+- [ ] Generic HTTPS proxy follow-up: combined independent security review and
+  rebuilt-image acceptance remain pending. Focused backend/security tests passed
+  278 checks and the generated localhost TLS-proxy fixture passed 16 assertions,
+  including verified CA/hostname, secure login/CSRF save and forged-peer rejection.
+  All owned processes and generated TLS/wiki/data roots were cleaned. Compose rendering
+  covers both IPv4/IPv6 private-interface publication and exact forwarding of
+  cookie/host/origin/peer/client-header inputs, while preserving loopback defaults.
+  These config checks do not prove a live Portainer, NPM, Caddy or firewall setup.
+
 Merge and deployment remain separate owner decisions requiring explicit approval;
 neither is part of this authorized local delivery.
 
@@ -87,14 +97,16 @@ Physical mobile hardware, screen-reader interaction, other browser engines and
 real NFS/TrueNAS behavior are unavailable locally. No claims cover those checks.
 Four low npm audit entries trace to the retained transitive KaTeX advisory
 GHSA-238p-pmpm-9mq7; no arbitrary dependency override or audit-zero claim.
-Proxy trust remains unsupported and fails closed. Production requires separate
-owner authorization, storage identity enrollment and deployment verification.
+Proxy trust defaults off. The generic trusted-proxy follow-up is subject to the
+pending combined gate above; no brand or proxy setting is implicitly trusted.
+Production requires separate owner authorization, storage identity enrollment
+and deployment verification.
 
-Verified runtime image: `backstory:stage4`,
+Historical Stage 4 runtime image: `backstory:stage4`,
 `sha256:48154e34929f5950c8beada18565d6037a81eb898d8407281b51bc318e504dd0`.
-It contains the final runtime code, including public process-only health, protected
-SQLite backup and pruned development dependencies. Later changes include Compose packaging, `.env` examples, documentation and
-tests; application runtime sources remain unchanged. The prior 96-runtime-file
-comparison to that image remains applicable to those unchanged sources.
-The new Compose metadata was exercised with that existing image.
-Hosted CI results are linked above and evaluated separately from local evidence.
+It contains the original reviewed runtime, including public process-only health,
+protected SQLite backup and pruned development dependencies. The UID1000/data
+packaging proof used this image. It does **not** contain the later trusted-proxy
+backend: those changed runtime sources require a rebuilt image and separate
+acceptance. The earlier 96-runtime-file comparison applies to the historical
+baseline, not the proxy follow-up. Hosted CI is evaluated separately.

@@ -94,10 +94,15 @@ secret and separately back up wiki files. Local process and filesystem tests
 cover interruptions before replacement, after replacement before indexing, and
 after commit before response; none provides NFS durability or atomic CAS proof.
 
-The first release does not support trusting reverse-proxy headers. Explicit
-proxy mode is rejected; direct HTTPS configuration checks pass independently.
-The supplied Compose recipe is loopback HTTP only and is not a production proxy
-recipe. Physical devices, screen readers and real NFS behavior require separate
+Proxy trust is off by default. The [generic HTTPS proxy mode](reverse-proxy.md)
+requires verified actual TCP peers, a proxy-overwritten scheme, exact host/origin
+and independent origin network restrictions. Focused backend checks and a
+generated TLS fixture passed; combined independent review/rebuilt-image acceptance
+remain pending. No local test proves the operator's NPM/Caddy settings, firewall
+or live Portainer deployment. Container mount targets also cannot establish that
+host wiki/data roots are disjoint behind bind aliases; verify canonical host roots
+and their actual mount sources outside the build context.
+Physical devices, screen readers and real NFS behavior require separate
 operator verification. Four low npm audit entries originate in the transitive
 KaTeX advisory GHSA-238p-pmpm-9mq7 through markdownlint; no arbitrary graph override
 was applied. The isolated helper returns no HTML and rejects prototype keys, but

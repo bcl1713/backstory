@@ -224,5 +224,7 @@ arbitrary roots. Keep backups until the restore was verified.
 
 See [release checks](testing/release-checklist.md) for actual evidence and
 [limitations](limitations.md) for inode/ownership/ACL/xattr, NFS caching/hung-call
-and residual external-writer races. Proxy trust is unsupported and fails closed;
-this localhost Compose file is not a reverse-proxy production recipe.
+and residual external-writer races. This walkthrough uses localhost/proxyoff
+defaults. For opt-in HTTPS forwarding, follow the [generic proxy contract](reverse-proxy.md)
+and its pending combined acceptance gate. The peer/header guard also covers
+`/health/`; use the real TLS proxy and canonical hostname for health probes.

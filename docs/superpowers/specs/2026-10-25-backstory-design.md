@@ -382,6 +382,21 @@ separate optional authentication gate. Retain application accounts even behind
 Access. Do not trust a bare Access email header as application authentication.
 No Tunnel/Access configuration or public exposure is part of local development.
 
+Follow-up integration status (2026-10-25): the original Stage 4 baseline was
+reviewed; the later generic HTTPS proxy implementation has a separate pending
+combined security/image acceptance gate. The explicit contract is vendor-neutral:
+`BACKSTORY_PROXY_MODE=trusted`, HTTPS cookies, exact allowed hosts/HTTPS origins,
+an allowlist of actual TCP peer IPs/CIDRs, preserved Host and a proxy-overwritten
+single `X-Forwarded-Proto: https`. The optional selected client-IP header must
+contain one overwritten literal IP; default `none` uses the TCP peer. The guard
+covers every route, including health, before HTTPS handling. Forwarded host and
+proxy/Access identity do not grant app authentication. Default Compose remains
+loopback/localhost/proxyoff, and env-based origin publication requires independent
+network restrictions. Host wiki/data roots must be verified canonical and disjoint
+outside the build context; distinct container mount targets do not prove that.
+See [proxy setup](../../reverse-proxy.md) for the operator contract. This follow-up
+does not authorize changing live proxies, firewalls, mounts or deploying a server.
+
 Run non-root with minimum filesystem access. Required write permissions and NFS
 UID/GID considerations are documented, not changed automatically. Health checks
 distinguish process health, wiki readiness and index freshness without exposing
