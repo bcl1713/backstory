@@ -76,13 +76,14 @@ SECRET_KEY = persistent_secret()
 DEBUG = False
 INSTALLED_APPS = [
     "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions",
-    "django.contrib.staticfiles", "backstory.apps.BackstoryConfig", "accounts", "wiki", "indexing",
+    "django.contrib.staticfiles", "backstory.apps.BackstoryConfig", "accounts.apps.AccountsConfig", "axes", "wiki", "indexing",
 ]
 MIDDLEWARE = [
+    "backstory.middleware.ResponsePolicyMiddleware",
     "django.middleware.security.SecurityMiddleware", "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware", "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django.middleware.clickjacking.XFrameOptionsMiddleware", "backstory.middleware.ResponsePolicyMiddleware",
+    "accounts.middleware.SessionPolicyMiddleware", "django.middleware.clickjacking.XFrameOptionsMiddleware", "axes.middleware.AxesMiddleware",
 ]
 ROOT_URLCONF = "backstory.urls"
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "DIRS": [BASE_DIR / "templates"], "APP_DIRS": True,
@@ -136,3 +137,31 @@ BACKSTORY_INDEX_YIELD_SECONDS = float(os.environ.get("BACKSTORY_INDEX_YIELD_SECO
 BACKSTORY_INDEX_INCREMENTAL_SECONDS = int(os.environ.get("BACKSTORY_INDEX_INCREMENTAL_SECONDS", "300"))
 BACKSTORY_INDEX_VERIFY_SECONDS = int(os.environ.get("BACKSTORY_INDEX_VERIFY_SECONDS", "86400"))
 BACKSTORY_INDEX_QUEUE_LIMIT = int(os.environ.get("BACKSTORY_INDEX_QUEUE_LIMIT", "1000"))
+
+BACKSTORY_SESSION_IDLE_SECONDS = 12 * 3600
+BACKSTORY_SESSION_ABSOLUTE_SECONDS = 24 * 3600
+BACKSTORY_REMEMBERED_IDLE_SECONDS = 14 * 86400
+BACKSTORY_REMEMBERED_ABSOLUTE_SECONDS = 90 * 86400
+AUTHENTICATION_BACKENDS = ['axes.backends.AxesStandaloneBackend', 'django.contrib.auth.backends.ModelBackend']
+AXES_LOCKOUT_PARAMETERS = ['username', 'ip_address']
+AXES_FAILURE_LIMIT = 5
+from datetime import timedelta
+AXES_COOLOFF_TIME = timedelta(minutes=30)
+AXES_RESET_ON_SUCCESS = False
+AXES_CLIENT_IP_CALLABLE = 'backstory.middleware.client_ip'
+AXES_LOCKOUT_CALLABLE = 'backstory.middleware.lockout'
+AXES_ENABLE_ACCESS_FAILURE_LOG = False
+AXES_DISABLE_ACCESS_LOG = True
+AXES_VERBOSE = False
+CSRF_TRUSTED_ORIGINS = [value.strip() for value in os.environ.get('BACKSTORY_CSRF_TRUSTED_ORIGINS', '').split(',') if value.strip()]
+BACKSTORY_PROXY_MODE = os.environ.get('BACKSTORY_PROXY_MODE', 'off')
+# Proxy authentication is deliberately unavailable; application accounts always apply.
+if BACKSTORY_PROXY_MODE != 'off':
+    raise ImproperlyConfigured('Proxy mode requires a trusted overwriting proxy and restricted origin; unsupported mode fails closed')
+LOGGING = {
+    'version': 1, 'disable_existing_loggers': False,
+    'filters': {'redact': {'()': 'backstory.logging.RedactRequest'}},
+    'handlers': {'safe': {'class': 'logging.StreamHandler', 'filters': ['redact']}},
+    'root': {'handlers': ['safe'], 'level': 'WARNING'},
+    'loggers': {name: {'handlers': ['safe'], 'filters': ['redact'], 'propagate': False, 'level': 'WARNING'} for name in ['django', 'django.request', 'django.security', 'django.security.DisallowedHost', 'django.security.csrf', 'axes', 'gunicorn.error', 'gunicorn.access']},
+}

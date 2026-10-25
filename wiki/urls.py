@@ -4,6 +4,9 @@ from indexing import views as index_views
 
 app_name = "wiki"
 urlpatterns = [
+    path("drafts/", views.protected_recovery_pending, name="drafts"),
+    path("history/<path:path>", views.protected_recovery_pending, name="history"),
+    path("restore/<int:revision_id>/", views.protected_recovery_pending, name="restore"),
     path("", views.shell, name="shell"),
     path("new/", views.new_note, name="new"),
     path("folders/", views.folders, name="folders"),

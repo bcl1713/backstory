@@ -46,6 +46,6 @@ def supervise(commands):
 
 if __name__ == '__main__':
     sys.exit(supervise([
-        ['gunicorn', '--no-control-socket', 'backstory.wsgi:application', '--bind', '0.0.0.0:8000', '--workers', '1', '--threads', '4', '--timeout', '30', '--access-logfile', '/dev/null'],
+        ['gunicorn', '--logger-class', 'backstory.logging.SafeGunicornLogger', '--no-control-socket', 'backstory.wsgi:application', '--bind', '0.0.0.0:8000', '--workers', '1', '--threads', '4', '--timeout', '30', '--access-logfile', '/dev/null'],
         [sys.executable, 'manage.py', 'run_indexer'],
     ]))

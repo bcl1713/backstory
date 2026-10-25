@@ -208,3 +208,9 @@ def save(request, path):
         return response
     except StorageError as error:
         return JsonResponse({"state": "error", "reason_code": error.reason_code}, status=error.status)
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def protected_recovery_pending(request, **kwargs):
+    return JsonResponse({'reason_code': 'recovery_not_available'}, status=501)
