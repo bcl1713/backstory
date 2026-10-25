@@ -161,16 +161,21 @@ def resolve_indexed_name(name):
     try:
         with sqlite_budget():
             candidates = list(IndexedName.objects.filter(name=name.casefold(), resolvable=True, note__generation_id=state.generation)
-                              .values_list('note__path', flat=True).distinct().order_by('note__path')[:CANDIDATE_LIMIT + 1])
+                              .values_list('note__path', 'note__stat').distinct().order_by('note__path')[:CANDIDATE_LIMIT + 1])
     except OperationalError:
         return 'unavailable', ()
     if len(candidates) > CANDIDATE_LIMIT:
         return 'unavailable', ()
     paths = []
-    for path in candidates:
+    from .scanner import file_stat
+    for path, indexed_stat in candidates:
         try:
             validate_path(path, 'content')
             if _regular(path):
+                # A changed eligible candidate may have added/removed this ID
+                # or alias. Dropping it cannot establish another unique match.
+                if file_stat(path) != indexed_stat:
+                    return 'unavailable', ()
                 paths.append(path)
         except PathDenied:
             continue

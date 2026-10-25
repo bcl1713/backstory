@@ -254,3 +254,45 @@ def test_final_identity_failure_blocks_candidate_promotion(wiki, monkeypatch):
         if w.run_batch(now=10000010000 + n).state == 'backoff':
             break
     assert IndexGeneration.objects.get(state='active').pk == original_id
+
+
+@pytest.mark.parametrize('arrival', ['before_start', 'after_start'])
+def test_overflow_at_scan_start_durably_verifies_same_stat_change(wiki, settings, monkeypatch, arrival):
+    w = api()
+    from indexing.queue import enqueue_note, request_scan
+    from indexing.models import IndexedNote, ScanState
+    from wiki.storage import read_note
+    from indexing.scanner import file_stat
+    (wiki / 'source.md').write_text('# Source')
+    path = wiki / 'overflow.md'
+    path.write_text('# Overflow old')
+    drain(w)
+    before = file_stat('overflow.md')
+    info = path.stat()
+    path.write_text('# Overflow new')
+    os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns))
+    assert file_stat('overflow.md') == before
+    settings.BACKSTORY_INDEX_QUEUE_LIMIT = 1
+    request_scan('incremental')
+    original = w._start
+    injected = False
+    def overflow():
+        enqueue_note('source.md', read_note('source.md').revision)
+        enqueue_note('overflow.md', read_note('overflow.md').revision)
+        assert ScanState.objects.get(pk=1).reconcile_needed
+    def start(state, kind):
+        nonlocal injected
+        if injected:
+            return original(state, kind)
+        injected = True
+        if arrival == 'before_start':
+            overflow()
+        original(state, kind)
+        if arrival == 'after_start':
+            overflow()
+    monkeypatch.setattr(w, '_start', start)
+    drain(w)
+    row = IndexedNote.objects.get(generation__state='active', path='overflow.md')
+    assert row.revision == read_note('overflow.md').revision
+    assert not ScanState.objects.get(pk=1).reconcile_needed
+    assert w.index_status().state == 'ready'

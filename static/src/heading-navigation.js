@@ -7,7 +7,10 @@ import { Transaction } from '@codemirror/state';
 function slug(text) {
   return text.toLowerCase().replace(/[^\p{L}\p{N}_\s-]/gu, '').trim().replace(/\s+/gu, '-') || 'section';
 }
-function plainHeading(state, node) {
+function referenceLabel(value) {
+  return value.slice(1, -1).trim().replace(/\s+/gu, ' ').toLowerCase().toUpperCase();
+}
+function plainHeading(state, node, references) {
   const raw = state.doc.sliceString(node.from, node.to);
   // Syntax offsets count UTF-16 code units, as does the CodeMirror document.
   const output = raw.split('');
@@ -21,7 +24,10 @@ function plainHeading(state, node) {
   node.node.toTree().iterate({ enter(child) {
     if (child.name === 'InlineCode') code.push([child.from, child.to]);
     const marker = ['HeaderMark', 'EmphasisMark', 'CodeMark', 'LinkMark'].includes(child.name);
-    const destination = ['URL', 'LinkTitle'].includes(child.name) && ['Link', 'Image'].includes(child.node.parent?.name);
+    const reference = child.name === 'LinkLabel'
+      && ['Link', 'Image'].includes(child.node.parent?.name)
+      && references.has(referenceLabel(raw.slice(child.from, child.to)));
+    const destination = (['URL', 'LinkTitle'].includes(child.name) && ['Link', 'Image'].includes(child.node.parent?.name)) || reference;
     if (marker || destination) erase(child.from, child.to);
   } });
   const inCode = index => code.some(([from, to]) => index >= from && index < to);
@@ -50,12 +56,18 @@ export function installHeadingNavigation(view) {
     if (!fragment.startsWith('preview-')) return;
     const wanted = fragment.slice('preview-'.length);
     const tree = ensureSyntaxTree(view.state, view.state.doc.length, 1000) || syntaxTree(view.state);
+    const references = new Set();
+    tree.iterate({ enter(node) {
+      if (node.name !== 'LinkReference') return;
+      const label = node.node.getChild('LinkLabel');
+      if (label) references.add(referenceLabel(view.state.doc.sliceString(label.from, label.to)));
+    } });
     const counts = new Map();
     const used = new Set();
     let position = null;
     tree.iterate({ enter(node) {
       if (!/^(ATXHeading[1-6]|SetextHeading[12])$/.test(node.name)) return;
-      const base = slug(plainHeading(view.state, node));
+      const base = slug(plainHeading(view.state, node, references));
       let count = counts.get(base) || 0;
       let candidate = base + (count ? `-${count}` : '');
       while (used.has(candidate)) candidate = `${base}-${++count}`;

@@ -90,7 +90,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: direct and
 });
 
 test('current-document heading slugs match safe preview for markup, entities, code and collision suffixes', async ({ page }) => {
-  const headings = ['# A', '# A', '# A-1', '# [**Label**](Other.md)', '# [Title label](Other.md "ignored title")', '# `[label](target)`', '# `[[raw|literal]]`', '# [[Other|Wiki label]]', '# Fish &amp; Chips', '# 東京 café', '# Under_score heading'];
+  const headings = ['# A', '# A', '# A-1', '# [**Label**](Other.md)', '# [Title label](Other.md "ignored title")', '# `[label](target)`', '# `[[raw|literal]]`', '# [[Other|Wiki label]]', '# Fish &amp; Chips', '# 東京 café', '# Under_score heading', '# [Literal][undefined-reference]'];
   const source = headings.join('\n\n') + '\n';
   await writeFile(`${runtime}/wiki/Slug cases.md`, source);
   await login(page);
@@ -108,4 +108,34 @@ test('current-document heading slugs match safe preview for markup, entities, co
     expected += headings[n].length + 2;
   }
   await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
+});
+
+for (const presentation of ['live', 'source']) test(`${presentation}: resolved reference heading fragments preserve current source and undo`, async ({ page }) => {
+  const source = 'Opening paragraph\n\n# [Label][target]\n\n[target]: Other.md\n\nUnresolved [plain][missing] and <https://example.invalid/>.\n';
+  const path = `${runtime}/wiki/References.md`;
+  await writeFile(path, source);
+  const expected = source.indexOf('# [Label]');
+  await login(page);
+  await page.goto('/notes/References.md');
+  const editor = page.locator('[data-markdown-editor]');
+  await page.getByRole('button', { name: presentation === 'source' ? 'Raw source' : 'Live preview', exact: true }).click();
+  await page.evaluate(() => { location.hash = '#preview-label'; });
+  await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
+  expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);
+  await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
+  await editor.evaluate(el => el.markdownEditor.view.dispatch({ changes: { from: el.markdownEditor.view.state.doc.length, insert: 'draft' } }));
+  await page.evaluate(() => { location.hash = '#preview-unmatched'; });
+  await page.evaluate(() => { location.hash = '#preview-label'; });
+  await page.locator('.cm-content').focus();
+  await page.keyboard.press('Control+z');
+  expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);
+  await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
+  await page.goto('/notes/Slice.md');
+  await page.getByLabel('Link target', { exact: true }).fill('References#Label|Reference heading');
+  await page.getByRole('button', { name: 'Resolve link', exact: true }).click();
+  await page.locator('[data-link-result] a').click();
+  await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
+  await page.getByRole('button', { name: presentation === 'source' ? 'Raw source' : 'Live preview', exact: true }).click();
+  expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);
+  expect(await readFile(path, 'utf8')).toBe(source);
 });

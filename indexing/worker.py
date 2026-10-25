@@ -88,9 +88,19 @@ def _commit_projection(snapshot, info, generations, token):
                                [note.pk, note.path, note.title, note.body, generation.pk])
 
 
+def _claim_reconciliation():
+    # UPDATE is the first statement in the caller's short write transaction.
+    # Its row count atomically claims the currently persisted intent. A later
+    # enqueue writes after commit and cannot be overwritten by a stale object.
+    return bool(ScanState.objects.filter(pk=1, reconcile_needed=True).update(reconcile_needed=False))
+
+
 def _start(state, kind):
     active = IndexGeneration.objects.filter(state='active').first()
+    requested = state.requested
     with transaction.atomic():
+        if _claim_reconciliation() and kind != 'rebuild':
+            kind = 'verify'
         generation = IndexGeneration.objects.create() if kind == 'rebuild' or active is None else active
         state.checkpoint = {'kind': kind, 'generation': generation.pk, 'token': uuid.uuid4().hex,
                             'stack': [{'path': '', 'offset': 0}], 'phase': 'discover'}
@@ -98,8 +108,27 @@ def _start(state, kind):
         state.requested = ''
         state.initialized = True
         state.reconcile_needed = False
-        state.save(update_fields=['checkpoint', 'processed', 'discovered', 'errors', 'initialized', 'reconcile_needed'])
-        ScanState.objects.filter(pk=1, requested=kind).update(requested='')
+        state.save(update_fields=['checkpoint', 'processed', 'discovered', 'errors', 'initialized'])
+        ScanState.objects.filter(pk=1, requested=requested).update(requested='')
+
+
+def _restart_for_reconciliation(state):
+    with transaction.atomic():
+        if not _claim_reconciliation():
+            return
+        # An overflow during an existing pass must verify content again,
+        # including paths already visited before the dropped revision arrived.
+        state.checkpoint.update(kind='verify', phase='discover', token=uuid.uuid4().hex,
+                                stack=[{'path': '', 'offset': 0}])
+        state.processed = state.discovered = state.errors = 0
+        state.reconcile_needed = False
+        state.save(update_fields=['checkpoint', 'processed', 'discovered', 'errors'])
+
+
+def _pending():
+    return (IndexJob.objects.exists()
+            or ScanState.objects.filter(pk=1, reconcile_needed=True).exists()
+            or ScanState.objects.filter(pk=1).exclude(requested='').exists())
 
 
 def _schedule(state, now):
@@ -108,6 +137,8 @@ def _schedule(state, now):
         state.next_incremental = now + settings.BACKSTORY_INDEX_INCREMENTAL_SECONDS
         state.next_verify = now + settings.BACKSTORY_INDEX_VERIFY_SECONDS
         changes += ['next_incremental', 'next_verify']
+    if state.checkpoint and state.reconcile_needed:
+        _restart_for_reconciliation(state)
     if not state.checkpoint:
         kind = state.requested
         if not state.initialized:
@@ -125,9 +156,9 @@ def _schedule(state, now):
 def _finish(state, generation, now):
     require_ready()
     # Prioritized writes are replayed into both generations before publication.
-    if IndexJob.objects.exists():
-        return False
     with transaction.atomic():
+        if IndexJob.objects.exists() or ScanState.objects.filter(pk=1, reconcile_needed=True).exists():
+            return False
         stale = IndexedNote.objects.filter(generation=generation).exclude(seen=state.checkpoint['token'])
         with connection.cursor() as cursor:
             cursor.execute('DELETE FROM indexed_fts WHERE rowid IN (SELECT id FROM indexing_indexednote WHERE generation_id=%s AND seen != %s)', [generation.pk, state.checkpoint['token']])
@@ -174,7 +205,7 @@ def _run(now, progress):
         priority += 1
         progress[0] = priority
     if not cp:
-        return BatchResult(priority, priority, IndexJob.objects.exists(), 'ready')
+        return BatchResult(priority, priority, _pending(), 'ready')
     generation = IndexGeneration.objects.get(pk=cp['generation'])
     remaining = limit - priority
     if remaining == 0:
@@ -207,8 +238,8 @@ def _run(now, progress):
             cp['after'] = note.pk
             processed += 1
         if len(notes) < remaining:
-            _finish(state, generation, now)
-            return BatchResult(processed + priority, priority, bool(state.requested or IndexJob.objects.exists()), 'ready')
+            complete = _finish(state, generation, now)
+            return BatchResult(processed + priority, priority, not complete or _pending(), 'ready' if complete else 'partial')
     state.checkpoint = cp
     state.errors = 0
     state.last_error = ''

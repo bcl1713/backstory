@@ -68,3 +68,21 @@ def test_excluded_root_is_missing_for_precedence_and_identifier_names_are_not_pa
     settings.BACKSTORY_EXCLUSIONS = ['target.md']
     assert resolve_link('folder/source.md', 'target', 'wiki').href == '/notes/folder/target.md'
     assert resolve_link('folder/source.md', 'key', 'wiki').href == '/notes/deep/identified.md'
+
+
+@pytest.mark.parametrize('name', ['existing-id', 'Existing alias'])
+def test_changed_identifier_candidate_withholds_resolution_without_body_read(wiki, monkeypatch, name):
+    build(wiki, {'source.md': '# Source', 'one.md': '---\nid: existing-id\naliases: [Existing alias]\n---\n# One'})
+    (wiki / 'one.md').write_text('---\nid: replacement-longer-id\naliases: [Replacement longer alias]\n---\n# One')
+    from wiki import storage
+    monkeypatch.setattr(storage, 'read_note', lambda *a: pytest.fail('identifier resolution read note body'))
+    assert resolve_link('source.md', name, 'wiki').state == 'unavailable'
+
+
+def test_changed_duplicate_candidate_cannot_make_another_candidate_unique(wiki, settings):
+    build(wiki, {'source.md': '# Source', 'one.md': '---\nid: shared\n---\n# One',
+                 'two.md': '---\nid: shared\n---\n# Two'})
+    (wiki / 'two.md').write_text('---\nid: replacement-longer\n---\n# Two')
+    assert resolve_link('source.md', 'shared', 'wiki').state == 'unavailable'
+    settings.BACKSTORY_EXCLUSIONS = ['two.md']
+    assert resolve_link('source.md', 'shared', 'wiki').href == '/notes/one.md'
