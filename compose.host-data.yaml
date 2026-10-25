@@ -1,0 +1,11 @@
+# Opt in through COMPOSE_FILE=compose.yaml:compose.host-data.yaml in .env.
+# Prepare a NEW private directory as the selected host owner before starting.
+services:
+  web:
+    volumes:
+      - type: bind
+        source: ${BACKSTORY_DATA_HOST_PATH:?Set an existing private host application-data directory}
+        target: /var/lib/backstory
+        read_only: false
+        bind:
+          create_host_path: false

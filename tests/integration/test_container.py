@@ -47,10 +47,14 @@ def test_compose_is_loopback_and_never_creates_host_wiki(tmp_path, omit_false):
 def test_public_health_reports_web_process_without_storage_or_index(wiki, monkeypatch):
     from django.test import Client
     import wiki.readiness
+    import wiki.views
     import indexing.worker
     def forbidden(*args, **kwargs):
         raise AssertionError('public health must not read private storage/index state')
+    # Load consumers before patching so first URL import cannot retain a test
+    # replacement after monkeypatch restores the defining module.
     monkeypatch.setattr(wiki.readiness, 'check_readiness', forbidden)
+    monkeypatch.setattr(wiki.views, 'check_readiness', forbidden)
     monkeypatch.setattr(indexing.worker, 'index_status', forbidden)
     response = Client().get('/health/')
     assert response.status_code == 200

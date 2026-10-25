@@ -1,21 +1,26 @@
 services:
   web:
     build: .
-    image: backstory:local
+    image: ${BACKSTORY_IMAGE:-backstory:local}
+    user: "${BACKSTORY_UID:-10001}:${BACKSTORY_GID:-10001}"
     init: true
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${BACKSTORY_PORT:-8000}:8000"
     environment:
       BACKSTORY_WIKI_ROOT: /wiki
       BACKSTORY_DATA_DIR: /var/lib/backstory
-      BACKSTORY_IDENTITY_PATH: ${BACKSTORY_IDENTITY_PATH:?Generate a disposable fixture and load its configuration}
-      BACKSTORY_IDENTITY_SHA256: ${BACKSTORY_IDENTITY_SHA256:?Load the fixture identity hash}
+      BACKSTORY_IDENTITY_PATH: ${BACKSTORY_IDENTITY_PATH:?Set the approved wiki-relative identity file}
+      BACKSTORY_IDENTITY_SHA256: ${BACKSTORY_IDENTITY_SHA256:?Set the approved identity SHA-256}
       BACKSTORY_COOKIE_MODE: localhost
       BACKSTORY_ALLOWED_HOSTS: localhost,127.0.0.1
+      BACKSTORY_PROXY_MODE: "off"
+      BACKSTORY_EXCLUSIONS: ${BACKSTORY_EXCLUSIONS:-}
+      BACKSTORY_REVISION_QUOTA_BYTES: ${BACKSTORY_REVISION_QUOTA_BYTES:-67108864}
     volumes:
       - type: bind
-        source: ${BACKSTORY_WIKI_ROOT:?Choose an existing disposable wiki directory}
+        source: ${BACKSTORY_WIKI_ROOT:?Set the approved existing host wiki directory}
         target: /wiki
+        read_only: ${BACKSTORY_WIKI_READ_ONLY:-false}
         bind:
           create_host_path: false
       - type: volume
