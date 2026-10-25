@@ -22,7 +22,10 @@ No private notes, default passwords or production configuration ship here.
 [Storage policy](docs/storage.md), [safe preview](docs/preview.md),
 [limitations](docs/limitations.md) and [release checks](docs/testing/release-checklist.md)
 explain the boundaries. Application data and its signing secret stay outside the
-wiki. Startup never creates or repairs a missing wiki.
+wiki. Storage readiness uses an owner-approved root `.backstory-marker` file;
+its contents are never read or hashed, and it is excluded from wiki content.
+Startup never creates or repairs a missing wiki or marker. Older installations
+should follow the [marker migration steps](docs/setup.md#migrate-from-a-visible-marker-and-hash).
 
 The [design](docs/superpowers/specs/2026-10-25-backstory-design.md) and
 [ordered implementation plan](docs/superpowers/plans/2026-10-25-backstory-implementation.md)

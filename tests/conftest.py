@@ -11,8 +11,7 @@ _wiki.mkdir()
 os.environ.update(
     BACKSTORY_WIKI_ROOT=str(_wiki),
     BACKSTORY_DATA_DIR=str(_runtime / "data"),
-    BACKSTORY_IDENTITY_PATH="Storage identity.txt",
-    BACKSTORY_IDENTITY_SHA256="0" * 64,
+    BACKSTORY_IDENTITY_PATH=".backstory-marker",
     BACKSTORY_COOKIE_MODE="localhost",
     BACKSTORY_ALLOWED_HOSTS="localhost,127.0.0.1,testserver",
 )

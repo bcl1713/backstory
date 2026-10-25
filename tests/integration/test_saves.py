@@ -111,7 +111,7 @@ def test_uncertain_replace_rereads_disk(reader, wiki, monkeypatch):
     assert response.status_code == 200
     assert response.json()["revision"] == revision(b"# Saved\n")
     assert target.read_bytes() == b"# Saved\n"
-    assert not list(wiki.glob(".backstory-*"))
+    assert not list(wiki.glob(".backstory-tmp-*"))
 
 
 def test_http_guards_and_identity_are_immutable(reader, wiki, settings):
@@ -123,10 +123,10 @@ def test_http_guards_and_identity_are_immutable(reader, wiki, settings):
     assert strict.post("/save/note.md", data='{"source":"draft"}', content_type="application/json", HTTP_IF_MATCH=revision(b"original")).status_code == 403
     assert Client().post("/save/note.md").status_code == 302
     assert save(reader, "draft", revision(b"original"), path="AGENTS.md").status_code == 404
-    assert save(reader, "draft", revision((wiki / "Identity.txt").read_bytes()), path="Identity.txt").status_code == 404
+    assert save(reader, "draft", revision((wiki / ".backstory-marker").read_bytes()), path=".backstory-marker").status_code == 404
     settings.BACKSTORY_NOTE_MAX_BYTES = 8
     assert save(reader, "a" * 9, revision(b"original")).status_code == 413
-    (wiki / "Identity.txt").unlink()
+    (wiki / ".backstory-marker").unlink()
     assert save(reader, "draft", revision(b"original")).status_code == 503
     assert target.read_bytes() == b"original"
 
@@ -179,7 +179,7 @@ def test_backups_capture_exact_original_and_submitted_and_mode(reader, wiki):
     assert bytes(backup.submitted) == b"# Draft\r\n"
     assert target.stat().st_mode & 0o777 == 0o640
     assert target.read_bytes().startswith(b"\xef\xbb\xbf")
-    assert not list(wiki.glob(".backstory-*"))
+    assert not list(wiki.glob(".backstory-tmp-*"))
 
 
 def test_create_publication_collision_during_link_never_overwrites(reader, wiki, monkeypatch):
@@ -191,7 +191,7 @@ def test_create_publication_collision_during_link_never_overwrites(reader, wiki,
     response = save(reader, "# New\n", create=True)
     assert response.status_code == 412
     assert (wiki / "note.md").read_bytes() == b"external winner"
-    assert not list(wiki.glob(".backstory-*"))
+    assert not list(wiki.glob(".backstory-tmp-*"))
 
 
 def test_create_hardlink_unsupported_refuses_with_actionable_reason(reader, wiki, monkeypatch):
@@ -229,12 +229,12 @@ def test_final_readiness_after_staging_cannot_be_bypassed(reader, wiki, monkeypa
     original_store = backend().store_required_backup
     def lose_mount(*args):
         original_store(*args)
-        (wiki / "Identity.txt").unlink()
+        (wiki / ".backstory-marker").unlink()
     monkeypatch.setattr(backend(), "store_required_backup", lose_mount)
     response = save(reader, "# Saved\n", revision(b"# Original\n"))
     assert response.status_code == 503
     assert target.read_bytes() == b"# Original\n"
-    assert not list(wiki.glob(".backstory-*"))
+    assert not list(wiki.glob(".backstory-tmp-*"))
 
 
 def test_recovery_actor_expiry_and_guards(reader, wiki, django_user_model, settings):
@@ -281,7 +281,7 @@ def test_source_recovery_rechecks_size_path_and_readiness(reader, wiki, settings
     assert save(reader, draft, revision(b"original"), mode="source_recovery", token=token).status_code == 413
     settings.BACKSTORY_NOTE_MAX_BYTES = 2000
     assert save(reader, draft, revision(b"original"), path=".hidden.md", mode="source_recovery", token=token).status_code == 404
-    (wiki / "Identity.txt").unlink()
+    (wiki / ".backstory-marker").unlink()
     assert save(reader, draft, revision(b"original"), mode="source_recovery", token=token).status_code == 503
     assert target.read_bytes() == b"original"
 

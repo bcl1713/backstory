@@ -20,7 +20,6 @@ class FixtureManifest:
     config_path: Path
     manifest_path: Path
     identity_path: str
-    identity_sha256: str
 
 
 def _note_source(number: int, case: int | None = None) -> bytes:
@@ -138,10 +137,10 @@ def generate_fixture(destination: Path, profile: Literal["small", "representativ
             os.close(fd)
     wiki = destination / "wiki"
     wiki.mkdir()
-    identity_path = "Home.md"
+    identity_path = ".backstory-marker"
     identity = b"# Home\n\nBackstory disposable synthetic storage, version 1.\n"
-    (wiki / identity_path).write_bytes(identity)
-    digest = hashlib.sha256(identity).hexdigest()
+    (wiki / "Home.md").write_bytes(identity)
+    (wiki / identity_path).touch()
     directories = ["notes", "projects/active", "projects/archive", "reference", "templates", "daily/2026"]
     counts = [300, 150, 100, 100, 50, 299] if profile == "representative" else [3, 2, 1, 2, 1, 2]
     (wiki / "attachments").mkdir()
@@ -164,7 +163,7 @@ def generate_fixture(destination: Path, profile: Literal["small", "representativ
     config = destination / "fixture.env"
     values = {
         "BACKSTORY_WIKI_ROOT": str(wiki), "BACKSTORY_DATA_DIR": str(destination / "data"),
-        "BACKSTORY_IDENTITY_PATH": identity_path, "BACKSTORY_IDENTITY_SHA256": digest,
+        "BACKSTORY_IDENTITY_PATH": identity_path,
         "BACKSTORY_COOKIE_MODE": "localhost", "BACKSTORY_ALLOWED_HOSTS": "localhost,127.0.0.1,[::1]",
     }
     config.write_text("".join(f"{key}={shlex.quote(value)}\n" for key, value in values.items()))
@@ -177,7 +176,7 @@ def generate_fixture(destination: Path, profile: Literal["small", "representativ
                           "sha256": hashlib.sha256(raw).hexdigest()})
     manifest_path.write_text(json.dumps({
         "profile": profile, "note_count": count, "daily_count": counts[-1],
-        "identity_path": identity_path, "identity_sha256": digest,
+        "identity_path": identity_path,
         "folder_counts": dict(zip(directories, counts)), "files": files, **values,
     }, indent=2) + "\n", encoding="utf-8")
     if for_containers:
@@ -190,7 +189,7 @@ def generate_fixture(destination: Path, profile: Literal["small", "representativ
         # The private outer directory stays 0700; only wiki is bind-mounted.
         # Never apply this operation to an existing destination or application data.
         _publish_container_wiki(wiki)
-    return FixtureManifest(wiki, destination / "data", config, manifest_path, identity_path, digest)
+    return FixtureManifest(wiki, destination / "data", config, manifest_path, identity_path)
 
 
 def main():

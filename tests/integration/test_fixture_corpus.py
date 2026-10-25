@@ -44,8 +44,8 @@ def test_manifest_records_reproducible_owned_files_outside_wiki(tmp_path):
         raw = file.read_bytes()
         assert records[path]["bytes"] == len(raw)
         assert records[path]["sha256"] == hashlib.sha256(raw).hexdigest()
-    assert manifest["identity_path"] == first.identity_path == "Home.md"
-    assert records["Home.md"]["sha256"] == first.identity_sha256
+    assert manifest["identity_path"] == first.identity_path == ".backstory-marker"
+    assert records[".backstory-marker"]["bytes"] == 0
 
 
 def test_corpus_contains_source_and_metadata_preservation_cases(tmp_path):
@@ -82,7 +82,7 @@ def test_small_profile_keeps_twelve_notes_and_stable_identity(tmp_path):
     note = fixture.wiki_root / "notes/Note 0000.md"
     note.write_bytes(note.read_bytes() + b"\nAn explicit synthetic edit.\n")
     assert (fixture.wiki_root / "Home.md").read_bytes() == original
-    assert hashlib.sha256(original).hexdigest() == fixture.identity_sha256
+    assert (fixture.wiki_root / fixture.identity_path).read_bytes() == b""
 
 
 @pytest.mark.parametrize("kind", ["empty", "nonempty", "file", "symlink", "dangling"])
@@ -126,7 +126,7 @@ def test_container_permissions_are_explicit_exact_and_keep_wrapper_private(tmp_p
     assert published["files"] == baseline["files"]
     assert published["note_count"] == 1000
     assert published["daily_count"] == 299
-    assert fixture.identity_sha256 == ordinary.identity_sha256
+    assert fixture.identity_path == ordinary.identity_path
 
 
 def test_container_cli_flag_generates_new_public_synthetic_wiki(tmp_path):

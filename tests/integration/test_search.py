@@ -92,7 +92,7 @@ def test_search_honest_partial_unavailable_and_escaped_html(wiki, reader):
     assert response.status_code == 200 and b'&lt;script&gt;' in response.content
     assert b'<script>' not in response.content
     assert b'&amp;' in response.content
-    (wiki / 'Identity.txt').unlink()
+    (wiki / '.backstory-marker').unlink()
     unavailable = s.search_notes('common')
     assert unavailable.items == () and unavailable.freshness.state == 'unavailable'
 

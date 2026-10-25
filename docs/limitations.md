@@ -5,9 +5,10 @@ indexing do not rewrite them. Existing BOMs survive edits, and explicit source
 recovery preserves the submitted newline sequence. Formatting is an explicit
 transformation governed by approved configuration; it does not serialize parsed
 front matter. New notes start without a BOM and use the editor's LF default.
-The administrator's configured storage identity file cannot be edited through
-Backstory. Revalidate that file outside the application after an intentional
-administrator change.
+The administrator's configured root marker (default `.backstory-marker`) is
+excluded from all wiki content, including editing and protected recovery. Its
+contents are never read or hashed; intentional changes do not affect readiness
+while it remains a readable regular file.
 
 Every changed save first stores exact original bytes and submitted UTF-8 source
 in the protected local application SQLite database. The default revision quota
@@ -44,8 +45,9 @@ the final hash-to-replace interval. Hostile local users able to replace the moun
 itself are outside the supported trust boundary.
 
 A successful local test does not establish TrueNAS/NFS durability, cache behavior,
-mount stability or visibility across clients. The read-only identity check is a
-readiness signal, not proof against a mount changing immediately afterward.
+mount stability or visibility across clients. The read-only marker check is a
+readiness signal. Presence does not prove write permissions, share health,
+filesystem authenticity or protection against a mount changing immediately afterward.
 Actual filesystem operations can fail after it succeeds. A hung NFS syscall may
 require mount/operator intervention; a request timeout cannot safely cancel it.
 When publication has an uncertain acknowledgement, Backstory re-reads disk and
@@ -61,7 +63,7 @@ Explicit **Store protected draft** saves only the current draft, its original
 base source/revision, encoding metadata and diagnostics in application SQLite.
 It never writes the wiki or enables an automatic retry. Drafts are private to
 the account that stored them; **Protected drafts** remains available when wiki
-identity fails, including after a process restart. Recovery reads protected
+marker readiness fails, including after a process restart. Recovery reads protected
 bytes without opening the note's live path. Return of storage never refreshes
 that draft's base or saves it. Compare base/current/draft and explicitly accept
 the displayed current revision for manual merging before saving again.

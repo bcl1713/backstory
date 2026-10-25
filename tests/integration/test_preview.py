@@ -46,7 +46,7 @@ def test_preview_rejects_bad_json_oversize_exclusions_and_unavailable_storage(re
     settings.BACKSTORY_NOTE_MAX_BYTES = 8
     assert reader.post("/preview/note.md", data=json.dumps({"source": "synthetic too large"}), content_type="application/json").status_code == 413
     assert reader.get("/preview/AGENTS.md").status_code == 404
-    (wiki / "Identity.txt").unlink()
+    (wiki / ".backstory-marker").unlink()
     assert reader.post("/preview/note.md", data='{"source":"draft"}', content_type="application/json").status_code == 503
 
 

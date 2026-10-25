@@ -325,5 +325,5 @@ def test_format_http_validates_size_json_and_readiness(reader, wiki, settings):
         assert reader.post("/format/note.md", data=body, content_type="application/json").status_code == 400
     settings.BACKSTORY_NOTE_MAX_BYTES = 8
     assert reader.post("/format/note.md", data=json.dumps({"source":"long synthetic"}), content_type="application/json").status_code == 413
-    (wiki / "Identity.txt").unlink()
+    (wiki / ".backstory-marker").unlink()
     assert reader.post("/format/note.md", data='{"source":"draft"}', content_type="application/json").status_code == 503

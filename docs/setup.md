@@ -46,31 +46,55 @@ configuration. Run the commands below from that same checkout.
 
 ## 2B. Start with an existing wiki
 
-### Verify the source and stable identity
+### Verify the source and reserve the storage marker
 
 Take a backup or snapshot including assets. Prefer a rehearsal copy first.
-Verify the intended mount and source directory before recording its identity.
+Verify the intended mount and source directory before selecting its marker.
 Backstory never creates a missing wiki or repairs its permissions.
 
-Choose an approved existing stable non-secret regular file in the wiki, at most
-64 KiB, with a relative non-hidden path and no symlink components. It must pass
-[storage policy](storage.md): authentication files, keys, configuration and agent
-rules cannot be identities. Backstory refuses to edit the chosen identity.
-`identity.txt` is suitable when deliberately reserved for that purpose; `Home.md`
-is unsuitable if an editor will change it. If no suitable identity exists,
-creating one is a separate deliberate enrollment decision outside Backstory.
+Reserve a dedicated non-secret regular file in the wiki root, normally
+`.backstory-marker` (the default `BACKSTORY_IDENTITY_PATH`). If it does not exist,
+its creation is a deliberate owner-approved enrollment step, outside Backstory.
+Use an empty file readable by the application user. Do not select authentication,
+keys, formatter config, agent rules or transient files. Root filenames only are
+supported; symlinks, directories and special files fail readiness.
 
-Only after verifying the storage and approving that particular file, hash it
-read-only. For example, if `identity.txt` is the approved file:
+Readiness checks open and `fstat` the file without reading or hashing its
+contents. The marker is excluded from every wiki content and recovery route,
+list/search, link resolution and editing, even when directly addressed. A custom
+root filename is supported for existing installations, but a dedicated dotfile
+keeps administrative metadata out of ordinary external editors too.
 
-```sh
-sha256sum -- /absolute/path/to/testwiki/identity.txt
-```
+Presence is not proof of write permissions, share health or a uniquely
+authenticated filesystem. Verify the actual mount independently, retain the
+read-only rehearsal, and handle real read/write failures. Never add a marker to
+whatever empty mountpoint happens to be visible just to turn readiness green.
 
-An empty regular identity file is accepted by the current policy. Its hash cannot
-distinguish two empty files, so independently verifying the intended mount is
-especially necessary. Never use an authentication file as the identity or reset
-the hash merely to make readiness green.
+### Migrate from a visible marker and hash
+
+1. Keep a backup and protected drafts. Confirm the intended mounted wiki with
+   the owner before changing any live file. This software update creates,
+   deletes and modifies no marker.
+2. With owner approval, reserve `.backstory-marker` in that verified wiki root
+   (or an explicitly chosen dedicated root dotfile), readable by the app user.
+   Contents are irrelevant; an empty regular file is sufficient.
+3. Set `BACKSTORY_IDENTITY_PATH=.backstory-marker` outside the wiki and remove
+   `BACKSTORY_IDENTITY_SHA256` from deployment configuration. It is no longer
+   consumed. Recreate the app/worker with the updated configuration.
+4. Keep the former visible marker path in `BACKSTORY_EXCLUSIONS` while it remains
+   administrative metadata. The owner can separately approve moving/deleting it
+   or deliberately returning it to ordinary note use. The app never does this.
+   The worker removes indexed entries for the currently configured marker;
+   ordinary exclusion reconciliation handles the old path when storage is ready.
+5. Check for `ready: marker_present`, verify the marker cannot be listed,
+   searched or opened, and explicitly resume edits against fresh disk revisions.
+   A missing/unreadable marker keeps drafts and the useful index but disables
+   writes and destructive reconciliation. Returning storage never replays saves.
+
+For a temporary transition, an existing configured visible root marker still
+passes on presence alone and is now excluded from content; its bytes may change
+without disabling storage. Changing the configured marker or live wiki still
+requires the owner's deliberate decision.
 
 ### Match the owner and create fresh private application data
 
@@ -123,8 +147,8 @@ existing file so it cannot overwrite another installation's configuration:
 (umask 077; set -C; cat .env.example > .env)
 ```
 
-Edit `.env`, replacing paths and hash with the approved values. Host paths must
-be absolute, with no `~`; single quotes allow spaces. This is dotenv data, not a
+Edit `.env`, replacing paths and marker filename with the approved values. Host
+paths must be absolute, with no `~`; single quotes allow spaces. This is dotenv data, not a
 shell script: do not `source` or `eval` it.
 
 ```dotenv
@@ -135,8 +159,7 @@ BACKSTORY_UID=1000
 BACKSTORY_GID=1000
 BACKSTORY_WIKI_ROOT='/absolute/path/to/testwiki'
 BACKSTORY_DATA_HOST_PATH='/home/YOUR_USER/backstory-wikitest-data'
-BACKSTORY_IDENTITY_PATH=identity.txt
-BACKSTORY_IDENTITY_SHA256=REPLACE_WITH_APPROVED_64_CHARACTER_SHA256
+BACKSTORY_IDENTITY_PATH=.backstory-marker
 BACKSTORY_WIKI_READ_ONLY=true
 BACKSTORY_BIND_ADDRESS=127.0.0.1
 BACKSTORY_PORT=8000
@@ -191,9 +214,9 @@ There are no per-note or per-folder account permissions, so select the source an
 exclusions deliberately. Keep private authentication files mode `600`; never put
 their contents into this configuration or terminal commands.
 
-Expect the selected UID/GID and the actual text `ready: identity_verified`.
+Expect the selected UID/GID and the actual text `ready: marker_present`.
 `storage_status` can exit zero while reporting unavailable; read the text.
-Readiness proves a readable identity, not permission to save. Sign in locally,
+Readiness checks readable marker presence, not permission to save. Sign in locally,
 browse notes and assets, and wait for the automatic background index to fill search.
 Opening a note reads current disk without waiting for indexing.
 
@@ -215,7 +238,7 @@ docker compose exec web python manage.py storage_status
 
 This preserves accounts, sessions, secret and history. It changes the wiki mount
 mode; it does not change host permissions. Test a disposable ordinary note, never
-the identity. Existing-note replacement preserves basic mode bits but makes a
+the marker. Existing-note replacement preserves basic mode bits but makes a
 new inode owned by the app's effective host user; matching UID `1000` retains that
 owner in this rootful example. New notes are `600`, readable by that same host
 owner. Ownership, ACLs, xattrs and hard-link relationships are not copied; review
@@ -239,8 +262,8 @@ Append `COMPOSE_PROJECT_NAME=backstory-demo-first` to that new `.env`, then use 
 build/account/start commands above. Leave `COMPOSE_FILE`, UID/GID and host-data
 path unset: the base `compose.yaml` keeps the named volume and user `10001:10001`.
 Its native fixture `BACKSTORY_DATA_DIR` is intentionally ignored by Compose.
-Keep the generated `Home.md` identity unchanged. Use a different `BACKSTORY_PORT`
-or stop the other installation before starting another demo.
+Keep the generated `.backstory-marker` present; `Home.md` is an ordinary note.
+Use a different `BACKSTORY_PORT` or stop the other installation before starting another demo.
 
 ## Portainer on a Docker Standalone endpoint
 
@@ -338,14 +361,14 @@ restores in disposable storage. Recovery retention is 30 days; quota defaults to
 ## Troubleshooting
 
 Preserve a draft before refreshing. Diagnose the intended storage instead of
-resetting its expected identity.
+enrolling an unverified marker.
 
 | Symptom | What to check |
 | --- | --- |
 | Missing-bind error before startup | Both absolute host directories must already exist on the Docker endpoint; no automatic replacement directory is created. |
 | Application-data permission error with UID 1000 | Confirm the host-data overlay is selected, the fresh data directory is owned by the mapped user, and a previous UID10001 named volume is not being reused. |
 | Ready but Save returns `wiki_write_denied` / HTTP 503 | Check `BACKSTORY_WIKI_READ_ONLY`, actual UID mapping and write/traversal access on the note's parent directory. File write bits alone are insufficient for atomic replacement. |
-| `identity_missing`, `identity_mismatch`, `root_missing`, `identity_unreadable` | Verify the intended source, mount and approved identity path/hash. Restore expected storage rather than enrolling whatever is visible. |
+| `marker_missing`, `root_missing`, `marker_unreadable` | Verify the intended source, mount and approved marker filename. Restore expected storage rather than enrolling whatever is visible. |
 | Wrong wiki or apparently new accounts/history | Inspect resolved `.env`, exported overrides, exact project/stack name and application-data path. Keep existing data; reconnect the intended configuration. |
 | `staging_cleanup_required` after read-only Save | Preserve the draft and stop retrying. Deliberate writable recreation performs guarded cleanup once storage is ready; compare the current note before saving again. |
 | Search is incomplete | Check index progress in Storage status. Refresh index queues maintenance; Rebuild creates a new projection while retaining the previous usable generation. |

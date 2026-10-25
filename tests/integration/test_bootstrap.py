@@ -33,7 +33,7 @@ def test_fixture_manifest_is_outside_wiki(tmp_path):
     assert fixture.wiki_root.is_dir()
     for directory in ["notes", "projects/active", "projects/archive", "reference", "templates", "daily/2026", "attachments"]:
         assert (fixture.wiki_root / directory).is_dir()
-    assert fixture.identity_path == "Home.md"
+    assert fixture.identity_path == ".backstory-marker"
     assert fixture.config_path.is_file()
     assert not fixture.config_path.is_relative_to(fixture.wiki_root)
     manifest = json.loads(fixture.manifest_path.read_text())

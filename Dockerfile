@@ -26,8 +26,6 @@ COPY . .
 COPY --from=assets /app/static ./static
 RUN ldconfig && BACKSTORY_WIKI_ROOT=/tmp/backstory-build/wiki \
     BACKSTORY_DATA_DIR=/tmp/backstory-build/data \
-    BACKSTORY_IDENTITY_PATH=identity.txt \
-    BACKSTORY_IDENTITY_SHA256=0000000000000000000000000000000000000000000000000000000000000000 \
     BACKSTORY_ALLOWED_HOSTS=localhost \
     python manage.py collectstatic --noinput \
     && rm -rf /tmp/backstory-build \

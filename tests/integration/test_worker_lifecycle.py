@@ -48,13 +48,12 @@ def test_supervisor_sigterm_stops_children(tmp_path):
 
 
 def test_real_process_restart_resumes_full_representative_corpus(tmp_path):
-    import hashlib
     import sqlite3
     from tests.fixtures.generate import generate_fixture
     fixture = generate_fixture(tmp_path / 'process-corpus', 'representative')
     env = {**os.environ, 'DJANGO_SETTINGS_MODULE': 'backstory.settings',
            'BACKSTORY_WIKI_ROOT': str(fixture.wiki_root), 'BACKSTORY_DATA_DIR': str(fixture.data_dir),
-           'BACKSTORY_IDENTITY_PATH': fixture.identity_path, 'BACKSTORY_IDENTITY_SHA256': fixture.identity_sha256,
+           'BACKSTORY_IDENTITY_PATH': fixture.identity_path,
            'BACKSTORY_COOKIE_MODE': 'localhost', 'BACKSTORY_ALLOWED_HOSTS': 'localhost'}
     subprocess.run([sys.executable, 'manage.py', 'migrate', '--noinput'], env=env, capture_output=True, check=True, timeout=30)
     first = 'import django,os; django.setup(); from indexing.worker import run_batch; from indexing.schema import enable_wal; enable_wal(); [run_batch(now=10000000000+n) for n in range(3)]; os._exit(23)'

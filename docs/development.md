@@ -33,7 +33,8 @@ including 299 date-named dailies and a 699,000-byte `reference/Large.md`, plus
 inert generated PNG/PDF assets. Layout: Home 1, notes 300, projects/active 150,
 projects/archive 100, reference 100, templates 50, daily 299. Unknown/nested YAML,
 malformed YAML, links, tables, Unicode, BOM and mixed newlines are synthetic.
-Keep `Home.md` unchanged: it is this fixture's storage identity. Manifest and
+The fixture's `.backstory-marker` signals storage presence; `Home.md` remains an
+ordinary editable note. Manifest and
 configuration live outside the wiki. Generation refuses every existing target.
 
 For containers generate a **new** fixture with `--for-containers`; follow

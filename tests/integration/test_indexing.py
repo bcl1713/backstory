@@ -85,7 +85,7 @@ def test_failed_scan_keeps_generation(wiki):
     drain(w)
     original = IndexGeneration.objects.get(state='active').pk
     request_scan('rebuild')
-    (wiki / 'Identity.txt').unlink()
+    (wiki / '.backstory-marker').unlink()
     w.run_batch()
     assert IndexGeneration.objects.get(state='active').pk == original
     assert IndexedNote.objects.filter(generation_id=original, path='keep.md').exists()
@@ -190,7 +190,7 @@ def test_index_controls_require_authentication_and_csrf(wiki, reader):
     strict.cookies = reader.cookies
     assert strict.post('/index/schedule/', {'kind': 'rebuild'}).status_code == 403
     assert reader.post('/index/schedule/', {'kind': 'rebuild'}).status_code == 302
-    (wiki / 'Identity.txt').unlink()
+    (wiki / '.backstory-marker').unlink()
     assert reader.get('/status/').status_code == 200
     assert reader.get('/index/status/').json()['state'] == 'unavailable'
 
@@ -247,7 +247,7 @@ def test_final_identity_failure_blocks_candidate_promotion(wiki, monkeypatch):
     request_scan('rebuild')
     original = w._finish
     def uncertain(*args):
-        (wiki / 'Identity.txt').unlink()
+        (wiki / '.backstory-marker').unlink()
         return original(*args)
     monkeypatch.setattr(w, '_finish', uncertain)
     for n in range(10):

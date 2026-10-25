@@ -38,13 +38,12 @@ _source_errors = host_source_configuration_errors(BACKSTORY_STORAGE_SOURCE_MODE,
 if _source_errors:
     raise ImproperlyConfigured('Invalid BACKSTORY host storage sources: ' + ', '.join(_source_errors))
 
-BACKSTORY_IDENTITY_PATH = required("BACKSTORY_IDENTITY_PATH")
-BACKSTORY_IDENTITY_SHA256 = required("BACKSTORY_IDENTITY_SHA256").lower()
-if len(BACKSTORY_IDENTITY_SHA256) != 64 or any(c not in "0123456789abcdef" for c in BACKSTORY_IDENTITY_SHA256):
-    raise ImproperlyConfigured("BACKSTORY_IDENTITY_SHA256 must be a SHA-256 hex digest")
-_identity = Path(BACKSTORY_IDENTITY_PATH)
-if _identity.is_absolute() or ".." in _identity.parts or not _identity.parts:
-    raise ImproperlyConfigured("BACKSTORY_IDENTITY_PATH must be a wiki-relative file path")
+# Administrative root marker: contents and legacy SHA-256 configuration are unused.
+BACKSTORY_IDENTITY_PATH = os.environ.get("BACKSTORY_IDENTITY_PATH", ".backstory-marker")
+if (not BACKSTORY_IDENTITY_PATH or "/" in BACKSTORY_IDENTITY_PATH
+        or "\\" in BACKSTORY_IDENTITY_PATH or BACKSTORY_IDENTITY_PATH in {".", ".."}
+        or any(ord(c) < 32 or ord(c) == 127 for c in BACKSTORY_IDENTITY_PATH)):
+    raise ImproperlyConfigured("BACKSTORY_IDENTITY_PATH must be a filename in the wiki root")
 
 BACKSTORY_COOKIE_MODE = os.environ.get("BACKSTORY_COOKIE_MODE", "https")
 if BACKSTORY_COOKIE_MODE not in {"https", "localhost"}:
@@ -152,14 +151,13 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {"default": {"BACKEND": "django.core.files.storage.FileSystemStorage"}, "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"}}
 
-# Content and identity reads are bounded independently; exclusions only add denies.
+# Content reads are bounded; exclusions only add denies.
 BACKSTORY_NOTE_MAX_BYTES = 2 * 1024 * 1024
 BACKSTORY_ATTACHMENT_MAX_BYTES = 64 * 1024 * 1024
 BACKSTORY_ATTACHMENT_RANGE_MAX_BYTES = 8 * 1024 * 1024
 # JSON can escape each source byte as six ASCII bytes; both source and transport
 # remain bounded. Preview also enforces the decoded UTF-8 note limit.
 DATA_UPLOAD_MAX_MEMORY_SIZE = BACKSTORY_NOTE_MAX_BYTES * 6 + 1024
-BACKSTORY_IDENTITY_MAX_BYTES = 64 * 1024
 BACKSTORY_EXCLUSIONS = tuple(filter(None, (item.strip() for item in os.environ.get("BACKSTORY_EXCLUSIONS", "").split(","))))
 
 # Background maintenance defaults; requests never start scans.

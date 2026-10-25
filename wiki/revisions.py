@@ -114,7 +114,7 @@ def recovery_path(path):
     from .readiness import check_readiness
     from .contracts import PathDenied
     validate_path(path, 'content')
-    if path == settings.BACKSTORY_IDENTITY_PATH or not path.lower().endswith('.md'):
+    if not path.lower().endswith('.md'):
         raise PathDenied()
     if check_readiness().state != 'ready':
         return path

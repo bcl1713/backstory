@@ -130,10 +130,10 @@ interactive terminal workflow, and verify login, note open/save, CSRF rejection,
 Secure cookies, restart persistence and unavailable-storage behavior using a
 rehearsal installation. Check that an untrusted origin connection is refused,
 including forged forwarding headers. Confirm actual network controls separately.
-Use disposable notes; leave the identity and private auth files untouched.
+Use disposable notes; leave the marker and private auth files untouched.
 
 The peer/header guard also covers `/health/`. Probe it through the actual TLS
 proxy and canonical hostname. An origin-side diagnostic is accepted only from an
 explicitly trusted peer with the canonical `Host` and exact `X-Forwarded-Proto:
 https`; it is not a health-route bypass. `/health/` proves process health only;
-authenticated Storage status reports identity readiness and indexing separately.
+authenticated Storage status reports marker readiness and indexing separately.

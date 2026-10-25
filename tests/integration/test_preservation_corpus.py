@@ -31,7 +31,6 @@ def test_generated_representative_samples_real_helper(tmp_path, settings, config
     settings.BACKSTORY_WIKI_ROOT = fixture.wiki_root
     settings.BACKSTORY_DATA_DIR = fixture.data_dir
     settings.BACKSTORY_IDENTITY_PATH = fixture.identity_path
-    settings.BACKSTORY_IDENTITY_SHA256 = fixture.identity_sha256
     if configured:
         (fixture.wiki_root / '.prettierrc').write_text('{"printWidth":96,"proseWrap":"always"}')
         (fixture.wiki_root / '.markdownlint-cli2.jsonc').write_text('{"config":{"MD013":false}}')

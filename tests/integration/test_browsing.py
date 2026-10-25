@@ -44,17 +44,17 @@ def test_literal_paths_browsing_and_source(reader, wiki):
 @pytest.mark.django_db
 def test_unavailable_storage_keeps_shell_status_and_login(reader, wiki):
     from django.core.management import call_command
-    (wiki / "Identity.txt").unlink()
+    (wiki / ".backstory-marker").unlink()
     for route in ["/", "/status/", "/accounts/login/"]:
         assert reader.get(route).status_code == 200
     response = reader.get("/source/note.md")
     assert response.status_code == 503
-    assert b"identity_missing" in response.content
+    assert b"marker_missing" in response.content
     assert str(wiki).encode() not in response.content
     assert b"Storage unavailable" in reader.get("/").content
     output = StringIO()
     call_command("storage_status", stdout=output)
-    assert "identity_missing" in output.getvalue()
+    assert "marker_missing" in output.getvalue()
     assert str(wiki) not in output.getvalue()
 
 

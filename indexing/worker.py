@@ -179,7 +179,22 @@ def _finish(state, generation, now):
     return True
 
 
+def _remove_marker_entries():
+    """Revoke administrative metadata only, independently of storage health.
+
+    This is a policy cleanup, never an inference that other notes disappeared.
+    Search/resolution already recheck policy while this maintenance is pending.
+    """
+    path = settings.BACKSTORY_IDENTITY_PATH
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute('DELETE FROM indexed_fts WHERE path=%s', [path])
+        IndexedNote.objects.filter(path=path).delete()
+        IndexJob.objects.filter(path=path).delete()
+
+
 def _run(now, progress):
+    _remove_marker_entries()
     state, _ = ScanState.objects.get_or_create(pk=1)
     if state.backoff_until > now:
         return BatchResult(pending=True, state='backoff')

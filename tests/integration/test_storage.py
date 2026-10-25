@@ -17,11 +17,10 @@ def module(name):
 def wiki(tmp_path, settings):
     root = tmp_path / "wiki"
     root.mkdir()
-    (root / "Identity.txt").write_bytes(b"synthetic storage identity\n")
+    (root / ".backstory-marker").write_bytes(b"synthetic storage identity\n")
     settings.BACKSTORY_WIKI_ROOT = root
     settings.BACKSTORY_DATA_DIR = tmp_path / "data"
-    settings.BACKSTORY_IDENTITY_PATH = "Identity.txt"
-    settings.BACKSTORY_IDENTITY_SHA256 = hashlib.sha256(b"synthetic storage identity\n").hexdigest()
+    settings.BACKSTORY_IDENTITY_PATH = ".backstory-marker"
     settings.BACKSTORY_EXCLUSIONS = []
     return root
 
@@ -31,8 +30,8 @@ def test_identity_is_not_directory_existence(wiki, settings):
     storage = module("wiki.storage")
     (wiki / "note.md").write_text("synthetic note")
     assert readiness.check_readiness().state == "ready"
-    (wiki / "Identity.txt").unlink()
-    assert readiness.check_readiness().reason_code == "identity_missing"
+    (wiki / ".backstory-marker").unlink()
+    assert readiness.check_readiness().reason_code == "marker_missing"
     with pytest.raises(storage.StorageUnavailable):
         storage.read_note("note.md")
     wiki.rename(wiki.with_name("original"))
@@ -43,23 +42,16 @@ def test_identity_is_not_directory_existence(wiki, settings):
     assert not wiki.exists()
 
 
-def test_identity_hash_and_size_cap(wiki, settings, monkeypatch):
+def test_marker_unreadable_is_unavailable(wiki, monkeypatch):
     readiness = module("wiki.readiness")
-    (wiki / "Identity.txt").write_bytes(b"wrong")
-    assert readiness.check_readiness().reason_code == "identity_mismatch"
-    settings.BACKSTORY_IDENTITY_MAX_BYTES = 8
-    (wiki / "Identity.txt").write_bytes(b"x" * 9)
-    settings.BACKSTORY_IDENTITY_SHA256 = hashlib.sha256(b"x" * 9).hexdigest()
-    assert readiness.check_readiness().reason_code == "identity_too_large"
-    # Simulate EACCES even when tests run as root; real OS open is otherwise used.
     original = os.open
-    def deny_identity(path, *args, **kwargs):
-        if path == "Identity.txt":
-            raise PermissionError("synthetic inaccessible identity")
+    def deny_marker(path, *args, **kwargs):
+        if path == ".backstory-marker":
+            raise PermissionError("synthetic inaccessible marker")
         return original(path, *args, **kwargs)
-    monkeypatch.setattr(os, "open", deny_identity)
+    monkeypatch.setattr(os, "open", deny_marker)
     result = readiness.check_readiness()
-    assert result.reason_code == "identity_unreadable"
+    assert result.reason_code == "marker_unreadable"
     assert str(wiki) not in str(result)
 
 

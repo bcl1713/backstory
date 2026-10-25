@@ -1,5 +1,4 @@
 """Real synthetic filesystem checks for bounded authenticated attachment streams."""
-import hashlib
 import importlib
 import os
 from types import SimpleNamespace
@@ -21,12 +20,11 @@ def attachment_wiki(tmp_path, settings):
     root = tmp_path / "wiki"
     root.mkdir()
     identity = b"synthetic attachment storage identity\n"
-    (root / "Home.md").write_bytes(identity)
+    (root / ".backstory-marker").write_bytes(identity)
     (root / "attachments").mkdir()
     settings.BACKSTORY_WIKI_ROOT = root
     settings.BACKSTORY_DATA_DIR = tmp_path / "data"
-    settings.BACKSTORY_IDENTITY_PATH = "Home.md"
-    settings.BACKSTORY_IDENTITY_SHA256 = hashlib.sha256(identity).hexdigest()
+    settings.BACKSTORY_IDENTITY_PATH = ".backstory-marker"
     settings.BACKSTORY_EXCLUSIONS = []
     return root
 
@@ -73,7 +71,7 @@ def test_attachment_types_and_download_boundary(attachment_wiki, name, mime, inl
 
 
 def test_attachment_requires_auth_before_storage_access(attachment_wiki):
-    (attachment_wiki / "Home.md").unlink()
+    (attachment_wiki / ".backstory-marker").unlink()
     with pytest.raises(PermissionDenied):
         delivery().serve_attachment(request(authenticated=False), "attachments/missing.png")
     disabled = request()
@@ -92,11 +90,11 @@ def test_attachment_reuses_sensitive_path_policy(attachment_wiki, path):
 
 def test_attachment_fails_when_storage_identity_is_missing(attachment_wiki):
     (attachment_wiki / "attachments/sample.png").write_bytes(b"inert")
-    (attachment_wiki / "Home.md").unlink()
+    (attachment_wiki / ".backstory-marker").unlink()
     with pytest.raises(StorageError) as error:
         delivery().serve_attachment(request(), "attachments/sample.png")
     assert error.value.status == 503
-    assert error.value.reason_code == "identity_missing"
+    assert error.value.reason_code == "marker_missing"
 
 
 @pytest.mark.parametrize("kind", ["file_link", "parent_link", "directory", "fifo"])

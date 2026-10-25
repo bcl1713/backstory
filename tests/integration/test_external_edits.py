@@ -86,7 +86,7 @@ def test_two_application_processes_one_winner(wiki, settings, tmp_path, creating
     target = wiki / 'note.md'
     if not creating: target.write_bytes(b'# Original\n')
     base = None if creating else revision(b'# Original\n')
-    env = dict(os.environ, DJANGO_SETTINGS_MODULE='backstory.settings', BACKSTORY_WIKI_ROOT=str(wiki), BACKSTORY_DATA_DIR=str(data), BACKSTORY_IDENTITY_PATH=settings.BACKSTORY_IDENTITY_PATH, BACKSTORY_IDENTITY_SHA256=settings.BACKSTORY_IDENTITY_SHA256)
+    env = dict(os.environ, DJANGO_SETTINGS_MODULE='backstory.settings', BACKSTORY_WIKI_ROOT=str(wiki), BACKSTORY_DATA_DIR=str(data), BACKSTORY_IDENTITY_PATH=settings.BACKSTORY_IDENTITY_PATH)
     script = '''import django; django.setup()
 from django.conf import settings
 settings.DATABASES['default']['NAME'] = __import__('sys').argv[1]
@@ -127,7 +127,7 @@ def test_process_interruption_preserves_authoritative_bytes_and_recovery(wiki, s
     db=data/'crash.sqlite3'
     destination=sqlite3.connect(db); connection.ensure_connection(); connection.connection.backup(destination); destination.close()
     target=wiki/'note.md'; target.write_bytes(b'# Original\n')
-    env=dict(os.environ,DJANGO_SETTINGS_MODULE='backstory.settings',BACKSTORY_WIKI_ROOT=str(wiki),BACKSTORY_DATA_DIR=str(data),BACKSTORY_IDENTITY_PATH=settings.BACKSTORY_IDENTITY_PATH,BACKSTORY_IDENTITY_SHA256=settings.BACKSTORY_IDENTITY_SHA256)
+    env=dict(os.environ,DJANGO_SETTINGS_MODULE='backstory.settings',BACKSTORY_WIKI_ROOT=str(wiki),BACKSTORY_DATA_DIR=str(data),BACKSTORY_IDENTITY_PATH=settings.BACKSTORY_IDENTITY_PATH)
     script='''import django; django.setup()
 import sys,os,json
 from django.conf import settings

@@ -11,8 +11,7 @@ services:
       BACKSTORY_DATA_HOST_SOURCE: ${BACKSTORY_DATA_HOST_PATH:?Set an existing private host application-data directory}
       BACKSTORY_WIKI_ROOT: /wiki
       BACKSTORY_DATA_DIR: /var/lib/backstory
-      BACKSTORY_IDENTITY_PATH: ${BACKSTORY_IDENTITY_PATH:?Set the approved wiki-relative identity file}
-      BACKSTORY_IDENTITY_SHA256: ${BACKSTORY_IDENTITY_SHA256:?Set the approved identity SHA-256}
+      BACKSTORY_IDENTITY_PATH: ${BACKSTORY_IDENTITY_PATH:-.backstory-marker}
       BACKSTORY_COOKIE_MODE: https
       BACKSTORY_ALLOWED_HOSTS: ${BACKSTORY_ALLOWED_HOSTS:?Set the exact public hostname}
       BACKSTORY_PROXY_MODE: trusted

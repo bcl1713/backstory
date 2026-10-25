@@ -15,7 +15,7 @@ acceptance is tracked in the [release checklist](testing/release-checklist.md).
 
 ## Reuse an existing tunnel
 
-Prepare the [approved wiki, stable identity and fresh private app data](setup.md#2b-start-with-an-existing-wiki)
+Prepare the [approved wiki, storage marker and fresh private app data](setup.md#2b-start-with-an-existing-wiki)
 and select the matching non-root UID/GID. Keep your existing connector and its
 credential storage as they are; do not select `compose.cloudflare.yaml` or copy
 `cloudflare.env.example` for this path.
@@ -108,7 +108,8 @@ Separate installations need separate project names, data paths and subnets.
 ### Prepare private storage and configuration
 
 Complete the [storage and UID setup](setup.md#2b-start-with-an-existing-wiki)
-first, including read-only hashing of an approved stable non-secret identity.
+first, including an owner-approved regular root marker (default `.backstory-marker`).
+No identity hash is required; migrate older configuration using the setup guide.
 Create a **fresh**, mode-700 app-data directory outside the wiki and checkout,
 owned by the app's effective host user. The example uses rootful Docker without
 user-namespace remapping and a wiki owned by `1000:1000`; it requires no wiki
@@ -138,7 +139,7 @@ Create a new private `.env` from the tunnel example, refusing an existing file:
 (umask 077; set -C; cat cloudflare.env.example > .env)
 ```
 
-Edit every path, identity hash and public host/origin. `CLOUDFLARE_TUNNEL_TOKEN_FILE`
+Edit every path, marker filename and public host/origin. `CLOUDFLARE_TUNNEL_TOKEN_FILE`
 contains the **absolute host path only**. Use absolute paths without `~` and single
 quotes for spaces; dotenv is data, so do not source/eval it. Keep
 `COMPOSE_FILE=compose.cloudflare.yaml` for ordinary Compose commands. The example
@@ -174,7 +175,7 @@ docker compose run --rm --no-deps web python manage.py storage_status
 Use the hidden interactive prompts for separate named human and assistant accounts.
 Inspect config for correct paths, selected user, token **path only**, no host ports,
 private origin membership and exact trusted `/32`. Read the actual storage text:
-expect `ready: identity_verified`, not merely exit zero. No connector starts in
+expect `ready: marker_present`, not merely exit zero. No connector starts in
 these account commands. An image from an authorized registry is another option;
 no public Backstory registry image is promised. The selected endpoint must be
 able to obtain exactly the image tag in `.env`.
@@ -204,7 +205,7 @@ hostname; verify both `/health/` and the authenticated application through that
 boundary. Test login, Secure cookies, CSRF rejection, and note open/save on a
 disposable note. Rehearse with `BACKSTORY_WIKI_READ_ONLY=true` first; after backup
 and approval to enable writes, set it to `false` and run `docker compose up -d`.
-Keep the project name, identity and data path unchanged to retain accounts/history.
+Keep the project name, marker filename and data path unchanged to retain accounts/history.
 
 To stop just this managed connector, use `docker compose stop cloudflared`.
 Stopping or removing containers preserves the host wiki, data and token file.
@@ -243,4 +244,4 @@ Review the route and edge settings before the connector serves public requests.
 | Cloudflare reports unavailable origin | Verify `web` is running, the bundled route is exactly `http://web:8000`, both services join their origin network, and storage/account checks pass. For an existing connector use its verified reachable private origin instead. |
 | Backstory rejects a request | Verify actual final TCP peer, public Host and exact overwritten HTTPS scheme. Do not expand trust or disable the guard. |
 | All visitors share an IP throttle bucket | Expected with client-IP `none`; Backstory ignores Cloudflare/XFF client headers. |
-| Health succeeds but a save fails | Health is process-only. Check authenticated Storage status, read-only setting and note-parent permissions; never change the identity just to get ready. |
+| Health succeeds but a save fails | Health is process-only. Check authenticated Storage status, read-only setting and note-parent permissions; never enroll an unverified marker just to get ready. |

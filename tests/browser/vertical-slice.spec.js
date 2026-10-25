@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { readFile, writeFile, stat, readdir } from 'node:fs/promises';
+import { readFile, writeFile, stat, readdir, unlink } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { runtime } from './support/server.js';
@@ -34,8 +34,7 @@ async function mode(page, presentation) {
 async function expireSession(context) {
   const session = (await context.cookies()).find(cookie => cookie.name === 'sessionid');
   expect(session).toBeDefined();
-  const identity = await readFile(`${runtime}/wiki/Storage identity.txt`);
-  const env = { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings', BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`, BACKSTORY_IDENTITY_PATH: 'Storage identity.txt', BACKSTORY_IDENTITY_SHA256: createHash('sha256').update(identity).digest('hex'), BACKSTORY_COOKIE_MODE: 'localhost', BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' };
+  const env = { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings', BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`, BACKSTORY_IDENTITY_PATH: '.backstory-marker', BACKSTORY_COOKIE_MODE: 'localhost', BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' };
   // Expire the actual server-side device; retain CSRF and avoid cookie deletion
   // racing session-renewal responses from other requests already in flight.
   const program = "import django,json,sys; django.setup(); from datetime import timedelta; from django.utils.timezone import now; from accounts.models import SessionDevice; count=SessionDevice.objects.filter(session_key_digest=json.load(sys.stdin)['digest'],revoked_at=None).update(absolute_expires_at=now()-timedelta(seconds=1)); assert count==1";
@@ -93,10 +92,10 @@ for (const presentation of ['live', 'source']) {
     expect(await readFile(target)).toEqual(original);
     await expect(page.locator('[data-diagnostics]')).toContainText('error');
     const diagnostics = await page.locator('[data-diagnostics]').innerText();
-    const identityPath = `${runtime}/wiki/Storage identity.txt`;
+    const identityPath = `${runtime}/wiki/.backstory-marker`;
     const identity = await readFile(identityPath);
     try {
-      await writeFile(identityPath, 'wrong identity');
+      await unlink(identityPath);
       expect((await action(page, 'Save source without formatting')).status()).toBe(503);
       expect(await page.locator('[data-diagnostics]').innerText()).toBe(diagnostics);
     } finally { await writeFile(identityPath, identity); }
@@ -157,7 +156,7 @@ for (const presentation of ['live', 'source']) {
   });
 
   test(`${presentation}: storage identity loss retains draft and restoration never replays Save`, async ({ page }) => {
-    const identityPath = `${runtime}/wiki/Storage identity.txt`;
+    const identityPath = `${runtime}/wiki/.backstory-marker`;
     const identity = await readFile(identityPath);
     await login(page);
     await mode(page, presentation);
@@ -166,7 +165,7 @@ for (const presentation of ['live', 'source']) {
     const saves = [];
     page.on('request', request => { if (request.url().includes('/save/')) saves.push(request); });
     try {
-      await writeFile(identityPath, 'wrong identity');
+      await unlink(identityPath);
       expect((await action(page, 'Save')).status()).toBe(503);
       expect(await readSource(page)).toBe(draft);
       await expect(page.locator('[data-editor-status]')).toContainText('Draft retained');

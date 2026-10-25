@@ -34,14 +34,15 @@ def test_both_modes_deny_hostile_paths(reader, wiki, mode, path):
 
 
 @pytest.mark.parametrize('mode', ['formatted', 'source_recovery'])
-@pytest.mark.parametrize('failure', ['identity_missing','identity_mismatch','identity_unreadable','oversize','unwritable','quota','backup_io','fsync','replace','write'])
+@pytest.mark.parametrize('failure', ['marker_missing','marker_directory','marker_unreadable','oversize','unwritable','quota','backup_io','fsync','replace','write'])
 def test_both_modes_storage_failures_cannot_publish(reader, wiki, settings, monkeypatch, mode, failure):
     import wiki.saves as saves
     target=wiki/'note.md'; original=b'# Original\n'; target.write_bytes(original)
-    identity=wiki/'Identity.txt'; oldmode=wiki.stat().st_mode
-    if failure=='identity_missing': identity.unlink()
-    if failure=='identity_mismatch': identity.write_bytes(b'wrong')
-    if failure=='identity_unreadable': identity.chmod(0)
+    identity=wiki/'.backstory-marker'; oldmode=wiki.stat().st_mode
+    if failure=='marker_missing': identity.unlink()
+    if failure=='marker_directory':
+        identity.unlink(); identity.mkdir()
+    if failure=='marker_unreadable': identity.chmod(0)
     if failure=='oversize': settings.BACKSTORY_NOTE_MAX_BYTES=4
     if failure=='unwritable':
         assert os.geteuid() != 0

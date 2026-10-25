@@ -3,7 +3,7 @@ from wiki.readiness import check_readiness
 
 
 class Command(BaseCommand):
-    help = "Check storage identity without creating or modifying wiki files."
+    help = "Check storage marker presence without creating or modifying wiki files."
 
     def handle(self, *args, **options):
         readiness = check_readiness()

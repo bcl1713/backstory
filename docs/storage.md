@@ -3,13 +3,35 @@
 For the sequential Compose walkthrough, including an existing wiki rehearsal,
 see [initial setup](setup.md). This page explains the underlying storage policy.
 
-The administrator configures an existing non-secret wiki-relative identity file
-and its SHA-256 outside the wiki. Startup and every note/folder access read that
-regular file with a hard 64 KiB cap. Missing, unreadable, excluded, oversized or
-mismatching identity means unavailable storage. Backstory never creates the wiki,
-repairs identity configuration or enrolls an empty directory. Login and the
-signed-in shell/status remain available; `python manage.py storage_status`
-reports only state, reason code and check time.
+The administrator reserves a non-secret regular file in the wiki root. The
+configured filename is `BACKSTORY_IDENTITY_PATH`, default `.backstory-marker`.
+No `BACKSTORY_IDENTITY_SHA256` is required or used. Startup and readiness checks
+open the marker read-only, relative to a pinned root descriptor with
+`O_NOFOLLOW` and `O_NONBLOCK`, and check its regular-file type with `fstat`.
+Contents are never read or hashed, and there is no marker content-size limit.
+An empty file works. A missing or unreadable marker, directory, FIFO, socket,
+device or symlink means unavailable storage (`marker_missing`,
+`marker_unreadable` or `root_missing`). Only this exact root marker has the narrow
+hidden-name exception; it cannot select a formatter configuration, credential,
+sync file, agent rule or reserved transient file.
+
+The marker is administrative metadata. All content purposes deny it, including
+listings, indexing/search, links, previews, attachments, editing, formatting,
+create/save, history and draft recovery. Policy is reapplied to stale indexed
+hits and old recovery records. The worker removes matching index rows, FTS,
+names, edges and queued jobs across generations, including during an outage;
+it does not remove unrelated notes on an uncertain mount.
+
+Backstory never creates the wiki or marker, modifies marker contents, repairs
+configuration or enrolls an empty directory. Only the owner may deliberately
+create/move/remove a live marker after verifying the intended mount; see
+[migration](setup.md#migrate-from-a-visible-marker-and-hash). Login, status and
+protected drafts for ordinary notes remain available during storage loss.
+Keep the last useful index and drafts, withhold unavailable results, and refuse
+writes and destructive scan reconciliation until readiness returns. Restoring
+storage never replays a save: the user must compare revisions and save explicitly.
+`python manage.py storage_status` reports state, reason code and check time;
+`ready: marker_present` means the presence check passed.
 
 Wiki and application roots are canonicalized and must be disjoint. Files open
 relative to pinned directory descriptors with Linux `O_NOFOLLOW` on every wiki
@@ -45,7 +67,8 @@ independent web processes require sticky routing or a different shared cursor
 strategy. This does not remove the need for shared cross-process save locks.
 
 Authenticated responses use `Cache-Control: no-store`. Direct source reads never
-wait for parsing, formatting or indexing. Identity checks cannot eliminate a
+wait for parsing, formatting or indexing. Marker presence does not prove write permissions, share health or a uniquely
+authenticated filesystem. Checks cannot eliminate a
 mount changing afterward, NFS caching, uncoordinated external edits, or blocking
 filesystem calls. A hostile local actor who can replace the mount itself is
 outside the supported boundary. Real NFS behavior is not established by local

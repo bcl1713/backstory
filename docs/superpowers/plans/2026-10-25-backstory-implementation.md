@@ -1,5 +1,11 @@
 # Backstory Implementation Plan
 
+> Storage readiness update: [issue #4](https://github.com/bcl1713/backstory/issues/4)
+> supersedes this document's identity-file/hash requirements. The release branch
+> now uses a presence-only root `.backstory-marker`, excluded from wiki content.
+> See [current storage policy](../../storage.md) and
+> [migration guidance](../../setup.md#migrate-from-a-visible-marker-and-hash).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans or, if the owner explicitly chooses delegation, superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This document does not authorize execution.
 
 **Goal:** Deliver a local, self-hosted browser and source editor for an existing shared Markdown directory, preserving files while supporting named users and external editors.

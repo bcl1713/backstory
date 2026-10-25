@@ -23,8 +23,7 @@ def config(tmp_path, *, portainer=False, **overrides):
         'BACKSTORY_UID': '1000', 'BACKSTORY_GID': '1000',
         'BACKSTORY_WIKI_ROOT': str(tmp_path / 'wiki'),
         'BACKSTORY_DATA_HOST_PATH': str(tmp_path / 'private data'),
-        'BACKSTORY_IDENTITY_PATH': 'Storage identity.txt',
-        'BACKSTORY_IDENTITY_SHA256': 'a' * 64,
+        'BACKSTORY_IDENTITY_PATH': '.backstory-marker',
         'BACKSTORY_ALLOWED_HOSTS': 'wiki.example.test',
         'BACKSTORY_CSRF_TRUSTED_ORIGINS': 'https://wiki.example.test',
         'BACKSTORY_TUNNEL_SUBNET': '172.30.241.0/29',
@@ -90,7 +89,7 @@ def test_tunnel_mounts_preserve_storage_policy_and_keep_token_out_of_web(tmp_pat
         assert not mount.get('bind', {}).get('create_host_path', False)
     expected = {
         'BACKSTORY_WIKI_ROOT': '/wiki', 'BACKSTORY_DATA_DIR': '/var/lib/backstory',
-        'BACKSTORY_IDENTITY_PATH': 'Storage identity.txt', 'BACKSTORY_IDENTITY_SHA256': 'a' * 64,
+        'BACKSTORY_IDENTITY_PATH': '.backstory-marker',
         'BACKSTORY_EXCLUSIONS': 'private,work/*.md', 'BACKSTORY_REVISION_QUOTA_BYTES': '123456',
     }
     assert all(web['environment'][key] == value for key, value in expected.items())
@@ -112,7 +111,6 @@ def test_tunnel_mounts_preserve_storage_policy_and_keep_token_out_of_web(tmp_pat
 
 @pytest.mark.parametrize('key', [
     'BACKSTORY_IMAGE', 'BACKSTORY_WIKI_ROOT', 'BACKSTORY_DATA_HOST_PATH',
-    'BACKSTORY_IDENTITY_PATH', 'BACKSTORY_IDENTITY_SHA256',
     'BACKSTORY_ALLOWED_HOSTS', 'BACKSTORY_CSRF_TRUSTED_ORIGINS',
     'BACKSTORY_TUNNEL_SUBNET', 'BACKSTORY_TUNNEL_CONNECTOR_IP',
     'CLOUDFLARE_TUNNEL_TOKEN_FILE',
@@ -144,8 +142,6 @@ def test_example_dotenv_selects_tunnel_manifest_with_plain_compose(tmp_path):
         pytest.skip('Docker Compose unavailable; tunnel packaging gate remains open')
     shutil.copyfile(REPO / 'compose.cloudflare.yaml', tmp_path / 'compose.cloudflare.yaml')
     example = (REPO / 'cloudflare.env.example').read_text()
-    example = example.replace('BACKSTORY_IDENTITY_SHA256=\n',
-                              'BACKSTORY_IDENTITY_SHA256=' + 'b' * 64 + '\n')
     (tmp_path / '.env').write_text(example)
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(('BACKSTORY_', 'CLOUDFLARE_', 'COMPOSE_', 'TUNNEL_'))}
@@ -156,7 +152,7 @@ def test_example_dotenv_selects_tunnel_manifest_with_plain_compose(tmp_path):
     web, connector = (deployment['services'][name] for name in ['web', 'cloudflared'])
     assert web['image'] == 'backstory:local'
     assert web['user'] == connector['user'] == '1000:1000'
-    assert web['environment']['BACKSTORY_IDENTITY_SHA256'] == 'b' * 64
+    assert web['environment']['BACKSTORY_IDENTITY_PATH'] == '.backstory-marker'
     assert web['environment']['BACKSTORY_ALLOWED_HOSTS'] == 'wiki.example.test'
     assert next(m for m in web['volumes'] if m['target'] == '/wiki')['read_only'] is True
     assert connector['volumes'][0]['source'] == '/absolute/private/path/cloudflare-tunnel-token'

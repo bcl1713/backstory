@@ -6,15 +6,17 @@ The commands below are a synthetic-only operations and recovery walkthrough.
 Use this path only with newly generated disposable storage. Production storage,
 mount/permission changes, tunnels, public exposure and deployment require separate
 owner authorization. Backstory does not enroll whatever directory is visible.
-A real wiki needs an approved existing stable non-secret regular identity file
-and its SHA-256 configured outside the wiki; never select authentication or
-agent-rule files. Readiness checks are read-only and never reset that identity.
+A real wiki needs an owner-approved root marker, default `.backstory-marker`,
+readable as a regular file. Configure `BACKSTORY_IDENTITY_PATH` outside the wiki;
+no hash is used. The app never reads its contents or creates/changes the marker.
+See the [migration steps](setup.md#migrate-from-a-visible-marker-and-hash) before
+changing a live installation.
 
 ## Build and start on localhost
 
 From the checkout, generate a new container fixture and explicitly export its
 configuration. Exported shell values take precedence over Compose `.env` and
-`--env-file`; sourcing this chosen fixture avoids stale paths/hashes in a shell.
+`--env-file`; sourcing this chosen fixture avoids stale paths in a shell.
 The service overrides application-data storage to its named local volume.
 
 ```sh
@@ -61,8 +63,8 @@ Backstory never chmods/chowns an existing wiki or runs web as root to bypass it.
 Only `--for-containers` at new fixture construction makes its public synthetic
 wiki directories 0777/files 0666; its enclosing directory remains 0700 and
 configuration/manifest 0600. The named application-data volume starts owned by
-10001 and remains separate/private. Readiness proves readable identity bytes,
-not write access. A denied sibling-stage write reports `wiki_write_denied`.
+10001 and remains separate/private. Readiness checks readable marker presence,
+which cannot establish write access, share health or filesystem authenticity. A denied sibling-stage write reports `wiki_write_denied`.
 
 ## Normal and recovery walkthrough
 
@@ -86,14 +88,14 @@ not write access. A denied sibling-stage write reports `wiki_write_denied`.
 5. Try malformed front matter in a disposable note. Failed Format/Save retains
    source and diagnostics; explicitly choose Save source without formatting.
    This skips transformations only: conflicts, auth/CSRF, confinement, size,
-   required backup, storage identity and final disk hash still apply.
+   required backup, storage marker and final disk hash still apply.
 6. Open `/history/<note-path>` and choose a revision, compare it and select
    Restore this revision. This restores exact original bytes through the same
    guarded save path with a fresh current precondition. A subsequent external
    change still gives 412. Editing historical source instead uses ordinary Save.
 7. Storage status exposes readiness reasons and index freshness without private
    host paths. Retry after the administrator restores the intended storage;
-   failed identity retains the useful index and protected recovery, refusing wiki
+   failed marker check retains the useful index and protected recovery, refusing wiki
    writes/deletion reconciliation. Return never automatically saves a draft.
    Protected drafts are private to their account and survive restart. Shared
    note history remains authenticated and policy checked.
@@ -202,8 +204,8 @@ uv run gunicorn backstory.wsgi:application --logger-class backstory.logging.Safe
 )
 ```
 
-Keep the fixture's original identity path/hash loaded; revalidate that intended
-identity rather than hashing whatever is present and accepting it. On localhost
+Keep the fixture's original marker filename loaded; verify the restored tree
+and its marker rather than enrolling whatever directory is visible. On localhost
 8001 verify human login, existing sessions, history and protected drafts. Open
 one revision and restore that note explicitly; it still checks the restored
 wiki's fresh revision, does not overwrite the original fixture and creates a

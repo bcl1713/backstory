@@ -45,12 +45,30 @@ def open_directory(path=""):
             os.close(descriptor)
 
 
+def check_marker():
+    """Open only the configured marker, without reading any of its contents."""
+    path = validate_path(settings.BACKSTORY_IDENTITY_PATH, "identity")
+    with open_directory() as directory:
+        descriptor = None
+        try:
+            descriptor = os.open(path, _FILE_FLAGS, dir_fd=directory)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise PathDenied()
+        except OSError as error:
+            raise _os_error(error) from None
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+
 def read_regular(path, *, purpose, max_bytes, too_large_code):
-    """Low-level privileged reader shared with identity and future config reader.
+    """Bounded reader for content and approved formatting configuration.
 
     A config caller must explicitly select the narrow config purpose. Public
     content entry points never accept a purpose supplied by the client.
     """
+    if purpose == "identity":
+        raise PathDenied()  # Marker contents are never read, even internally.
     validate_path(path, purpose)
     parent, _, name = path.rpartition("/")
     with open_directory(parent) as directory:

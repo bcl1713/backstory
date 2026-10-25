@@ -1,5 +1,11 @@
 # Backstory: first-release design and staged delivery
 
+> Storage readiness update: [issue #4](https://github.com/bcl1713/backstory/issues/4)
+> supersedes this document's identity-file/hash requirements. The release branch
+> now uses a presence-only root `.backstory-marker`, excluded from wiki content.
+> See [current storage policy](../../storage.md) and
+> [migration guidance](../../setup.md#migrate-from-a-visible-marker-and-hash).
+
 Status: implementation authorized by the owner after the planning baseline.
 Tasks 1–12 and their scoped reviews are complete on the feature branch. The
 environment-driven setup, trusted HTTPS proxy and optional tunnel follow-up passed

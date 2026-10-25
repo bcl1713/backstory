@@ -60,7 +60,7 @@ def test_new_rejects_denied_malformed_missing_and_symlink_folders(reader, wiki, 
 
 
 def test_new_requires_ready_storage(reader, wiki, draft_context):
-    (wiki / "Identity.txt").unlink()
+    (wiki / ".backstory-marker").unlink()
     assert reader.get("/new/").status_code == 503
     assert draft_context == []
     assert list(wiki.iterdir()) == []

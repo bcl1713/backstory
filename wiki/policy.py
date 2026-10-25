@@ -3,9 +3,9 @@
 All hidden components, agent rules, dependency/backup/sync directories and known
 credential/key/config names are denied, regardless of a Markdown extension.
 Admin exclusions add denies (root-relative glob patterns or directory prefixes).
-A separate config purpose admits only approved data files; content/identity
-purposes can never use that exception. Filesystem paths are never URL-unquoted
-here: Django has already decoded them once. Original URI/query encodings are
+A separate config purpose admits only approved data files. Only the exact root
+marker has a hidden-name exception for internal presence checks. Filesystem
+paths are never URL-unquoted here: Django has already decoded them once. Original URI/query encodings are
 validated separately. Literal percent sequences remain filenames.
 """
 import fnmatch
@@ -42,11 +42,11 @@ CONFIG_NAMES = frozenset({
     ".prettierignore", ".markdownlintignore",
     ".editorconfig", ".gitignore",
 })
-_POLICY_VERSION = "2"
+_POLICY_VERSION = "3"
 
 
 def policy_version():
-    return hashlib.sha256(json.dumps([_POLICY_VERSION, list(settings.BACKSTORY_EXCLUSIONS)], ensure_ascii=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([_POLICY_VERSION, settings.BACKSTORY_IDENTITY_PATH, list(settings.BACKSTORY_EXCLUSIONS)], ensure_ascii=True).encode()).hexdigest()
 
 
 def validate_path(path: str, purpose: str):
@@ -64,6 +64,19 @@ def validate_path(path: str, purpose: str):
         raise PathDenied()
     parts = path.split("/")
     if any(part in {"", ".", ".."} for part in parts) or "\\" in path or any(ord(char) < 32 or ord(char) == 127 for char in path):
+        raise PathDenied()
+    marker = path == settings.BACKSTORY_IDENTITY_PATH
+    if purpose == "identity":
+        if not marker or len(parts) != 1:
+            raise PathDenied()
+        # Never turn credential, formatter, sync or reserved temporary files
+        # into a marker. Only this configured root name bypasses the dot deny.
+        name = parts[0]
+        if (name in CONFIG_NAMES or name.casefold().startswith((".env", ".syncthing", ".backstory-tmp-"))
+                or name.casefold() in {".git", ".obsidian", ".silverbullet.auth.json", ".stfolder", ".stversions", ".aws", ".ssh", ".codex"}):
+            raise PathDenied()
+        parts = [name.removeprefix(".")]
+    elif marker or path.startswith(settings.BACKSTORY_IDENTITY_PATH + "/"):
         raise PathDenied()
     if purpose == "config":
         if parts[-1] not in CONFIG_NAMES:
@@ -84,7 +97,7 @@ def validate_path(path: str, purpose: str):
         lowered = part.casefold()
         if part.startswith(".") or lowered in _DENIED_NAMES or any(fnmatch.fnmatchcase(lowered, pattern) for pattern in _DENIED_PATTERNS):
             raise PathDenied()
-    for pattern in settings.BACKSTORY_EXCLUSIONS:
+    for pattern in (() if purpose == "identity" else settings.BACKSTORY_EXCLUSIONS):
         pattern = pattern.rstrip("/")
         if pattern and (path == pattern or path.startswith(pattern + "/") or fnmatch.fnmatchcase(path, pattern)):
             raise PathDenied()

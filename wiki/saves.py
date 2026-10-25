@@ -25,9 +25,6 @@ def validate_save(actor, path, source):
     if not actor.is_authenticated or not actor.is_active:
         raise PermissionDenied
     validate_path(path, "content")
-    # The administrator's stable readiness fixture can never be rewritten by us.
-    if path == settings.BACKSTORY_IDENTITY_PATH:
-        raise PathDenied()
     if not path.lower().endswith(".md"):
         raise PathDenied()
     try:

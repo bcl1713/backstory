@@ -21,7 +21,7 @@ def test_compose_is_loopback_and_never_creates_host_wiki(tmp_path, omit_false):
         pytest.skip('Docker Compose unavailable; exact container gate remains open')
     fixture = generate_fixture(tmp_path / 'container-fixture', 'small', for_containers=True)
     env = {**os.environ, 'BACKSTORY_WIKI_ROOT': str(fixture.wiki_root),
-        'BACKSTORY_IDENTITY_PATH': fixture.identity_path, 'BACKSTORY_IDENTITY_SHA256': fixture.identity_sha256}
+        'BACKSTORY_IDENTITY_PATH': fixture.identity_path}
     result = subprocess.run(['docker', 'compose', 'config', '--format', 'json'], env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     web = json.loads(result.stdout)['services']['web']

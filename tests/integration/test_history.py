@@ -17,7 +17,7 @@ def test_explicit_draft_is_actor_scoped_and_available_without_wiki(reader, wiki,
     actor = get_user_model().objects.get(username='synthetic-reader')
     target = wiki / 'note.md'; target.write_bytes(b'old')
     draft = store_draft(actor, 'note.md', revision(b'old'), '\ufeffdraft\r\n', [], base_source='old', bom=True, newline='\r\n')
-    (wiki / 'Identity.txt').unlink()
+    (wiki / '.backstory-marker').unlink()
     page = reader.get(f'/drafts/{draft.pk}/')
     assert page.status_code == 200
     assert page['Cache-Control'] == 'no-store'
@@ -64,7 +64,7 @@ def test_history_and_draft_reapply_policy(reader, wiki, path):
     from wiki.models import RecoveryDraft, SavedRevision
     actor = get_user_model().objects.get(username='synthetic-reader')
     (wiki / 'notes').mkdir(exist_ok=True)
-    (wiki / 'notes/link.md').symlink_to(wiki / 'Identity.txt')
+    (wiki / 'notes/link.md').symlink_to(wiki / '.backstory-marker')
     record = RecoveryDraft.objects.create(actor=actor, path=path, base_revision=None, source=b'private', base_source=b'', diagnostics=[])
     assert reader.get(f'/drafts/{record.pk}/').status_code == 404
     assert reader.get('/history/' + path).status_code == 404
@@ -74,12 +74,10 @@ def test_recovery_page_never_opens_live_path_when_unavailable(reader, wiki, monk
     from wiki.revisions import store_draft
     actor = get_user_model().objects.get(username='synthetic-reader')
     draft = store_draft(actor, 'note.md', None, 'draft', [])
-    (wiki/'Identity.txt').unlink()
+    (wiki/'.backstory-marker').unlink()
     import wiki.storage as storage
-    real = storage.read_regular
     def guarded(path, **kwargs):
-        assert kwargs.get('purpose') == 'identity'
-        return real(path, **kwargs)
+        pytest.fail('Recovery must not read live wiki bytes during storage loss')
     monkeypatch.setattr(storage, 'read_regular', guarded)
     assert reader.get(f'/drafts/{draft.pk}/').status_code == 200
     assert reader.get(f'/drafts/{draft.pk}/download/').content == b'draft'

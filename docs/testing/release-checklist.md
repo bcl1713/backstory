@@ -141,3 +141,24 @@ packaging proof used this image. It does **not** contain the later trusted-proxy
 backend: those changed runtime sources require a rebuilt image and separate
 acceptance. The earlier 96-runtime-file comparison applies to the historical
 baseline, not the proxy follow-up. Hosted CI is evaluated separately.
+
+## Issue #4: presence-only administrative marker (2026-10-25)
+
+- [x] `.venv/bin/pytest -q`: 692 passed; `npm run test:formatter`: 21 passed;
+  `npm run test:browser`: 48 passed (Chromium). JavaScript suites used execution
+  outside the filesystem/network sandbox for child processes and localhost.
+- [x] Hidden regular marker, empty/changed/large non-UTF-8 contents without reads,
+  missing/unreadable marker, existing and dangling symlinks, directory and FIFO
+  rejection. Other hidden/credential/config paths remain denied.
+- [x] Direct content/create/save/format/preview/attachment/history/draft routes,
+  stale search/link entries, exact marker index/FTS/name/edge/job cleanup during
+  loss, preserved unrelated index and drafts, return without save replay, and
+  stale-base conflicts. Existing final-readiness and safe-save suites passed.
+- [x] `manage.py check` and HTTPS `check --deploy --fail-level WARNING`: no issues.
+  `storage_status` reports `ready: marker_present` with neither marker-path nor
+  hash configuration supplied, using `.backstory-marker` in disposable storage.
+  All three Compose manifests render with no hash requirement; assets build and
+  diff whitespace checks passed. Independent code review found no actionable issues.
+- [x] Setup, migration, status, storage and deployment guidance agree. Live marker
+  creation/move/deletion remains an explicit owner decision. No live wiki/mount,
+  deployment, service exposure or production storage verification performed.

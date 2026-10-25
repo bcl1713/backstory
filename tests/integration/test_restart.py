@@ -17,7 +17,7 @@ def run(program, env):
 def environment(fixture):
     return {**os.environ, 'DJANGO_SETTINGS_MODULE': 'backstory.settings',
         'BACKSTORY_WIKI_ROOT': str(fixture.wiki_root), 'BACKSTORY_DATA_DIR': str(fixture.data_dir),
-        'BACKSTORY_IDENTITY_PATH': fixture.identity_path, 'BACKSTORY_IDENTITY_SHA256': fixture.identity_sha256,
+        'BACKSTORY_IDENTITY_PATH': fixture.identity_path,
         'BACKSTORY_COOKIE_MODE': 'localhost', 'BACKSTORY_ALLOWED_HOSTS': 'localhost,testserver'}
 
 

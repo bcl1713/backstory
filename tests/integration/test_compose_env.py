@@ -12,7 +12,7 @@ REPO = Path(__file__).resolve().parents[2]
 KEYS = (
     'COMPOSE_FILE', 'COMPOSE_PROJECT_NAME', 'BACKSTORY_UID', 'BACKSTORY_GID',
     'BACKSTORY_IMAGE', 'BACKSTORY_PORT', 'BACKSTORY_WIKI_ROOT',
-    'BACKSTORY_IDENTITY_PATH', 'BACKSTORY_IDENTITY_SHA256',
+    'BACKSTORY_IDENTITY_PATH',
     'BACKSTORY_DATA_HOST_PATH', 'BACKSTORY_WIKI_READ_ONLY',
     'BACKSTORY_EXCLUSIONS', 'BACKSTORY_REVISION_QUOTA_BYTES',
     'BACKSTORY_BIND_ADDRESS', 'BACKSTORY_COOKIE_MODE', 'BACKSTORY_ALLOWED_HOSTS',
@@ -30,8 +30,7 @@ def config(tmp_path, *, files='compose.yaml', **values):
         'COMPOSE_PROJECT_NAME': 'backstory-env-test',
         'COMPOSE_FILE': ':'.join(str(REPO / name) for name in files.split(':')),
         'BACKSTORY_WIKI_ROOT': str(tmp_path / 'wiki'),
-        'BACKSTORY_IDENTITY_PATH': 'Storage identity.txt',
-        'BACKSTORY_IDENTITY_SHA256': 'a' * 64,
+        'BACKSTORY_IDENTITY_PATH': '.backstory-marker',
         **values,
     }
     dotenv.write_text('\n'.join(f'{key}={value}' for key, value in settings.items() if value is not None))
@@ -48,7 +47,8 @@ def web_config(result):
 
 
 def test_default_keeps_private_named_data_and_nonroot_image_user(tmp_path):
-    web = web_config(config(tmp_path))
+    web = web_config(config(tmp_path, BACKSTORY_IDENTITY_PATH=None))
+    assert web['environment']['BACKSTORY_IDENTITY_PATH'] == '.backstory-marker'
     assert web['user'] == '10001:10001'
     assert web['image'] == 'backstory:local'
     assert web['ports'][0]['host_ip'] == '127.0.0.1'
@@ -131,8 +131,7 @@ def test_plain_compose_discovers_dotenv_and_selects_hostdata(tmp_path):
         'BACKSTORY_UID=1000', 'BACKSTORY_GID=1000',
         f"BACKSTORY_WIKI_ROOT='{tmp_path / 'wiki'}'",
         f"BACKSTORY_DATA_HOST_PATH='{tmp_path / 'private data'}'",
-        'BACKSTORY_IDENTITY_PATH=identity.txt',
-        'BACKSTORY_IDENTITY_SHA256=' + 'b' * 64,
+        'BACKSTORY_IDENTITY_PATH=.backstory-marker',
         'BACKSTORY_WIKI_READ_ONLY=true', 'BACKSTORY_EXCLUSIONS=private',
     ]))
     env = {key: value for key, value in os.environ.items() if key not in KEYS}

@@ -1,12 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { runtime } from './support/server.js';
 
 async function python(program) {
-  const identity = await readFile(`${runtime}/wiki/Storage identity.txt`);
-  const env = { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings', BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`, BACKSTORY_IDENTITY_PATH: 'Storage identity.txt', BACKSTORY_IDENTITY_SHA256: createHash('sha256').update(identity).digest('hex'), BACKSTORY_COOKIE_MODE: 'localhost', BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' };
+  const env = { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings', BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`, BACKSTORY_IDENTITY_PATH: '.backstory-marker', BACKSTORY_COOKIE_MODE: 'localhost', BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' };
   const result = spawnSync('.venv/bin/python', ['-c', program], { env, encoding: 'utf8', timeout: 120000 });
   expect(result.status, result.stderr).toBe(0);
 }
