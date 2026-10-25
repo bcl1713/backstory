@@ -1,20 +1,47 @@
-import { Compartment, EditorState, Transaction } from '@codemirror/state';
+import { Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, keymap, drawSelection } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, isolateHistory } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
 
 export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onFailure = () => {}, nonce = '' }) {
   const presentation = new Compartment();
-  const exactSources = [];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
-  const getSource = () => exactSources.find(record => record.doc.eq(view.state.doc))?.source ?? view.state.doc.toString().replaceAll('\n', separator);
+  const uniformEndings = new Map(['\n', '\r\n', '\r'].map(value => [value, { separator: value }]));
+  const endingsFrom = (text, preferred) => {
+    const breaks = text.match(/\r\n|\r|\n/g) || [];
+    return breaks.every(value => value === breaks[0])
+      ? uniformEndings.get(breaks[0] || preferred)
+      : { separator: preferred, breaks };
+  };
+  const restoreEndings = StateEffect.define();
+  const lineEndings = StateField.define({
+    create: () => endingsFrom(source, separator),
+    update(value, transaction) {
+      // A real edit uses the current preferred convention. Undo restores the
+      // original boundary sequence through history effects, including mixed EOLs.
+      let next = transaction.docChanged ? uniformEndings.get(value.separator) : value;
+      for (const effect of transaction.effects) if (effect.is(restoreEndings)) next = effect.value;
+      return next;
+    },
+  });
+  const getSource = () => {
+    const text = view.state.doc.toString();
+    const endings = view.state.field(lineEndings);
+    let index = 0;
+    return endings.breaks
+      ? text.replace(/\n/g, () => endings.breaks[index++])
+      : text.replaceAll('\n', endings.separator);
+  };
   const view = new EditorView({
     parent,
     state: EditorState.create({
       doc: source,
       extensions: [
+        lineEndings,
+        invertedEffects.of(transaction => transaction.docChanged || transaction.effects.some(effect => effect.is(restoreEndings))
+          ? [restoreEndings.of(transaction.startState.field(lineEndings))] : []),
         history(), keymap.of([...defaultKeymap, ...historyKeymap]), drawSelection(),
         markdown({ base: markdownLanguage, extensions: [frontMatter], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
         EditorView.lineWrapping,
@@ -23,22 +50,24 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         EditorView.exceptionSink.of(() => onFailure()),
         presentation.of(createLivePreviewExtension()),
         EditorView.updateListener.of(update => {
-          if (update.docChanged) onChange(getSource());
+          if (update.docChanged || update.startState.field(lineEndings) !== update.state.field(lineEndings)) onChange(getSource());
         }),
       ],
     }),
   });
-  exactSources.push({ doc: view.state.doc, source });
   return {
     view,
     getSource,
     setSource(nextSource) {
-      // Explicit accepted replacements are separate, undoable source edits.
-      const transaction = view.state.update({ changes: { from: 0, to: view.state.doc.length, insert: nextSource }, annotations: [Transaction.userEvent.of('input'), isolateHistory.of('full')] });
-      exactSources.unshift({ doc: transaction.newDoc, source: nextSource });
-      if (exactSources.length > 16) exactSources.splice(15, 1);
-      view.dispatch(transaction);
-      if (!transaction.docChanged) onChange(getSource());
+      if (getSource() === nextSource) return;
+      const doc = view.state.toText(nextSource);
+      // Newline-only replacements are metadata events in the same undo history.
+      // They do not replace identical text or move the current selection.
+      view.dispatch({
+        changes: view.state.doc.eq(doc) ? undefined : { from: 0, to: view.state.doc.length, insert: doc },
+        effects: restoreEndings.of(endingsFrom(nextSource, view.state.field(lineEndings).separator)),
+        annotations: [Transaction.userEvent.of('input'), isolateHistory.of('full')],
+      });
     },
     setMode(mode) {
       if (!['live', 'source'].includes(mode)) throw new TypeError('Unknown editor mode');

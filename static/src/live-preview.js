@@ -60,7 +60,13 @@ function buildDecorations(view) {
       if (!node.node.getChild('URL') || state.doc.lineAt(node.from).number !== state.doc.lineAt(node.to).number) return false;
       mark(node.from, node.to, 'lp-link');
     }
-    if (['EmphasisMark', 'CodeMark', 'HeaderMark', 'LinkMark', 'URL'].includes(node.name)) hide(node);
+    if (['EmphasisMark', 'CodeMark', 'HeaderMark'].includes(node.name)) hide(node);
+    // Autolinks, bare URLs and email have no separate label: retain all source.
+    // Only a supported, single-line labeled Link may conceal its destination.
+    if (['LinkMark', 'URL'].includes(node.name)) {
+      const link = node.node.parent;
+      if (link?.name === 'Link' && link.getChild('URL') && state.doc.lineAt(link.from).number === state.doc.lineAt(link.to).number) hide(node);
+    }
   } });
   return Decoration.set(ranges, true);
 }

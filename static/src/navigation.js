@@ -124,7 +124,8 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
         conflict = { source: '', revision: null, path: requestedPath };
         find('[data-conflict-status]').textContent = 'The current file is absent. Accepting this version requires a new create-if-absent save.';
       } else if (response.ok && response.headers.get('ETag')) {
-        conflict = { source: await response.text(), revision: response.headers.get('ETag'), path: requestedPath };
+        const source = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await response.arrayBuffer());
+        conflict = { source, revision: response.headers.get('ETag'), path: requestedPath };
         find('[data-conflict-status]').textContent = 'This is the disk version read for comparison. Reload and merge require an explicit choice; Save checks it again.';
       } else throw new Error('comparison unavailable');
       find('#conflict-current').value = conflict.source;

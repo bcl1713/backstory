@@ -318,3 +318,58 @@ test('a rejected formatter diff remains inspectable but cannot be applied as sou
   expect(await readSource(page)).toBe(submitted);
   expect(await readFile(target)).toEqual(original);
 });
+
+for (const presentation of ['live', 'source']) test(`${presentation}: accepted newline-only Format has exact undo redo without disk writes`, async ({ page }) => {
+  const configPath = `${runtime}/wiki/.prettierrc`;
+  let existingConfig;
+  try { existingConfig = await readFile(configPath); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const exactOriginal = '# Mixed\r\n\nBody\r\n';
+  const disk = Buffer.from('\ufeff' + exactOriginal);
+  try {
+    await writeFile(target, disk);
+    await writeFile(configPath, '{"endOfLine":"lf"}\n');
+    const before = await stat(target);
+    await login(page);
+    await mode(page, presentation);
+    const formattedResponse = await action(page, 'Format', '/format/');
+    expect(formattedResponse.status()).toBe(200);
+    expect((await formattedResponse.json()).source).toBe('# Mixed\n\nBody\n');
+    expect(await readSource(page)).toBe(exactOriginal);
+    await page.getByRole('button', { name: 'Apply formatted source' }).click();
+    expect(await readSource(page)).toBe('# Mixed\n\nBody\n');
+    await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+    await page.locator('.cm-content').focus();
+    await page.keyboard.press('Control+z');
+    expect(await readSource(page)).toBe(exactOriginal);
+    await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
+    await page.getByRole('button', { name: 'Live preview', exact: true }).click();
+    await page.locator('.cm-content').focus();
+    await page.keyboard.press('Control+Shift+Z');
+    expect(await readSource(page)).toBe('# Mixed\n\nBody\n');
+    await expect(page.locator('[data-editor-status]')).toHaveText('Unsaved changes');
+    expect(await readFile(target)).toEqual(disk);
+    expect((await stat(target)).mtimeMs).toBe(before.mtimeMs);
+  } finally {
+    if (existingConfig) await writeFile(configPath, existingConfig);
+    else { const { rm } = await import('node:fs/promises'); await rm(configPath, { force: true }); }
+  }
+});
+
+test('conflict reload and subsequent Save preserve a leading content FEFF separately from encoding BOM', async ({ page }) => {
+  await login(page);
+  await replace(page, '# My retained draft\n');
+  const currentSource = '\ufeff# Current\r\n';
+  await writeFile(target, Buffer.from('\ufeff' + currentSource));
+  expect((await action(page, 'Save')).status()).toBe(412);
+  await expect(page.getByLabel('Current disk source', { exact: true })).toHaveValue('\ufeff# Current\n');
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Reload current source' }).click();
+  expect(await readSource(page)).toBe(currentSource);
+  await page.locator('.cm-content').focus();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText('\nChanged\n');
+  const saved = await action(page, 'Save');
+  expect(saved.status()).toBe(200);
+  expect(saved.request().postDataJSON().source.startsWith('\ufeff')).toBe(true);
+  expect((await readFile(target)).subarray(0, 6)).toEqual(Buffer.from('\ufeff\ufeff'));
+});

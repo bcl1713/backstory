@@ -121,3 +121,65 @@ test('JavaScript unavailable leaves a labeled editable source fallback', async (
   await expect(fallback).toBeEditable();
   await context.close();
 });
+
+for (const presentation of ['live', 'source']) {
+  for (const [ending, original] of [
+    ['CRLF', '# Synthetic\r\n\r\nBody\r\n'],
+    ['mixed', '# Synthetic\r\n\nBody\rFinal\r\n'],
+  ]) {
+    test(`${presentation}: accepted ${ending} newline-only source changes undo and redo exact serialization`, async ({ page }) => {
+      await open(page);
+      if (presentation === 'source') await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+      const formatted = original.replace(/\r\n|\r/g, '\n');
+      await editor(page).evaluate((el, value) => el.markdownEditor.setSource(value), original);
+      await select(page, 3);
+      const beforeSelection = await selection(page);
+      await editor(page).evaluate((el, value) => el.markdownEditor.setSource(value), formatted);
+      expect(await readSource(page)).toBe(formatted);
+      await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+      await page.getByRole('button', { name: 'Live preview', exact: true }).click();
+      expect(await readSource(page)).toBe(formatted);
+      await page.locator('.cm-content').focus();
+      await page.keyboard.press('Control+z');
+      expect(await readSource(page)).toBe(original);
+      expect(await selection(page)).toEqual(beforeSelection);
+      await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+      expect(await readSource(page)).toBe(original);
+      await page.locator('.cm-content').focus();
+      await page.keyboard.press('Control+Shift+Z');
+      expect(await readSource(page)).toBe(formatted);
+      await page.keyboard.press('Control+End');
+      await page.keyboard.type('Typed after Format');
+      await page.keyboard.press('Control+z');
+      expect(await readSource(page)).toBe(formatted);
+      await page.keyboard.press('Control+z');
+      expect(await readSource(page)).toBe(original);
+    });
+  }
+}
+
+test('inactive autolinks, bare URLs, email and unsupported references stay visible and inert in all modes', async ({ page }) => {
+  await open(page);
+  const requests = [];
+  page.on('request', request => { if (request.url().includes('example.invalid')) requests.push(request.url()); });
+  const links = '# Cursor stays here\n\n<https://example.invalid/auto>\n\nhttps://example.invalid/bare\n\n<reader@example.invalid>\n\n[unresolved][unknown]\n\n[label](Other.md)\n';
+  await editor(page).evaluate((el, value) => {
+    el.markdownEditor.setSource(value);
+    el.markdownEditor.view.dispatch({ selection: { anchor: 0 } });
+  }, links);
+  const content = page.locator('.cm-content');
+  for (const visible of ['<https://example.invalid/auto>', 'https://example.invalid/bare', '<reader@example.invalid>', '[unresolved][unknown]']) {
+    await expect(content).toContainText(visible);
+  }
+  await select(page, links.indexOf('example.invalid/auto'));
+  await expect(content).toContainText('<https://example.invalid/auto>');
+  await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+  await expect(content).toContainText('[label](Other.md)');
+  await expect(content).toContainText('<reader@example.invalid>');
+  await page.getByRole('button', { name: 'Live preview', exact: true }).click();
+  await select(page, 0);
+  await expect(content).toContainText('<https://example.invalid/auto>');
+  expect(await readSource(page)).toBe(links);
+  expect(await editor(page).locator('a[href],img[src]').count()).toBe(0);
+  expect(requests).toEqual([]);
+});
