@@ -1,8 +1,8 @@
 # Local development
 
-Task 1 provides the runtime, login and interactive accounts. Browsing, editing,
-formatting and indexing arrive in subsequent tasks. Develop against generated
-synthetic storage only. Never use a private wiki or authentication file as a fixture.
+The runtime provides login, interactive accounts and protected lazy browsing.
+Editing, formatting and indexing arrive in subsequent tasks. Develop against
+generated synthetic storage only. Never use a private wiki or authentication file as a fixture.
 
 Install Python 3.14, uv 0.12.19 and Node 22 LTS (22.12 or newer). Dependencies are
 pinned in `pyproject.toml` and `package.json`, including transitive lockfiles.
@@ -21,7 +21,7 @@ uv run python manage.py check
 uv run python manage.py migrate
 uv run python manage.py collectstatic --noinput
 uv run python manage.py create_account
-uv run gunicorn backstory.wsgi:application --bind 127.0.0.1:8000 --access-logfile /dev/null
+uv run gunicorn backstory.wsgi:application --bind 127.0.0.1:8000 --workers 1 --threads 4 --access-logfile /dev/null
 ```
 
 Visit <http://127.0.0.1:8000/accounts/login/>. Account creation prompts for a
@@ -41,8 +41,9 @@ contains copied authentication files or private content.
 
 The wiki root is never created by application startup. Wiki and data roots must
 be absolute, distinct and non-overlapping, including through symlinks. Missing
-wiki storage still permits login; the storage readiness layer in Task 2 will
-refuse reads/writes until the configured identity check succeeds. Identity
+wiki storage still permits login and signed-in status; storage reads are refused
+until the configured identity check succeeds. See [storage policy](storage.md)
+for exclusions, diagnostics, limits and cursor restart behavior. Identity
 configuration is a relative file path plus its expected SHA-256, set outside the
 wiki. Never enroll storage automatically or select a sensitive identity file.
 
@@ -95,8 +96,14 @@ its proxy boundary and run `python manage.py check --deploy --fail-level WARNING
 The supplied Compose workflow deliberately selects localhost mode.
 
 Run `uv run pytest tests/integration/test_bootstrap.py` for root/fixture/auth
-contracts. `uv run pytest` currently runs the same suite. Runtime checks validate
-SQLite FTS5 support. Browser and formatter commands are reserved as
+contracts. The policy, storage and browsing suites check confined storage and
+lazy browsing:
+
+```sh
+uv run pytest tests/unit/test_policy.py tests/integration/test_storage.py tests/integration/test_browsing.py
+```
+
+Runtime checks validate SQLite FTS5 support. Browser and formatter commands are reserved as
 `npm run test:browser` and `npm run test:formatter`; those suites and the
 Playwright dependency are introduced by their owning tasks and are not yet
 available. No service worker or note cache is installed.

@@ -6,3 +6,5 @@ class BackstoryConfig(AppConfig):
 
     def ready(self):
         from . import checks  # noqa: F401
+        from wiki.readiness import check_readiness
+        self.storage_readiness = check_readiness()

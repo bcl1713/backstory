@@ -76,7 +76,7 @@ SECRET_KEY = persistent_secret()
 DEBUG = False
 INSTALLED_APPS = [
     "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions",
-    "django.contrib.staticfiles", "backstory.apps.BackstoryConfig", "accounts",
+    "django.contrib.staticfiles", "backstory.apps.BackstoryConfig", "accounts", "wiki",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware", "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -119,3 +119,8 @@ STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STORAGES = {"default": {"BACKEND": "django.core.files.storage.FileSystemStorage"}, "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"}}
+
+# Content and identity reads are bounded independently; exclusions only add denies.
+BACKSTORY_NOTE_MAX_BYTES = 2 * 1024 * 1024
+BACKSTORY_IDENTITY_MAX_BYTES = 64 * 1024
+BACKSTORY_EXCLUSIONS = tuple(filter(None, (item.strip() for item in os.environ.get("BACKSTORY_EXCLUSIONS", "").split(","))))

@@ -1,0 +1,2 @@
+{% extends 'wiki/shell.html' %}
+{% block content %}<h1>Storage status</h1>{% if diagnostic %}<p role="status">{{ diagnostic }}</p>{% else %}<p role="status">{{ readiness.state }}: {{ readiness.reason_code }}</p><p>Checked {{ readiness.checked_at|date:'c' }}</p>{% endif %}<p>If storage is unavailable, check the mounted wiki and approved identity configuration with your administrator.</p><a href="{% url 'wiki:status' %}">Retry storage check</a>{% endblock %}
