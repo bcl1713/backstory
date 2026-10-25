@@ -122,5 +122,10 @@ STORAGES = {"default": {"BACKEND": "django.core.files.storage.FileSystemStorage"
 
 # Content and identity reads are bounded independently; exclusions only add denies.
 BACKSTORY_NOTE_MAX_BYTES = 2 * 1024 * 1024
+BACKSTORY_ATTACHMENT_MAX_BYTES = 64 * 1024 * 1024
+BACKSTORY_ATTACHMENT_RANGE_MAX_BYTES = 8 * 1024 * 1024
+# JSON can escape each source byte as six ASCII bytes; both source and transport
+# remain bounded. Preview also enforces the decoded UTF-8 note limit.
+DATA_UPLOAD_MAX_MEMORY_SIZE = BACKSTORY_NOTE_MAX_BYTES * 6 + 1024
 BACKSTORY_IDENTITY_MAX_BYTES = 64 * 1024
 BACKSTORY_EXCLUSIONS = tuple(filter(None, (item.strip() for item in os.environ.get("BACKSTORY_EXCLUSIONS", "").split(","))))

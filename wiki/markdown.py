@@ -1,0 +1,150 @@
+"""Independent CommonMark/GFM preview. Never serialize HTML back into source."""
+from html import escape
+from pathlib import PurePosixPath
+from urllib.parse import unquote, urlsplit
+
+from markdown_it import MarkdownIt
+from mdit_py_plugins.tasklists import tasklists_plugin
+import nh3
+
+from .attachments import INLINE_RASTER_SUFFIXES
+from .contracts import Preview
+from .links import heading_slug, resolve_link
+
+_LINK_LIMIT = 200
+_TAGS = {
+    "p", "a", "img", "span", "h1", "h2", "h3", "h4", "h5", "h6", "br", "hr",
+    "em", "strong", "s", "blockquote", "pre", "code", "ul", "ol", "li", "table",
+    "thead", "tbody", "tr", "th", "td", "input",
+}
+_ATTRIBUTES = {
+    "a": {"href", "title"}, "img": {"src", "alt", "title", "loading"},
+    "span": {"class"}, "input": {"checked", "disabled"},
+    "ol": {"start"}, **{f"h{level}": {"id"} for level in range(1, 7)},
+}
+
+
+def _diagnose(env, code):
+    env["diagnostics"].setdefault(code, None)
+
+
+def _resolve(env, target, kind):
+    key = (kind, target)
+    if key not in env["links"]:
+        if len(env["links"]) >= _LINK_LIMIT:
+            _diagnose(env, "preview_link_limit")
+            return None
+        env["links"][key] = resolve_link(env["source_path"], target, kind)
+    result = env["links"][key]
+    if result.state in {"missing", "unavailable"}:
+        _diagnose(env, "link_" + result.state)
+    return result
+
+
+def _wiki_rule(state, silent):
+    # Runs in the inline parser: fences, code spans and backslash escapes have
+    # already consumed their own syntax. Never search/replace the source string.
+    if state.linkLevel or not state.src.startswith("[[", state.pos):
+        return False
+    end = state.src.find("]]", state.pos + 2, state.posMax)
+    if end == -1 or "\n" in state.src[state.pos + 2:end]:
+        return False
+    if not silent:
+        token = state.push("wiki_link", "", 0)
+        token.content = state.src[state.pos + 2:end]
+    state.pos = end + 2
+    return True
+
+
+def _wiki_render(self, tokens, index, options, env):
+    result = _resolve(env, tokens[index].content, "wiki")
+    if result is None:
+        return '<span class="link-unavailable">Unavailable link</span>'
+    label = escape(result.label)
+    if result.href is None:
+        return f'<span class="link-{result.state}">{label}</span>'
+    return f'<a href="{escape(result.href, quote=True)}">{label}</a>'
+
+
+def _image_render(self, tokens, index, options, env):
+    token = tokens[index]
+    target = token.attrGet("src") or ""
+    result = _resolve(env, target, "markdown")
+    if result and result.state == "external":
+        _diagnose(env, "external_image_blocked")
+        return '<span class="image-placeholder">External image blocked</span>'
+    if result and result.href and result.href.startswith("/attachments/"):
+        path = unquote(urlsplit(result.href).path)
+        if PurePosixPath(path).suffix.lower() in INLINE_RASTER_SUFFIXES:
+            alt = escape(token.content, quote=True)
+            return f'<img src="{escape(result.href, quote=True)}" alt="{alt}" loading="lazy">'
+    _diagnose(env, "image_unavailable")
+    return '<span class="image-placeholder">Image unavailable</span>'
+
+
+def _rewrite_links(tokens, env):
+    stack = []
+    for token in tokens:
+        if token.type == "link_open":
+            result = _resolve(env, token.attrGet("href") or "", "markdown")
+            blocked = result is None or result.href is None
+            stack.append(blocked)
+            if blocked:
+                token.tag = "span"
+                token.attrs = {"class": "link-unavailable" if result is None else "link-" + result.state}
+            else:
+                token.attrSet("href", result.href)
+        elif token.type == "link_close" and stack:
+            if stack.pop():
+                token.tag = "span"
+        if token.children:
+            _rewrite_links(token.children, env)
+
+
+def _plain_heading(tokens):
+    return "".join(token.content for token in tokens if token.type in {"text", "code_inline", "image", "wiki_link"})
+
+
+def _parser():
+    parser = MarkdownIt("gfm-like", {"html": False, "maxNesting": 32}).use(tasklists_plugin)
+    parser.inline.ruler.before("link", "wiki_link", _wiki_rule)
+    parser.add_render_rule("wiki_link", _wiki_render)
+    parser.add_render_rule("image", _image_render)
+    return parser
+
+
+def _attribute_filter(tag, attribute, value):
+    if tag == "img" and attribute == "src" and not value.startswith("/attachments/"):
+        return None
+    return value
+
+
+def render_preview(source: str, source_path: str) -> Preview:
+    env = {"source_path": source_path, "diagnostics": {}, "links": {}}
+    try:
+        parser = _parser()
+        tokens = parser.parse(source, env)
+        counts = {}
+        used = set()
+        for index, token in enumerate(tokens):
+            if token.type == "heading_open" and index + 1 < len(tokens):
+                slug = heading_slug(_plain_heading(tokens[index + 1].children or []))
+                count = counts.get(slug, 0)
+                candidate = slug + (f"-{count}" if count else "")
+                while candidate in used:
+                    count += 1
+                    candidate = f"{slug}-{count}"
+                counts[slug] = count + 1
+                used.add(candidate)
+                token.attrSet("id", "preview-" + candidate)
+        _rewrite_links(tokens, env)
+        html = parser.renderer.render(tokens, parser.options, env)
+        html = nh3.clean(html, tags=_TAGS, attributes=_ATTRIBUTES,
+                         attribute_filter=_attribute_filter,
+                         url_schemes={"http", "https", "mailto"},
+                         tag_attribute_values={"input": {"type": {"checkbox"}}})
+        return Preview(html, tuple(env["diagnostics"]))
+    except Exception:
+        # A parser/plugin failure must never prevent access to the original
+        # source or expose its text through exception diagnostics/logs.
+        return Preview('<p class="preview-error">Preview unavailable. Original source remains available.</p>', ("preview_unavailable",))

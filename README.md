@@ -2,8 +2,9 @@
 
 A self-hosted Markdown wiki browser and source editor for one shared directory
 of plain files. The first runtime slice is runnable: Django, SQLite FTS5 checks,
-interactive Argon2 accounts, protected lazy browsing, direct source reads and
-bundled local assets. Editing is being added through the staged plan.
+interactive Argon2 accounts, protected lazy browsing, direct source reads,
+safe Markdown preview, bounded attachments and bundled local assets. Editing is
+being added through the staged plan. Read about [preview and attachments](docs/preview.md).
 Read the [storage policy](docs/storage.md) for identity checks and confinement.
 
 Start with the [local development guide](docs/development.md), which generates a

@@ -8,5 +8,7 @@ urlpatterns = [
     path("folders/<path:path>", views.folders, name="folder"),
     path("notes/<path:path>", views.note, name="note"),
     path("source/<path:path>", views.source, name="source"),
+    path("preview/<path:path>", views.preview, name="preview"),
+    path("attachments/<path:path>", views.attachment, name="attachment"),
     path("status/", views.status, name="status"),
 ]

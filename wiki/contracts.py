@@ -55,3 +55,16 @@ class FolderPage:
     path: str
     entries: tuple[FolderEntry, ...]
     next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class Preview:
+    html: str
+    diagnostics: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class LinkResult:
+    state: str
+    href: str | None
+    label: str

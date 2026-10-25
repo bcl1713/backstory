@@ -1,16 +1,21 @@
 from dataclasses import asdict
+import json
 from urllib.parse import urlencode
 
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import RequestDataTooBig
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_http_methods
 
+from .attachments import serve_attachment
 from .contracts import StorageError
+from .markdown import render_preview
 from .policy import authorize_content
 from .readiness import check_readiness
-from .storage import list_folder, read_note
+from .storage import list_folder, read_note, require_ready
 
 
 def diagnostic(request, error):
@@ -29,7 +34,7 @@ def shell(request):
             context["folder"] = folder
             context["entries"] = [
                 {"name": item.name, "kind": item.kind,
-                 "url": ("/?" + urlencode({"folder": item.path}) if item.kind == "folder" else reverse("wiki:note", args=[item.path]))}
+                 "url": ("/?" + urlencode({"folder": item.path}) if item.kind == "folder" else reverse("wiki:note" if item.path.lower().endswith(".md") else "wiki:attachment", args=[item.path]))}
                 for item in page.entries
             ]
             if page.next_cursor:
@@ -60,7 +65,7 @@ def note(request, path):
     try:
         authorize_content(request, path)
         snapshot = read_note(path)
-        response = render(request, "wiki/note.html", {"note": snapshot})
+        response = render(request, "wiki/note.html", {"note": snapshot, "preview": render_preview(snapshot.source, path)})
         response["ETag"] = snapshot.revision
         return response
     except StorageError as error:
@@ -78,6 +83,47 @@ def source(request, path):
         return response
     except StorageError as error:
         return diagnostic(request, error)
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def preview(request, path):
+    try:
+        authorize_content(request, path)
+        require_ready()
+        if request.method == "GET":
+            snapshot = read_note(path)
+            return render(request, "wiki/preview.html", {"note": snapshot, "preview": render_preview(snapshot.source, path)})
+        if request.content_type != "application/json":
+            raise StorageError("invalid_preview_request")
+        try:
+            body = json.loads(request.body)
+            source = body.get("source") if isinstance(body, dict) else None
+            if not isinstance(source, str):
+                raise ValueError
+            source_bytes = source.encode("utf-8", errors="strict")
+        except RequestDataTooBig:
+            raise StorageError("note_too_large", 413) from None
+        except (ValueError, UnicodeError):
+            raise StorageError("invalid_preview_request") from None
+        if len(source_bytes) > settings.BACKSTORY_NOTE_MAX_BYTES:
+            raise StorageError("note_too_large", 413)
+        return JsonResponse(asdict(render_preview(source, path)))
+    except StorageError as error:
+        return JsonResponse({"reason_code": error.reason_code}, status=error.status)
+
+
+@login_required
+@require_http_methods(["GET", "HEAD"])
+def attachment(request, path):
+    try:
+        authorize_content(request, path)
+        return serve_attachment(request, path)
+    except StorageError as error:
+        response = diagnostic(request, error)
+        if getattr(error, "content_range", None):
+            response["Content-Range"] = error.content_range
+        return response
 
 
 @login_required

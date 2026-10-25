@@ -1,3 +1,4 @@
 {% extends 'wiki/shell.html' %}
 {% block title %}{{ note.path }} · Backstory{% endblock %}
-{% block content %}<h1>{{ note.path }}</h1><p><a href="{% url 'wiki:source' note.path %}">Plain source</a></p><label for="source">Markdown source</label><textarea id="source" name="source" rows="28" cols="80" readonly>{{ note.source }}</textarea>{% endblock %}
+{% block content %}<h1>{{ note.path }}</h1><p><a href="{% url 'wiki:source' note.path %}">Plain source</a></p><label for="source">Markdown source</label><textarea id="source" name="source" rows="28" cols="80" readonly>{{ note.source }}</textarea>
+<section aria-label="Markdown preview"><h2>Preview</h2>{% for diagnostic in preview.diagnostics %}<p role="status">{{ diagnostic }}</p>{% endfor %}{{ preview.html|safe }}</section>{% endblock %}
