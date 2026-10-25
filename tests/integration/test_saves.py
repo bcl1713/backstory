@@ -383,3 +383,59 @@ def test_startup_cleanup_rereads_registration_under_writer_lock(wiki, settings, 
     staging.cleanup_staged_saves()
     assert not (wiki / later_temp).exists()
     assert not list((settings.BACKSTORY_DATA_DIR / "pending-saves").iterdir())
+
+
+@pytest.mark.parametrize("established_bom", [False, True])
+@pytest.mark.parametrize("uncertain_ack", [False, True])
+def test_source_recovery_preserves_leading_editable_feff(reader, wiki, monkeypatch, established_bom, uncertain_ack):
+    target = wiki / "note.md"
+    prefix = b"\xef\xbb\xbf" if established_bom else b""
+    target.write_bytes(prefix + b"# Original\n")
+    original = target.read_bytes()
+    draft = "\ufeff---\nx: [\n---\n# Recovery\r\nmixed\n"
+    failed = save(reader, draft, revision(original))
+    assert failed.status_code == 422
+    token = failed.json()["recovery_token"]
+    if uncertain_ack:
+        replace = os.replace
+        def uncertain(*args, **kwargs):
+            replace(*args, **kwargs)
+            raise OSError("synthetic lost acknowledgement")
+        monkeypatch.setattr(os, "replace", uncertain)
+    recovered = save(reader, draft, revision(original), mode="source_recovery", token=token)
+    assert recovered.status_code == 200
+    assert recovered.json()["source"] == draft
+    expected = prefix + draft.encode("utf-8")
+    assert target.read_bytes() == expected
+    assert recovered.json()["revision"] == revision(expected)
+
+
+def test_noop_with_encoding_bom_and_editable_feff_preserves_bytes_and_history(reader, wiki):
+    from django.apps import apps
+    target = wiki / "note.md"
+    raw = b"\xef\xbb\xbf\xef\xbb\xbf# Same\r\nmixed\n"
+    target.write_bytes(raw)
+    # Ignore both transforms so normal save must preserve the exact source.
+    (wiki / ".prettierignore").write_text("note.md\n")
+    (wiki / ".markdownlintignore").write_text("note.md\n")
+    before = target.stat()
+    response = save(reader, "\ufeff# Same\r\nmixed\n", revision(raw))
+    assert response.status_code == 200
+    assert response.json()["state"] == "noop"
+    assert response.json()["source"] == "\ufeff# Same\r\nmixed\n"
+    assert response.json()["revision"] == revision(raw)
+    assert target.read_bytes() == raw
+    assert target.stat().st_mtime_ns == before.st_mtime_ns
+    assert target.stat().st_ino == before.st_ino
+    assert apps.get_model("wiki", "SavedRevision").objects.count() == 0
+
+
+@pytest.mark.parametrize("mode", [[], {}, 3, None])
+def test_invalid_mode_json_is_rejected_without_writing(reader, wiki, mode):
+    target = wiki / "note.md"
+    original = b"# Original\n"
+    target.write_bytes(original)
+    response = save(reader, "# Changed\n", revision(original), mode=mode)
+    assert response.status_code == 400
+    assert response.json()["reason_code"] == "invalid_save_mode"
+    assert target.read_bytes() == original

@@ -113,7 +113,7 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
     submitted = validate_save(actor, path, submitted_source)
     if base_revision is not None and not re.fullmatch(r'"[0-9a-f]{64}"', base_revision):
         raise StorageError("invalid_precondition")
-    if mode not in {"formatted", "source_recovery"}:
+    if not isinstance(mode, str) or mode not in {"formatted", "source_recovery"}:
         raise StorageError("invalid_save_mode")
     try:
         with application_lock("note:" + path):
@@ -130,8 +130,9 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                 if result.outcome == "failed":
                     return failed_format(actor, path, submitted_source, base_revision, result)
                 candidate, diagnostics, diff = result.source, result.diagnostics, result.diff
-            # On-disk BOM is established by the original file, never doubled.
-            source = candidate.removeprefix("\ufeff")
+            # NoteSnapshot separates the encoding BOM; every source character
+            # (including a leading U+FEFF) remains editable content.
+            source = candidate
             output = (b"\xef\xbb\xbf" if current and current.bom else b"") + source.encode("utf-8")
             if len(output) > settings.BACKSTORY_NOTE_MAX_BYTES:
                 raise StorageError("note_too_large", 413)
@@ -192,7 +193,7 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                         except StorageError:
                             return SaveResult("uncertain", submitted_source, None, diagnostics, diff, reason_code="write_uncertain", status=503)
                         if observed and observed.raw_bytes == output:
-                            return _saved(observed.source, observed.revision, diagnostics, diff, mode, uncertain=True, path=path)
+                            return _saved(source, observed.revision, diagnostics, diff, mode, uncertain=True, path=path)
                         conflict = _check_base(observed, base_revision, submitted_source)
                         if conflict:
                             return conflict
