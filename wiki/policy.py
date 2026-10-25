@@ -33,7 +33,11 @@ _DENIED_PATTERNS = (
     "*.bak", "*.backup", "*sync-conflict*", "syncthing*",
 )
 CONFIG_NAMES = frozenset({
-    ".prettierrc", ".markdownlint-cli2.jsonc", ".prettierignore", ".markdownlintignore",
+    ".prettierrc", *[".prettierrc." + suffix for suffix in ("json", "jsonc", "yaml", "yml", "json5", "js", "cjs", "mjs", "ts", "cts", "mts")],
+    *["prettier.config." + suffix for suffix in ("js", "cjs", "mjs", "ts", "cts", "mts")],
+    *[".markdownlint." + suffix for suffix in ("json", "jsonc", "yaml", "yml", "js", "cjs", "mjs")],
+    *[".markdownlint-cli2." + suffix for suffix in ("jsonc", "yaml", "yml", "js", "cjs", "mjs")],
+    ".prettierignore", ".markdownlintignore",
     ".editorconfig", ".gitignore",
 })
 _POLICY_VERSION = "1"
@@ -44,7 +48,7 @@ def policy_version():
 
 
 def validate_path(path: str, purpose: str):
-    if purpose not in {"content", "folder", "identity", "config"}:
+    if purpose not in {"content", "folder", "identity", "config", "config-reference"}:
         raise PathDenied()
     if not isinstance(path, str) or len(path) > 4096:
         raise PathDenied()
@@ -60,9 +64,18 @@ def validate_path(path: str, purpose: str):
     if any(part in {"", ".", ".."} for part in parts) or "\\" in path or any(ord(char) < 32 or ord(char) == 127 for char in path):
         raise PathDenied()
     if purpose == "config":
-        if path not in CONFIG_NAMES:
+        if parts[-1] not in CONFIG_NAMES:
             raise PathDenied()
+        if len(parts) > 1:
+            validate_path("/".join(parts[:-1]), "folder")
         return path
+    if purpose == "config-reference":
+        if parts[-1] in CONFIG_NAMES:
+            return validate_path(path, "config")
+        if not path.lower().endswith((".json", ".jsonc", ".yaml", ".yml")):
+            raise PathDenied()
+    elif parts[-1].casefold() in CONFIG_NAMES:
+        raise PathDenied()
     for part in parts:
         lowered = part.casefold()
         if part.startswith(".") or lowered in _DENIED_NAMES or any(fnmatch.fnmatchcase(lowered, pattern) for pattern in _DENIED_PATTERNS):

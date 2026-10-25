@@ -68,3 +68,21 @@ class LinkResult:
     state: str
     href: str | None
     label: str
+
+
+@dataclass(frozen=True)
+class Diagnostic:
+    code: str
+    message: str
+    severity: str = "error"
+    line: int | None = None
+    column: int | None = None
+
+
+@dataclass(frozen=True)
+class FormatResult:
+    source: str
+    diagnostics: tuple[Diagnostic, ...]
+    diff: str
+    outcome: str
+    config_digest: str
