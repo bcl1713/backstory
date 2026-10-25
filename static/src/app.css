@@ -1,0 +1,21 @@
+@import '../../assets/app.css';
+[hidden] { display: none !important; }
+.editor-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: 1rem 0; }
+.editor-controls button { margin: 0; font-size: .9rem; }
+.editor-controls button[aria-pressed="false"] { background: #e1e9e7; color: #214f54; }
+[data-editor-status] { color: #4a6060; font-size: .9rem; }
+[data-markdown-editor] { border: 1px solid #93a6a5; border-radius: .35rem; background: #fffefa; }
+.cm-editor { font-size: 1rem; }
+.cm-editor .cm-content { min-height: 28rem; padding: 1.25rem; font-family: ui-monospace, monospace; line-height: 1.65; }
+.cm-editor .cm-line { padding: 0 .25rem; }
+.cm-editor.cm-focused { outline: 3px solid #a45517; outline-offset: 2px; }
+.lp-heading { font-family: system-ui, sans-serif; font-weight: 700; }
+.lp-h1 { font-size: 1.8rem; } .lp-h2 { font-size: 1.4rem; }
+.lp-strong { font-weight: 700; } .lp-emphasis { font-style: italic; }
+.lp-code { background: #eaf0ed; border-radius: .2rem; }
+.lp-link { color: #214f54; text-decoration: underline; text-underline-offset: .2em; }
+.lp-list-marker { color: #54756d; font-weight: 700; }
+.cm-line.lp-source-region { background: #eff2ed; color: #3e514e; }
+#source { display: block; box-sizing: border-box; width: 100%; min-height: 32rem; padding: 1rem; font: 1rem/1.65 ui-monospace, monospace; }
+.editor-help { color: #4a6060; font-size: .9rem; }
+@media (max-width: 600px) { main { margin: 1rem auto; padding: .75rem; } .cm-editor .cm-content { padding: .75rem; } .editor-controls button { min-height: 44px; } }

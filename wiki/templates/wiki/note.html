@@ -1,4 +1,18 @@
-{% extends 'wiki/shell.html' %}
+{% extends 'wiki/shell.html' %}{% load static %}
 {% block title %}{{ note.path }} · Backstory{% endblock %}
-{% block content %}<h1>{{ note.path }}</h1><p><a href="{% url 'wiki:source' note.path %}">Plain source</a></p><label for="source">Markdown source</label><textarea id="source" name="source" rows="28" cols="80" readonly>{{ note.source }}</textarea>
-<section aria-label="Markdown preview"><h2>Preview</h2>{% for diagnostic in preview.diagnostics %}<p role="status">{{ diagnostic }}</p>{% endfor %}{{ preview.html|safe }}</section>{% endblock %}
+{% block content %}
+<h1>{{ note.path }}</h1>
+<p class="editor-help">Edit Markdown directly. Move into a block to reveal its source. Front matter, tables, code and unfamiliar syntax stay visible.</p>
+<div class="editor-controls" data-editor-controls hidden role="group" aria-label="Editor presentation">
+<button type="button" data-editor-mode="live" aria-pressed="true">Live preview</button>
+<button type="button" data-editor-mode="source" aria-pressed="false">Raw source</button>
+<button type="button" data-plain-fallback>Plain text fallback</button>
+</div>
+<p role="status" aria-live="polite" data-editor-status>Unchanged</p>
+<div data-markdown-editor data-style-nonce="{{ request.csp_style_nonce }}"></div>
+<div data-source-fallback><label for="source">Markdown source (plain text fallback)</label><textarea id="source" name="source" rows="28" cols="80">{{ note.source }}</textarea></div>
+{% for diagnostic in preview.diagnostics %}<p role="status">{{ diagnostic }}</p>{% endfor %}
+<p><a href="{% url 'wiki:preview' note.path %}">Open safe server preview</a> · <a href="{% url 'wiki:source' note.path %}">Plain source download</a></p>
+{{ note.source|json_script:'note-source' }}{{ note.newline|json_script:'note-newline' }}
+<script type="module" src="{% static 'editor.js' %}"></script>
+{% endblock %}

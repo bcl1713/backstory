@@ -6,6 +6,7 @@ RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
     npm ci --strict-ssl=true
 COPY assets ./assets
+COPY static/src ./static/src
 COPY scripts/build-assets.mjs ./scripts/build-assets.mjs
 RUN npm run build && mkdir /node-libs && cp /usr/lib/*-linux-gnu/libstdc++.so.6 /node-libs/
 
