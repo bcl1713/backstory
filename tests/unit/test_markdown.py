@@ -115,3 +115,32 @@ def test_gfm_rendering_retains_tables_strikethrough_tasks_and_external_links(wik
     assert any(tag == "s" for tag, attrs in elements)
     assert any(tag == "input" and "disabled" in attrs for tag, attrs in elements)
     assert any(tag == "a" and attrs.get("href") == "https://example.invalid" for tag, attrs in elements)
+
+
+@pytest.mark.parametrize("source_relative", [False, True])
+def test_wikilink_directory_candidate_does_not_block_note_candidate(wiki, source_relative):
+    (wiki / "target").mkdir()
+    if source_relative:
+        (wiki / "folder").mkdir()
+        (wiki / "folder/target").mkdir()
+        (wiki / "folder/target.md").write_bytes(b"")
+        expected = "/notes/folder/target.md"
+    else:
+        (wiki / "target.md").write_bytes(b"")
+        expected = "/notes/target.md"
+    result = module("wiki.links").resolve_link("folder/note.md", "target", "wiki")
+    assert result.state == "resolved"
+    assert result.href == expected
+
+
+@pytest.mark.parametrize("candidate_kind", ["symlink", "fifo"])
+def test_wikilink_denied_candidate_still_blocks_optional_note(wiki, candidate_kind):
+    import os
+    (wiki / "target.md").write_bytes(b"")
+    if candidate_kind == "symlink":
+        (wiki / "target").symlink_to(wiki / "target.md")
+    else:
+        os.mkfifo(wiki / "target")
+    result = module("wiki.links").resolve_link("note.md", "target", "wiki")
+    assert result.state == "unavailable"
+    assert result.href is None

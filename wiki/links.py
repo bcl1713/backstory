@@ -40,6 +40,8 @@ def _regular(path):
             info = os.stat(name, dir_fd=directory, follow_symlinks=False)
         except FileNotFoundError:
             return False
+    if stat.S_ISDIR(info.st_mode):
+        return False
     if not stat.S_ISREG(info.st_mode):
         raise StorageError("path_denied", 404)
     return True

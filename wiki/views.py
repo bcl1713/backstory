@@ -30,7 +30,7 @@ def shell(request):
     context = {"readiness": readiness}
     if readiness.state == "ready":
         try:
-            folder = authorize_content(request, request.GET.get("folder", ""), "folder")
+            folder = authorize_content(request, request.GET.get("folder", ""), "folder", query_parameter="folder")
             page = list_folder(folder, request.GET.get("cursor"))
             context["folder"] = folder
             context["entries"] = [

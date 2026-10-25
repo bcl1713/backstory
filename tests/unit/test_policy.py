@@ -38,3 +38,25 @@ def test_decode_once(settings):
     assert p.validate_path(".prettierrc", "config") == ".prettierrc"
     with pytest.raises(p.PathDenied):
         p.validate_path(".private", "config")
+
+
+@pytest.mark.parametrize("purpose", ["content", "identity", "folder"])
+@pytest.mark.parametrize("name", ["secret", "credential", "auth", "authentication", "token", "tokens", "key", "keys"])
+def test_bare_sensitive_families_are_denied_as_strings(name, purpose):
+    p = policy()
+    # No credential fixtures: each spelling exercises the shared string policy.
+    for path in [name, name.upper(), f"notes/{name}", f"notes/{name.upper()}/note.md"]:
+        with pytest.raises(p.PathDenied):
+            p.validate_path(path, purpose)
+
+
+def test_existing_formatting_config_policy_exceptions_are_preserved():
+    p = policy()
+    for path in [".prettierrc", "notes/.prettierrc.yaml", "notes/prettier.config.js", "notes/.markdownlint-cli2.jsonc"]:
+        assert p.validate_path(path, "config") == path
+        assert p.validate_path(path, "config-reference") == path
+        for purpose in ["content", "identity", "folder"]:
+            with pytest.raises(p.PathDenied):
+                p.validate_path(path, purpose)
+    for path in ["formatting/options.json", "formatting/options.jsonc", "formatting/options.yaml", "formatting/options.yml"]:
+        assert p.validate_path(path, "config-reference") == path

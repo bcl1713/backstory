@@ -4,8 +4,9 @@ All hidden components, agent rules, dependency/backup/sync directories and known
 credential/key/config names are denied, regardless of a Markdown extension.
 Admin exclusions add denies (root-relative glob patterns or directory prefixes).
 A separate config purpose admits only approved data files; content/identity
-purposes can never use that exception. No URL unquoting occurs here: Django has
-already decoded the request path once. Literal percent sequences are filenames.
+purposes can never use that exception. Filesystem paths are never URL-unquoted
+here: Django has already decoded them once. Original URI/query encodings are
+validated separately. Literal percent sequences remain filenames.
 """
 import fnmatch
 import hashlib
@@ -23,6 +24,7 @@ _DENIED_NAMES = {
     "node_modules", "vendor", "venv", "env", "__pycache__", "bower_components",
     "backups", "backup", "lost+found", "system volume information", "$recycle.bin",
     "syncthing", "sync", "sync-conflicts", "credentials", "secrets", "config",
+    "secret", "credential", "auth", "authentication", "token", "tokens", "key", "keys",
     "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "authorized_keys", "known_hosts",
     "ssh_config", "sshd_config", "passwd", "shadow", "npmrc", "netrc",
 }
@@ -40,7 +42,7 @@ CONFIG_NAMES = frozenset({
     ".prettierignore", ".markdownlintignore",
     ".editorconfig", ".gitignore",
 })
-_POLICY_VERSION = "1"
+_POLICY_VERSION = "2"
 
 
 def policy_version():
@@ -87,7 +89,16 @@ def validate_path(path: str, purpose: str):
     return path
 
 
-def authorize_content(request, path, purpose="content"):
+def _strict_uri_component(value, *, form=False):
+    if re.search(r"%(?![0-9a-fA-F]{2})", value):
+        raise PathDenied()
+    try:
+        return unquote_to_bytes(value.replace("+", " ") if form else value).decode("utf-8", errors="strict")
+    except UnicodeError:
+        raise PathDenied() from None
+
+
+def authorize_content(request, path, purpose="content", *, query_parameter=None):
     """Every later route must call this before any content operation."""
     if not request.user.is_authenticated or not request.user.is_active:
         raise PermissionDenied
@@ -97,10 +108,20 @@ def authorize_content(request, path, purpose="content"):
     raw_uri = request.META.get("RAW_URI", request.META.get("REQUEST_URI"))
     if raw_uri is not None:
         raw_path = raw_uri.split("?", 1)[0]
-        if re.search(r"%(?![0-9a-fA-F]{2})", raw_path):
+        _strict_uri_component(raw_path)
+    if query_parameter is not None:
+        # QueryDict replaces malformed UTF-8. Validate original form values before
+        # that repaired spelling can select a folder, preserving '+' and last-value
+        # semantics without decoding the already-decoded filesystem path again.
+        selected = None
+        for pair in request.META.get("QUERY_STRING", "").split("&"):
+            key, _, value = pair.partition("=")
+            try:
+                name = _strict_uri_component(key, form=True)
+            except PathDenied:
+                continue  # A malformed unrelated key cannot name this parameter.
+            if name == query_parameter:
+                selected = _strict_uri_component(value, form=True)
+        if selected is not None and selected != path:
             raise PathDenied()
-        try:
-            unquote_to_bytes(raw_path).decode("utf-8", errors="strict")
-        except UnicodeError:
-            raise PathDenied() from None
     return validate_path(path, purpose)

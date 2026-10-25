@@ -79,3 +79,44 @@ def test_malformed_raw_encoding_is_distinct_from_literal_percent(reader, wiki):
     assert reader.get("/source/%25FF.md", RAW_URI="/source/%25FF.md").status_code == 200
     for raw in ["/source/%FF.md", "/source/%ZZ.md", "/source/trailing%.md"]:
         assert reader.get(raw, RAW_URI=raw).status_code == 404
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("encoded", ["%FF", "%ZZ", "trailing%", "%C3%28"])
+def test_malformed_folder_query_never_selects_repaired_name(reader, wiki, encoded):
+    from urllib.parse import unquote_plus
+    repaired = unquote_plus(encoded)
+    selected = wiki / repaired
+    selected.mkdir()
+    (selected / "must-not-be-listed.md").write_bytes(b"")
+    response = reader.get("/?folder=" + encoded, RAW_URI="/?folder=" + encoded)
+    assert response.status_code == 404
+    assert b"must-not-be-listed.md" not in response.content
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("name", ["\ufffd", "%ZZ", "%FF", "100%", "plus+name", "with space", "日本語#folder", "%2e%2e"])
+def test_valid_folder_query_keeps_exact_once_decoded_name(reader, wiki, name):
+    from urllib.parse import urlencode
+    selected = wiki / name
+    selected.mkdir()
+    (selected / "selected.md").write_bytes(b"")
+    query = urlencode({"folder": name})
+    response = reader.get("/?" + query, RAW_URI="/?" + query)
+    assert response.status_code == 200
+    assert b"selected.md" in response.content
+
+
+@pytest.mark.django_db
+def test_folder_query_keeps_form_key_plus_and_last_value_semantics(reader, wiki):
+    for name, marker in [("plus name", "space-selected.md"), ("plus+name", "plus-selected.md")]:
+        (wiki / name).mkdir()
+        (wiki / name / marker).write_bytes(b"")
+    response = reader.get("/?f%6Flder=plus+name")
+    assert response.status_code == 200
+    assert b"space-selected.md" in response.content
+    assert b"plus-selected.md" not in response.content
+    response = reader.get("/?folder=plus+name&folder=plus%2Bname")
+    assert response.status_code == 200
+    assert b"plus-selected.md" in response.content
+    assert b"space-selected.md" not in response.content
