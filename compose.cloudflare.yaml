@@ -1,0 +1,71 @@
+# Optional, self-contained Docker Standalone / Portainer tunnel installation.
+# Build web separately on the selected endpoint. See docs/cloudflare.md.
+services:
+  web:
+    image: ${BACKSTORY_IMAGE:?Set an image already available on the selected Docker endpoint or registry}
+    user: "${BACKSTORY_UID:-10001}:${BACKSTORY_GID:-10001}"
+    init: true
+    environment:
+      BACKSTORY_WIKI_ROOT: /wiki
+      BACKSTORY_DATA_DIR: /var/lib/backstory
+      BACKSTORY_IDENTITY_PATH: ${BACKSTORY_IDENTITY_PATH:?Set the approved wiki-relative identity file}
+      BACKSTORY_IDENTITY_SHA256: ${BACKSTORY_IDENTITY_SHA256:?Set the approved identity SHA-256}
+      BACKSTORY_COOKIE_MODE: https
+      BACKSTORY_ALLOWED_HOSTS: ${BACKSTORY_ALLOWED_HOSTS:?Set the exact public hostname}
+      BACKSTORY_PROXY_MODE: trusted
+      BACKSTORY_CSRF_TRUSTED_ORIGINS: ${BACKSTORY_CSRF_TRUSTED_ORIGINS:?Set the exact public HTTPS origin}
+      BACKSTORY_TRUSTED_PROXY_IPS: "${BACKSTORY_TUNNEL_CONNECTOR_IP:?Set the connector private IPv4 address}/32"
+      BACKSTORY_PROXY_CLIENT_IP_HEADER: none
+      BACKSTORY_EXCLUSIONS: ${BACKSTORY_EXCLUSIONS:-}
+      BACKSTORY_REVISION_QUOTA_BYTES: ${BACKSTORY_REVISION_QUOTA_BYTES:-67108864}
+    volumes:
+      - type: bind
+        source: ${BACKSTORY_WIKI_ROOT:?Set the approved existing host wiki directory}
+        target: /wiki
+        read_only: ${BACKSTORY_WIKI_READ_ONLY:-false}
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKSTORY_DATA_HOST_PATH:?Set an existing private host application-data directory}
+        target: /var/lib/backstory
+        read_only: false
+        bind:
+          create_host_path: false
+    networks:
+      origin:
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.3
+    user: "${BACKSTORY_UID:-10001}:${BACKSTORY_GID:-10001}"
+    command: [tunnel, --no-autoupdate, run, --token-file, /run/secrets/cloudflare_tunnel_token]
+    restart: unless-stopped
+    read_only: true
+    depends_on:
+      - web
+    volumes:
+      - type: bind
+        source: ${CLOUDFLARE_TUNNEL_TOKEN_FILE:?Set the absolute private token-file path on the Docker endpoint}
+        target: /run/secrets/cloudflare_tunnel_token
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      origin:
+        ipv4_address: ${BACKSTORY_TUNNEL_CONNECTOR_IP:?Set the connector private IPv4 address}
+      egress:
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+networks:
+  # Only the application and this connector join the private HTTP origin.
+  origin:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${BACKSTORY_TUNNEL_SUBNET:?Set a conflict-free private IPv4 CIDR for this installation}
+  # Only cloudflared needs a route to Cloudflare; web has no egress network.
+  egress:
