@@ -239,6 +239,11 @@ or stop the other installation before starting another demo.
 
 ## Portainer on a Docker Standalone endpoint
 
+If you already have Cloudflare Tunnel, use the [existing-tunnel setup](cloudflare.md#reuse-an-existing-tunnel)
+with this manifest. Backstory needs no tunnel token or second connector.
+The [optional bundled connector](cloudflare.md#optional-bundled-connector) has its
+own manifest for installations that want to manage a connector alongside the app.
+
 `compose.portainer.yaml` is self-contained and build-free for **Docker Standalone**.
 It is not a Swarm recipe. Prepare the storage and `.env` above on the selected
 Docker endpoint; for a remote browser also prepare the [HTTPS proxy settings](reverse-proxy.md).

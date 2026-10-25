@@ -13,6 +13,8 @@ The guide covers matching the wiki owner with fresh private application data,
 a build-free Portainer Standalone manifest, and an optional disposable demo.
 The [HTTPS proxy guide](docs/reverse-proxy.md) defines the shared contract for
 Caddy, Nginx Proxy Manager and other compatible frontends.
+[Cloudflare Tunnel](docs/cloudflare.md) is also supported: reuse an existing
+connector without giving Backstory a token, or choose the optional bundled connector.
 [Local development](docs/development.md) covers the native synthetic workflow;
 [operations](docs/operations.md) covers recovery and backup/restore.
 No private notes, default passwords or production configuration ship here.

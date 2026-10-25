@@ -1,7 +1,9 @@
 # Backstory: first-release design and staged delivery
 
 Status: implementation authorized by the owner after the planning baseline.
-Tasks 1–4 are implemented on the feature branch. The owner's subsequent editor
+Tasks 1–12 and their scoped reviews are complete on the feature branch. The
+environment-driven setup, trusted HTTPS proxy and optional tunnel follow-up is
+under combined verification and review. The owner's subsequent editor
 direction supersedes the earlier source-plus-separate-preview primary UI.
 Implementation remains limited to disposable synthetic storage and localhost;
 production deployment, public exposure and live-storage changes are unauthorized.
@@ -20,7 +22,9 @@ and never gates note opening.
 Development uses generated, disposable content only. The supplied collection
 statistics guide synthetic fixtures; no private snapshot, authentication file,
 or live note becomes test content. No production deployment, mount/permission
-changes, Cloudflare setup, migration or changes to existing tools are authorized.
+changes, live Cloudflare account/tunnel/DNS/Access changes, migration or changes
+to existing tools are authorized. Optional tunnel packaging is implemented for
+the owner's first-class Cloudflare request; it does not authorize activation.
 Delete, rename, bulk operations, attachment upload, rich-text/HTML round-trip
 editing or WYSIWYG feature parity, MCP, collaboration
 CRDTs and graph UI are outside the first release.
@@ -41,11 +45,20 @@ LTS compatible with the chosen formatter versions. Pin exact dependencies and
 commit lockfiles during implementation. No Redis, external database, cloud
 service, mandatory CDN, or frontend framework is required.
 
-One Compose service runs supervised web and background-index processes, sharing
+One application Compose service runs supervised web and background-index processes, sharing
 an image and local application volume. It exposes localhost only by default.
 The production server does not use Django's development server. Process failures
 propagate to the container; SIGTERM stops both processes cleanly. Keep deployment
 and worker code small enough to operate and test independently.
+
+Deployment configuration lives in environment values. Local HTTP, generic trusted
+HTTPS proxies and existing Cloudflare Tunnel connectors share the same file and
+account model. Proxy brands do not select different application behavior.
+An explicitly selected standalone tunnel manifest may add a pinned `cloudflared`
+connector on an isolated origin network, without publishing an app port. Only
+that optional connector receives a token-file mount; existing connectors require
+no new token or service. Application login remains mandatory, including behind
+an optional Cloudflare Access gate. See [tunnel setup](../../cloudflare.md).
 
 ## Storage and trust boundaries
 

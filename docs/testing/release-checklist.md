@@ -90,6 +90,13 @@ This local record does not imply a hosted pass.
   cookie/host/origin/peer/client-header inputs, while preserving loopback defaults.
   These config checks do not prove a live Portainer, NPM, Caddy or firewall setup.
 
+- [ ] Cloudflare follow-up combined review: existing-connector reuse is documented
+  without new credentials. Optional bundled packaging has no app host port,
+  isolated origin/egress networks, exact connector peer trust and a private
+  connector-only token-file mount. Focused configuration/permissions checks and
+  a current-image internal mock-origin login/save/denial proof passed; no live
+  Cloudflare edge, account, route, DNS or Access change was performed.
+
 Merge and deployment remain separate owner decisions requiring explicit approval;
 neither is part of this authorized local delivery.
 
