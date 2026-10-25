@@ -165,3 +165,6 @@ LOGGING = {
     'root': {'handlers': ['safe'], 'level': 'WARNING'},
     'loggers': {name: {'handlers': ['safe'], 'filters': ['redact'], 'propagate': False, 'level': 'WARNING'} for name in ['django', 'django.request', 'django.security', 'django.security.DisallowedHost', 'django.security.csrf', 'axes', 'gunicorn.error', 'gunicorn.access']},
 }
+
+BACKSTORY_REVISION_RETENTION_DAYS = 30
+BACKSTORY_REVISION_QUOTA_BYTES = int(os.environ.get('BACKSTORY_REVISION_QUOTA_BYTES', str(64 * 1024 * 1024)))

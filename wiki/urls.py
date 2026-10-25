@@ -4,9 +4,12 @@ from indexing import views as index_views
 
 app_name = "wiki"
 urlpatterns = [
-    path("drafts/", views.protected_recovery_pending, name="drafts"),
-    path("history/<path:path>", views.protected_recovery_pending, name="history"),
-    path("restore/<int:revision_id>/", views.protected_recovery_pending, name="restore"),
+    path("revisions/<int:revision_id>/", views.revision, name="revision"),
+    path("drafts/<int:draft_id>/", views.draft, name="draft"),
+    path("drafts/<int:draft_id>/download/", views.draft, {"download": True}, name="draft-download"),
+    path("drafts/", views.drafts, name="drafts"),
+    path("history/<path:path>", views.history, name="history"),
+    path("restore/<int:revision_id>/", views.restore, name="restore"),
     path("", views.shell, name="shell"),
     path("new/", views.new_note, name="new"),
     path("folders/", views.folders, name="folders"),

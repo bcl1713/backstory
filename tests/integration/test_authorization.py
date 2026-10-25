@@ -2,7 +2,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
 
-ROUTES = [('get', p) for p in ['/', '/new/', '/folders/', '/folders/notes', '/notes/a.md', '/source/a.md', '/attachments/a.png', '/search/?q=canary', '/resolve/?source=a.md&target=a', '/index/status/', '/status/', '/history/a.md', '/drafts/']] + [('post', p) for p in ['/new/', '/save/a.md', '/format/a.md', '/preview/a.md', '/index/schedule/', '/drafts/', '/restore/1/']]
+ROUTES = [('get', p) for p in ['/', '/new/', '/folders/', '/folders/notes', '/notes/a.md', '/source/a.md', '/attachments/a.png', '/search/?q=canary', '/resolve/?source=a.md&target=a', '/index/status/', '/status/', '/history/a.md', '/drafts/', '/drafts/1/', '/drafts/1/download/', '/revisions/1/', '/accounts/devices/']] + [('post', p) for p in ['/new/', '/save/a.md', '/format/a.md', '/preview/a.md', '/index/schedule/', '/drafts/', '/restore/1/']]
 
 @pytest.mark.django_db
 @pytest.mark.parametrize('method,path', ROUTES)

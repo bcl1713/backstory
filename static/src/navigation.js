@@ -32,7 +32,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   let path = parse('#note-path');
   mountLinkDiscovery(() => path);
   const folder = parse('#note-folder');
-  let baseSource = initialSource;
+  let baseSource = parse('#note-base-source') ?? initialSource;
   let baseRevision = isNew ? null : parse('#note-revision');
   let csrf = find('[name=csrfmiddlewaretoken]').value;
   let busy = false;
@@ -40,10 +40,13 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   let proposal = null;
   let proposalSource = null;
   let conflict = null;
+  let lastDiagnostics = [];
   const status = find('[data-editor-status]');
   const saveButton = find('[data-save]');
   const formatButton = find('[data-format]');
   const recoveryButton = find('[data-source-recovery]');
+  const restoreButton = find('[data-restore-revision]');
+  const restorationId = find('[data-markdown-editor]').dataset.restorationId;
   const filename = find('#note-filename');
   const encode = value => value.split('/').map(encodeURIComponent).join('/');
   const dirty = () => editor.getSource() !== baseSource || (isNew && !path && Boolean(filename?.value.trim()));
@@ -52,6 +55,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     saveButton.disabled = busy;
     formatButton.disabled = busy;
     recoveryButton.hidden = !recovery;
+    if (restoreButton) restoreButton.disabled = busy || editor.getSource() !== initialSource;
     recoveryButton.disabled = busy;
     if (filename) filename.disabled = busy || !isNew || Boolean(path);
   };
@@ -71,6 +75,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   };
   const invalidateRecovery = () => { recovery = null; syncButtons(); };
   const diagnostics = items => {
+    lastDiagnostics = Array.isArray(items) ? items : [];
     const list = find('[data-diagnostics]');
     list.replaceChildren();
     for (const item of Array.isArray(items) ? items : []) {
@@ -161,7 +166,8 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     say(kind === 'format' ? 'Checking proposed formatting…' : 'Saving…');
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRFToken': csrf, ...(revision === null ? { 'If-None-Match': '*' } : { 'If-Match': revision }) };
     try {
-      const response = await fetch(`/${kind === 'format' ? 'format' : 'save'}/${encode(requestedPath)}`, {
+      const endpoint = kind === 'restore' ? `/restore/${restorationId}/` : `/${kind === 'format' ? 'format' : 'save'}/${encode(requestedPath)}`;
+      const response = await fetch(endpoint, {
         method: 'POST', credentials: 'same-origin', cache: 'no-store', headers,
         body: JSON.stringify({ source: submitted, mode: sourceRecovery ? 'source_recovery' : 'formatted', ...(sourceRecovery ? { recovery_token: recovery.token } : {}) }),
       });
@@ -228,6 +234,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   saveButton.addEventListener('click', () => perform('save'));
   formatButton.addEventListener('click', () => perform('format'));
   recoveryButton.addEventListener('click', () => perform('source_recovery'));
+  restoreButton?.addEventListener('click', () => perform('restore'));
   document.addEventListener('keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); perform('save'); }
   });
@@ -276,6 +283,24 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     say('Current revision accepted for manual merge. Draft retained; review and edit it, then explicitly Save.');
     editor.focus();
   });
+  find('[data-store-draft]').addEventListener('click', async () => {
+    if (busy) return;
+    const requestedPath = requestPath();
+    if (!requestedPath) return;
+    busy = true; syncButtons();
+    try {
+      const response = await fetch('/drafts/', {method: 'POST', credentials: 'same-origin', cache: 'no-store',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+        body: JSON.stringify({path: requestedPath, base_revision: baseRevision, source: editor.getSource(), base_source: baseSource,
+          diagnostics: lastDiagnostics, bom, newline: parse('#note-newline') || '\n'})});
+      if (!authenticated(response)) return;
+      const result = await response.json();
+      if (!response.ok || !result.url) { say('Draft retained. Protected storage failed; copy or download it.'); return; }
+      const link = find('[data-stored-draft]'); link.href = result.url; link.hidden = false;
+      say('Protected draft stored. Saving to the wiki still requires an explicit action and revision check.');
+    } catch { say('Draft retained. Protected storage could not be confirmed; copy or download it.'); }
+    finally { busy = false; syncButtons(); }
+  });
   find('[data-copy-draft]').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(editor.getSource()); say('Draft copied.'); }
     catch { editor.showFallback(); find('#source').select(); say('Select and copy the draft, or download it.'); }
@@ -319,6 +344,8 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       syncButtons();
     }
   });
+  const retainedDiagnostics = parse('#note-diagnostics');
+  if (Array.isArray(retainedDiagnostics)) diagnostics(retainedDiagnostics);
   installDraftGuards(dirty);
   find('[data-editor-actions]').hidden = false;
   syncButtons();
@@ -326,6 +353,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     if (proposalSource !== null && value !== proposalSource) clearProposal();
     if (recovery && (recovery.source !== value || recovery.revision !== baseRevision)) invalidateRecovery();
     if (!find('[data-conflict]').hidden) find('#conflict-draft').value = value;
+    syncButtons();
     say(dirty() ? 'Unsaved changes' : 'Unchanged');
   };
 }

@@ -21,3 +21,15 @@ class FormatRecovery(models.Model):
     diagnostics = models.JSONField()
     diff = models.TextField(default="")
     expires_at = models.DateTimeField()
+
+
+class RecoveryDraft(models.Model):
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    path = models.CharField(max_length=4096)
+    base_revision = models.CharField(max_length=66, null=True)
+    source = models.BinaryField()
+    base_source = models.BinaryField(default=b'')
+    bom = models.BooleanField(default=False)
+    newline = models.CharField(max_length=2, default='\n')
+    diagnostics = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)

@@ -52,7 +52,35 @@ reports the observed revision or uncertainty without retrying the write. If byte
 match the staged candidate but directory durability cannot be confirmed, save
 success includes a durability warning. No failed draft is replayed automatically.
 
-Until the persistent indexing queue is installed, changed disk saves report
-`saved_index_delayed` (or `saved_source_index_delayed`). The `enqueue_note(path,
-revision)` boundary may fail without turning a completed disk save into failure.
-Discovery is not yet available; known notes can still open/save directly.
+Changed disk saves enqueue a bounded discovery update. Queue errors report
+`saved_index_delayed` (or `saved_source_index_delayed`) while preserving the
+confirmed save result. Direct note opening never waits for a scan.
+
+Explicit **Store protected draft** saves only the current draft, its original
+base source/revision, encoding metadata and diagnostics in application SQLite.
+It never writes the wiki or enables an automatic retry. Drafts are private to
+the account that stored them; **Protected drafts** remains available when wiki
+identity fails, including after a process restart. Recovery reads protected
+bytes without opening the note's live path. Return of storage never refreshes
+that draft's base or saves it. Compare base/current/draft and explicitly accept
+the displayed current revision for manual merging before saving again.
+
+Wiki history is shared with authenticated active accounts and rechecks content
+policy. Open an original revision from `/history/<note-path>` and choose
+**Restore this revision**. A stale base still returns HTTP 412; after comparison,
+explicitly accept the current revision and restore again. Restoration skips
+formatting transformations and uses the same readiness, confinement, backup,
+quota, final-hash and publication checks. The encoding BOM and leading editable
+U+FEFF are preserved separately. Editing the historical source instead uses the
+ordinary Format/Save controls; restoration is disabled while it differs from
+the selected original.
+
+History and explicit drafts share the default 64 MiB quota and 30-day retention.
+`python manage.py prune_recovery` prunes expired protected rows and checks
+readiness before cleaning registered abandoned transient siblings. It does not
+scan or purge wiki notes. Protected rows are pruned during subsequent writes
+and explicit draft storage too. SQLite contains all recovery blobs, so a
+consistent SQLite backup covers their data; separately retain the application
+secret and separately back up wiki files. Local process and filesystem tests
+cover interruptions before replacement, after replacement before indexing, and
+after commit before response; none provides NFS durability or atomic CAS proof.

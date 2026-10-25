@@ -110,7 +110,7 @@ def _saved(source, revision, diagnostics, diff, mode, *, uncertain=False, path):
     return SaveResult(state, source, revision, diagnostics, diff)
 
 
-def save_note(actor, path, submitted_source, base_revision, mode="formatted", recovery_token=None):
+def save_note(actor, path, submitted_source, base_revision, mode="formatted", recovery_token=None, *, restore_bom=None):
     submitted = validate_save(actor, path, submitted_source)
     if base_revision is not None and not re.fullmatch(r'"[0-9a-f]{64}"', base_revision):
         raise StorageError("invalid_precondition")
@@ -134,7 +134,8 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
             # NoteSnapshot separates the encoding BOM; every source character
             # (including a leading U+FEFF) remains editable content.
             source = candidate
-            output = (b"\xef\xbb\xbf" if current and current.bom else b"") + source.encode("utf-8")
+            output_bom = restore_bom if restore_bom is not None else bool(current and current.bom)
+            output = (b"\xef\xbb\xbf" if output_bom else b"") + source.encode("utf-8")
             if len(output) > settings.BACKSTORY_NOTE_MAX_BYTES:
                 raise StorageError("note_too_large", 413)
             original = current.raw_bytes if current else b""

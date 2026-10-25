@@ -24,8 +24,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const result = spawnSync(python, args, { env, stdio: 'inherit' });
     if (result.status !== 0) process.exit(result.status || 1);
   }
-  const server = spawn(python, ['manage.py', 'runserver', '127.0.0.1:8765', '--noreload'], { env, stdio: 'inherit' });
+  const start = () => spawn(python, ['manage.py', 'runserver', '127.0.0.1:8765', '--noreload'], { env, stdio: 'inherit' });
+  let server = start();
+  writeFileSync(`${runtime}/server.pid`, String(process.pid));
+  let restarting = false;
+  let restarts = 0;
+  writeFileSync(`${runtime}/restart-count`, String(restarts));
+  const watch = child => child.on('exit', code => { if (!restarting) process.exit(code || 0); });
+  watch(server);
+  process.on('SIGUSR2', () => {
+    if (restarting) return;
+    restarting = true;
+    server.once('exit', () => { server = start(); watch(server); restarting = false; writeFileSync(`${runtime}/restart-count`, String(++restarts)); });
+    server.kill('SIGTERM');
+  });
   process.on('SIGTERM', () => server.kill('SIGTERM'));
   process.on('SIGINT', () => server.kill('SIGINT'));
-  server.on('exit', code => process.exit(code || 0));
+
 }
