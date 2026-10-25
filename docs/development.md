@@ -1,5 +1,8 @@
 # Local development
 
+For a Compose installation or an existing wiki, start with the [setup guide](setup.md).
+This page covers native development against generated disposable data.
+
 Use generated synthetic storage only. Install Python 3.14, uv 0.12.19 and
 Node 22 LTS (22.12 or newer). Lockfiles pin dependencies; the image pins Python
 3.14.9 and Node 22.23.4. Choose a previously nonexistent fixture directory:

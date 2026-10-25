@@ -1,5 +1,8 @@
 # Confined storage and direct reads
 
+For the sequential Compose walkthrough, including an existing wiki rehearsal,
+see [initial setup](setup.md). This page explains the underlying storage policy.
+
 The administrator configures an existing non-secret wiki-relative identity file
 and its SHA-256 outside the wiki. Startup and every note/folder access read that
 regular file with a hard 64 KiB cap. Missing, unreadable, excluded, oversized or
@@ -17,8 +20,9 @@ agent/dependency directories, backup/sync internals, credential/secret/config/au
 files, token and key files, SSH credentials, and private-key/container suffixes.
 The maintained list is in `wiki/policy.py`. `BACKSTORY_EXCLUSIONS` adds
 comma-separated root-relative glob patterns or directory prefixes. No allowlist
-can bypass these content denies. The future privileged formatting-config reader
-uses a separate narrow purpose; hidden configuration is never browsable content.
+can bypass these content denies. The formatting-config reader uses a separate
+narrow purpose for supported data configuration; hidden configuration is never
+browsable content.
 
 Paths arrive from Django already URL-decoded once. Literal percent sequences,
 Unicode and `#` in filenames are preserved; their links are URL-quoted. The

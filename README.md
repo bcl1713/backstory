@@ -6,9 +6,11 @@ Named accounts share bounded folder/search access, conflict-checked saves,
 explicit formatting recovery, protected drafts and revision history. One
 non-root container supervises Gunicorn and background SQLite indexing.
 
-Start with [local development](docs/development.md) to generate a disposable
-synthetic wiki and create human/assistant accounts interactively. For Compose,
-backup/restore and the operator walkthrough, use [operations](docs/operations.md).
+Start here: [initial setup](docs/setup.md). **Already have a wiki?
+[Connect the existing folder](docs/setup.md#2b-start-with-an-existing-wiki).**
+The Compose-first guide also includes an optional disposable demo.
+[Local development](docs/development.md) covers the native synthetic workflow;
+[operations](docs/operations.md) covers recovery and backup/restore.
 No private notes, default passwords or production configuration ship here.
 
 [Storage policy](docs/storage.md), [safe preview](docs/preview.md),

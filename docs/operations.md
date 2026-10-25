@@ -1,5 +1,8 @@
 # Local operations and recovery
 
+For first-time setup or an existing wiki, start with the [setup guide](setup.md).
+The commands below are a synthetic-only operations and recovery walkthrough.
+
 Use this path only with newly generated disposable storage. Production storage,
 mount/permission changes, tunnels, public exposure and deployment require separate
 owner authorization. Backstory does not enroll whatever directory is visible.
