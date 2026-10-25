@@ -46,9 +46,23 @@ test('representative search reports partial state, then opens current disk conte
   await python("import django; django.setup(); from indexing.worker import run_batch\nfor n in range(500):\n r=run_batch(now=10000000000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)");
   await page.goto('/search/?q=synthetic');
   await expect(page.getByRole('status')).toContainText('ready');
-  await expect(page.getByRole('link', { name: 'Next page', exact: true })).toBeVisible();
   const response = await page.request.get('/search/?q=synthetic');
   expect((await response.body()).length).toBeLessThan(40000);
+  // Broad matches may legitimately hit the search work guard even when ready.
+  // FTS indexes paths as well as titles/bodies: daily selects the 299 dailies
+  // without the large-note match, so exercise real cursor paging on that subset.
+  await page.goto('/search/?q=daily');
+  await expect(page.getByRole('status')).toContainText('ready');
+  const results = page.locator('main ol li a');
+  await expect(results).toHaveCount(30);
+  const firstPage = await results.evaluateAll(links => links.map(link => link.getAttribute('href')));
+  expect(firstPage.every(href => href.startsWith('/notes/daily/2026/'))).toBe(true);
+  await expect(page.getByRole('link', { name: 'Next page', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Next page', exact: true }).click();
+  await expect(page).toHaveURL(/[?&]cursor=/);
+  await expect(results).toHaveCount(30);
+  const secondPage = await results.evaluateAll(links => links.map(link => link.getAttribute('href')));
+  expect(secondPage.every(href => href.startsWith('/notes/daily/2026/') && !firstPage.includes(href))).toBe(true);
   await writeFile(`${runtime}/wiki/Search observer.md`, '# Current external disk content\n');
   await page.goto('/search/?' + new URLSearchParams({ q: 'observerneedleunique' }));
   await page.getByRole('link', { name: 'Search observer', exact: true }).click();
