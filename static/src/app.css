@@ -19,3 +19,8 @@
 #source { display: block; box-sizing: border-box; width: 100%; min-height: 32rem; padding: 1rem; font: 1rem/1.65 ui-monospace, monospace; }
 .editor-help { color: #4a6060; font-size: .9rem; }
 @media (max-width: 600px) { main { margin: 1rem auto; padding: .75rem; } .cm-editor .cm-content { padding: .75rem; } .editor-controls button { min-height: 44px; } }
+[data-format-proposal], [data-conflict], [data-reauth], [data-diagnostics-region] { margin: 1.5rem 0; padding: 1rem; border: 1px solid #93a6a5; border-radius: .35rem; background: #fffefa; }
+[data-format-proposal] textarea, [data-conflict] textarea { width: 100%; box-sizing: border-box; font: .9rem/1.5 ui-monospace, monospace; }
+[data-format-diff] { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; font-size: .85rem; background: #eff2ed; padding: .75rem; }
+[data-diagnostics] { overflow-wrap: anywhere; }
+button:disabled { opacity: .6; cursor: wait; }

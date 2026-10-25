@@ -90,7 +90,7 @@ test('keyboard edits and undo redo survive mode changes without putting decorati
   expect(await readSource(page)).toBe(source);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   await page.locator('.cm-content').focus();
-  await page.keyboard.press('Control+Shift+z');
+  await page.keyboard.press('Control+Shift+Z');
   expect(await readSource(page)).toBe(changed);
   await expect(page.getByRole('status').filter({ hasText: 'Unsaved changes' })).toBeVisible();
 });
