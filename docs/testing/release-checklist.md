@@ -81,8 +81,8 @@ This local record does not imply a hosted pass.
   not establish host UID1000 bind mapping on a rootful deployment. No live wiki
   or Portainer UI was used.
 
-- [ ] Generic HTTPS proxy follow-up: combined independent security review and
-  rebuilt-image acceptance remain pending. Focused backend/security tests passed
+- [x] Generic HTTPS proxy follow-up: combined independent security review accepted
+  at `27d7b26`, with no mandatory residual findings. Focused backend/security tests passed
   278 checks and the generated localhost TLS-proxy fixture passed 16 assertions,
   including verified CA/hostname, secure login/CSRF save and forged-peer rejection.
   All owned processes and generated TLS/wiki/data roots were cleaned. Compose rendering
@@ -90,12 +90,36 @@ This local record does not imply a hosted pass.
   cookie/host/origin/peer/client-header inputs, while preserving loopback defaults.
   These config checks do not prove a live Portainer, NPM, Caddy or firewall setup.
 
-- [ ] Cloudflare follow-up combined review: existing-connector reuse is documented
+- [x] Cloudflare follow-up combined review accepted at `27d7b26`: existing-connector reuse is documented
   without new credentials. Optional bundled packaging has no app host port,
   isolated origin/egress networks, exact connector peer trust and a private
   connector-only token-file mount. Focused configuration/permissions checks and
   a current-image internal mock-origin login/save/denial proof passed; no live
   Cloudflare edge, account, route, DNS or Access change was performed.
+
+- [x] Review finding SERVER-001 corrected: all three host-data manifests derive
+  host-source provenance from their actual mounts. Early startup refuses equal
+  or nested wiki/private-data sources before creating private state. 201 affected
+  checks passed, including 47 new provenance cases. Independent corrected-image
+  verification passed 18 overlap refusals plus three UID1000 sibling startups and
+  the original UID10001/named-volume startup; all owned resources were removed.
+  Host symlink/bind aliases still require operator provenance verification.
+- [x] Rebuilt `backstory:server-fixed` image:
+  `sha256:9ee9075255e4a539b890ddd6f88e7249ed731e951a5fd0fb11f37befddf72508`.
+  All 101 tracked runtime/build/manifest hashes match the reviewed source.
+  The subsequent two browser-fixture corrections do not change those inputs.
+- [x] [Hosted runtime checkpoint `6a9d1fc`](https://github.com/bcl1713/backstory/actions/runs/40236810430)
+  passed 667 Python, 21 formatter and 48 Chromium browser tests. Later local
+  verification corrected two test assumptions: a ready broad search can legitimately
+  hit its work guard, and deleting every cookie is not a deterministic server-side
+  expiry fixture. The latest full local browser run had 47 passes and one cookie-loss
+  assertion failure. At reviewed `27d7b26`, the 46 unchanged scenarios retain their
+  passes; both modified expiry scenarios pass focused verification (2 passed).
+  The search correction also passed its focused check and the latest full run,
+  including real disjoint cursor pages over 299 dailies. This combined evidence
+  is not a fresh final-head full local suite. Accumulated failed-login counters in
+  the reused synthetic DB caused an initial focused verification failure; only that generated
+  fixture was reset through `axes_reset`, with production throttling unchanged.
 
 Merge and deployment remain separate owner decisions requiring explicit approval;
 neither is part of this authorized local delivery.
@@ -104,8 +128,8 @@ Physical mobile hardware, screen-reader interaction, other browser engines and
 real NFS/TrueNAS behavior are unavailable locally. No claims cover those checks.
 Four low npm audit entries trace to the retained transitive KaTeX advisory
 GHSA-238p-pmpm-9mq7; no arbitrary dependency override or audit-zero claim.
-Proxy trust defaults off. The generic trusted-proxy follow-up is subject to the
-pending combined gate above; no brand or proxy setting is implicitly trusted.
+Proxy trust defaults off. The generic trusted-proxy follow-up passed the scoped
+combined gate above; no brand or proxy setting is implicitly trusted.
 Production requires separate owner authorization, storage identity enrollment
 and deployment verification.
 

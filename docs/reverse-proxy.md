@@ -7,9 +7,9 @@ Prepare the [existing wiki and fresh private data](setup.md#2b-start-with-an-exi
 first. This guide supplies configuration; it does not deploy or change your live
 proxy, firewall or server.
 
-**Follow-up status:** Compose rendering, focused backend checks and a generated
-localhost TLS-proxy fixture passed. Combined independent security review and
-rebuilt-image acceptance remain pending in the
+**Follow-up status:** Compose rendering, focused backend checks, a generated
+localhost TLS-proxy fixture and rebuilt-image acceptance passed. Combined
+independent security review accepted the corrected source at `27d7b26`; see the
 [release checklist](testing/release-checklist.md). Do not treat rendering as proof
 that your existing proxy and origin restrictions meet this contract.
 

@@ -2,8 +2,9 @@
 
 Status: implementation authorized by the owner after the planning baseline.
 Tasks 1–12 and their scoped reviews are complete on the feature branch. The
-environment-driven setup, trusted HTTPS proxy and optional tunnel follow-up is
-under combined verification and review. The owner's subsequent editor
+environment-driven setup, trusted HTTPS proxy and optional tunnel follow-up passed
+scoped independent review at `27d7b26` and synthetic corrected-image verification.
+The owner's subsequent editor
 direction supersedes the earlier source-plus-separate-preview primary UI.
 Implementation remains limited to disposable synthetic storage and localhost;
 production deployment, public exposure and live-storage changes are unauthorized.
@@ -396,8 +397,8 @@ Access. Do not trust a bare Access email header as application authentication.
 No Tunnel/Access configuration or public exposure is part of local development.
 
 Follow-up integration status (2026-10-25): the original Stage 4 baseline was
-reviewed; the later generic HTTPS proxy implementation has a separate pending
-combined security/image acceptance gate. The explicit contract is vendor-neutral:
+reviewed; the later generic HTTPS proxy implementation passed its separate
+combined security/image acceptance gate at `27d7b26`. The explicit contract is vendor-neutral:
 `BACKSTORY_PROXY_MODE=trusted`, HTTPS cookies, exact allowed hosts/HTTPS origins,
 an allowlist of actual TCP peer IPs/CIDRs, preserved Host and a proxy-overwritten
 single `X-Forwarded-Proto: https`. The optional selected client-IP header must
