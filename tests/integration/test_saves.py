@@ -72,7 +72,7 @@ def test_failure_requires_explicit_source_recovery(reader, wiki, monkeypatch):
     monkeypatch.setattr(backend(), "format_source", lambda *args: pytest.fail("recovery ran formatter"))
     recovered = save(reader, draft, base, mode="source_recovery", token=data["recovery_token"])
     assert recovered.status_code == 200
-    assert recovered.json()["state"] == "saved_source_index_delayed"
+    assert recovered.json()["state"] == "saved_source"
     assert recovered.json()["diagnostics"] == data["diagnostics"]
     assert (wiki / "note.md").read_bytes() == b"\xef\xbb\xbf" + draft.encode()
 
@@ -439,3 +439,20 @@ def test_invalid_mode_json_is_rejected_without_writing(reader, wiki, mode):
     assert response.status_code == 400
     assert response.json()["reason_code"] == "invalid_save_mode"
     assert target.read_bytes() == original
+
+
+def test_wiki_parent_permission_error_is_actionable_and_preserves_disk(reader, wiki, monkeypatch):
+    import errno
+    import os
+    from wiki.storage import read_note
+    (wiki / 'note.md').write_text('# Original\n')
+    base = read_note('note.md').revision
+    original = os.open
+    def denied(path, flags, *args, **kwargs):
+        if isinstance(path, str) and path.startswith('.backstory-tmp-'):
+            raise PermissionError(errno.EACCES, 'synthetic parent write denied')
+        return original(path, flags, *args, **kwargs)
+    monkeypatch.setattr(os, 'open', denied)
+    response = save(reader, '# Edited\n', base)
+    assert response.status_code == 503 and response.json()['reason_code'] == 'wiki_write_denied'
+    assert (wiki / 'note.md').read_text() == '# Original\n'

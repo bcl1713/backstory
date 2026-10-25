@@ -92,8 +92,9 @@ def format_with_recovery(actor, path, source, base):
 
 
 def enqueue_note(path, revision):
-    """Task 7 replaces this boundary with its persistent coalescing queue."""
-    return False
+    from indexing.queue import enqueue_note as persist
+    persist(path, revision)
+    return True
 
 
 def _saved(source, revision, diagnostics, diff, mode, *, uncertain=False, path):
@@ -198,6 +199,8 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                         if conflict:
                             return conflict
                         return SaveResult("current", submitted_source, observed.revision if observed else None, diagnostics, diff, reason_code="create_link_unsupported" if current is None and error.errno in {errno.EOPNOTSUPP, errno.ENOTSUP, errno.EXDEV, errno.EPERM} else "write_not_confirmed", status=503)
+                    if error.errno in {errno.EACCES, errno.EPERM}:
+                        raise StorageError("wiki_write_denied", 503) from None
                     raise _os_error(error) from None
                 finally:
                     if descriptor is not None:

@@ -37,4 +37,4 @@ RUN ldconfig && BACKSTORY_WIKI_ROOT=/tmp/backstory-build/wiki \
     && chown backstory:backstory /var/lib/backstory
 USER 10001:10001
 EXPOSE 8000
-CMD ["gunicorn", "backstory.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "4", "--timeout", "30", "--access-logfile", "/dev/null"]
+CMD ["sh", "docker/entrypoint.sh"]

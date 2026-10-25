@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from indexing import views as index_views
 
 app_name = "wiki"
 urlpatterns = [
@@ -13,5 +14,7 @@ urlpatterns = [
     path("format/<path:path>", views.format_note, name="format"),
     path("save/<path:path>", views.save, name="save"),
     path("attachments/<path:path>", views.attachment, name="attachment"),
+    path("index/status/", index_views.status, name="index-status"),
+    path("index/schedule/", index_views.schedule, name="index-schedule"),
     path("status/", views.status, name="status"),
 ]

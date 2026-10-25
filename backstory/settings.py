@@ -76,7 +76,7 @@ SECRET_KEY = persistent_secret()
 DEBUG = False
 INSTALLED_APPS = [
     "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions",
-    "django.contrib.staticfiles", "backstory.apps.BackstoryConfig", "accounts", "wiki",
+    "django.contrib.staticfiles", "backstory.apps.BackstoryConfig", "accounts", "wiki", "indexing",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware", "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -129,3 +129,10 @@ BACKSTORY_ATTACHMENT_RANGE_MAX_BYTES = 8 * 1024 * 1024
 DATA_UPLOAD_MAX_MEMORY_SIZE = BACKSTORY_NOTE_MAX_BYTES * 6 + 1024
 BACKSTORY_IDENTITY_MAX_BYTES = 64 * 1024
 BACKSTORY_EXCLUSIONS = tuple(filter(None, (item.strip() for item in os.environ.get("BACKSTORY_EXCLUSIONS", "").split(","))))
+
+# Background maintenance defaults; requests never start scans.
+BACKSTORY_INDEX_BATCH_SIZE = int(os.environ.get("BACKSTORY_INDEX_BATCH_SIZE", "20"))
+BACKSTORY_INDEX_YIELD_SECONDS = float(os.environ.get("BACKSTORY_INDEX_YIELD_SECONDS", "1"))
+BACKSTORY_INDEX_INCREMENTAL_SECONDS = int(os.environ.get("BACKSTORY_INDEX_INCREMENTAL_SECONDS", "300"))
+BACKSTORY_INDEX_VERIFY_SECONDS = int(os.environ.get("BACKSTORY_INDEX_VERIFY_SECONDS", "86400"))
+BACKSTORY_INDEX_QUEUE_LIMIT = int(os.environ.get("BACKSTORY_INDEX_QUEUE_LIMIT", "1000"))

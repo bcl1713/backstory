@@ -181,7 +181,8 @@ def attachment(request, path):
 @login_required
 @require_GET
 def status(request):
-    return render(request, "wiki/status.html", {"readiness": check_readiness()})
+    from indexing.worker import index_status
+    return render(request, "wiki/status.html", {"readiness": check_readiness(), "index": index_status()})
 
 
 @login_required
