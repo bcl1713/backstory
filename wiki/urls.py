@@ -4,6 +4,7 @@ from . import views
 app_name = "wiki"
 urlpatterns = [
     path("", views.shell, name="shell"),
+    path("new/", views.new_note, name="new"),
     path("folders/", views.folders, name="folders"),
     path("folders/<path:path>", views.folders, name="folder"),
     path("notes/<path:path>", views.note, name="note"),

@@ -16,7 +16,7 @@ from .formatting import format_source
 from .markdown import render_preview
 from .policy import authorize_content
 from .readiness import check_readiness
-from .storage import list_folder, read_note, require_ready
+from .storage import list_folder, open_directory, read_note, require_ready
 from .saves import format_with_recovery, parse_precondition, save_note
 
 
@@ -59,6 +59,24 @@ def folders(request, path=""):
         return JsonResponse(asdict(page))
     except StorageError as error:
         return JsonResponse({"reason_code": error.reason_code, "restart": error.reason_code == "cursor_invalid"}, status=error.status)
+
+
+@login_required
+@require_GET
+def new_note(request):
+    try:
+        folder = authorize_content(request, request.GET.get("folder", ""), "folder", query_parameter="folder")
+        require_ready()
+        # Validate only the requested existing directory, without listing it.
+        with open_directory(folder):
+            pass
+        return render(request, "wiki/note.html", {
+            "is_new": True,
+            "folder": folder,
+            "note": {"path": "", "source": "", "newline": "\n", "revision": None},
+        })
+    except StorageError as error:
+        return diagnostic(request, error)
 
 
 @login_required
