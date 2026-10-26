@@ -3,6 +3,7 @@
 This is the generic contract for an operator-managed HTTPS frontend and a private
 HTTP origin. The application has no proxy-vendor detection or proxy-provided
 account login. Nginx Proxy Manager, Caddy and other proxies use the same settings.
+For a build-free published image, follow the [Portainer / Compose guide](portainer.md).
 Prepare the [existing wiki and fresh private data](setup.md#2b-start-with-an-existing-wiki)
 first. This guide supplies configuration; it does not deploy or change your live
 proxy, firewall or server.
@@ -87,10 +88,11 @@ docker compose config
 docker compose run --rm web python manage.py check --deploy --fail-level WARNING
 ```
 
-Then use the same first-time migrate/account commands from setup and ordinary
-`docker compose up -d --build`. Portainer uses the same values through its stack
-environment form. Do not reuse a localhost-only image for a new runtime feature;
-build the reviewed current source on the selected endpoint.
+For the published image, use `BACKSTORY_IMAGE=ghcr.io/bcl1713/backstory:1.0.0`
+and the [image deployment guide](portainer.md): pull, start, then provision named
+accounts interactively. Portainer uses these same security values through its
+stack environment form. The source-build workflow in setup remains available
+for local development.
 
 ## Optional frontend examples
 

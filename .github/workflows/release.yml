@@ -1,0 +1,149 @@
+name: release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Keep a release together; never cancel an image upload mid-publication.
+concurrency:
+  group: main-release
+  cancel-in-progress: false
+permissions:
+  contents: read
+
+jobs:
+  correctness:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: correctness
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select semantic version
+        id: version
+        run: |
+          git fetch origin main --tags
+          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
+            echo 'Main has advanced; use the release run for its current head.' >&2
+            exit 1
+          fi
+          python3 scripts/release-version.py
+      - name: Check for an already published release
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          # A successful empty list means absence; API/auth failures stop the run.
+          state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == env.TAG) | if .draft then "draft" else "published" end')"
+          case "$state" in
+            published)
+              echo 'published=true' >> "$GITHUB_OUTPUT"
+              echo "Release $TAG is already published; nothing to do." >> "$GITHUB_STEP_SUMMARY" ;;
+            draft|'') ;;
+            *) echo 'Unexpected release lookup result; refusing publication.' >&2; exit 1 ;;
+          esac
+      - name: Image metadata
+        if: steps.existing.outputs.published != 'true'
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}"
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+          echo "minor=${VERSION%.*}" >> "$GITHUB_OUTPUT"
+          echo "major=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+        if: steps.existing.outputs.published != 'true'
+      - uses: docker/setup-buildx-action@v3
+        if: steps.existing.outputs.published != 'true'
+      - uses: docker/login-action@v3
+        if: steps.existing.outputs.published != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and publish the tested commit
+        if: steps.existing.outputs.published != 'true'
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            BACKSTORY_VERSION=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}
+            ${{ steps.image.outputs.name }}:${{ steps.version.outputs.tag }}
+            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.minor }}
+            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.major }}
+            ${{ steps.image.outputs.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Prepare deployment assets and release notes
+        if: steps.existing.outputs.published != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          mkdir release-assets
+          cp compose.portainer.yaml release-assets/
+          sed "s/1\.0\.0/$VERSION/g" docs/portainer.md > release-assets/portainer.md
+          sed "s|^BACKSTORY_IMAGE=.*|BACKSTORY_IMAGE=$IMAGE:$VERSION|" portainer.env.example > release-assets/portainer.env.example
+          (cd release-assets && sha256sum compose.portainer.yaml portainer.env.example portainer.md > SHA256SUMS)
+          cat > release-assets/release-notes.md <<EOF
+          Deploy Backstory with Portainer or Docker Compose using the attached files. No clone or local build is required.
+
+          Image: \`$IMAGE:$VERSION\` (linux/amd64 and linux/arm64)
+
+          Digest: \`$IMAGE@$DIGEST\`
+
+          Tested source: \`$SOURCE_SHA\`
+
+          Start with the [Portainer deployment guide](https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.tag }}/docs/portainer.md).
+          Set your storage paths, UID/GID, public host, CSRF origin and actual trusted proxy peer; create named accounts interactively after startup.
+          EOF
+      - name: Create matching GitHub release after image publication
+        if: steps.existing.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SOURCE_SHA: ${{ github.sha }}
+          PREVIOUS: ${{ steps.version.outputs.previous }}
+        run: |
+          state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == env.TAG) | if .draft then "draft" else "published" end')"
+          case "$state" in
+            '')
+              notes_args=()
+              if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$TAG" ]; then
+                notes_args+=(--notes-start-tag "$PREVIOUS")
+              fi
+              gh release create "$TAG" --target "$SOURCE_SHA" --title "Backstory $TAG" --draft \
+                --generate-notes --notes-file release-assets/release-notes.md "${notes_args[@]}" ;;
+            draft)
+              # A draft might predate this commit or this build's digest.
+              gh release edit "$TAG" --target "$SOURCE_SHA" --notes-file release-assets/release-notes.md ;;
+            *) echo 'Release is already public or state is unexpected; refusing to modify it.' >&2; exit 1 ;;
+          esac
+          gh release upload "$TAG" release-assets/compose.portainer.yaml release-assets/portainer.env.example \
+            release-assets/portainer.md release-assets/SHA256SUMS --clobber
+          gh release edit "$TAG" --draft=false --latest
+          echo "Published [$TAG](https://github.com/${{ github.repository }}/releases/tag/$TAG)" >> "$GITHUB_STEP_SUMMARY"

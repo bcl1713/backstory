@@ -1,5 +1,8 @@
 # Cloudflare Tunnel
 
+**Deploy the published image:** the [Portainer / Compose guide](portainer.md)
+covers the complete clone-free workflow, including user provisioning and `.env`.
+
 **Already running a tunnel? Reuse it.** Backstory needs no Cloudflare token,
 account credentials or additional connector when your existing `cloudflared`
 already forwards requests. Use the [existing-tunnel path](#reuse-an-existing-tunnel)
@@ -56,7 +59,7 @@ the actual TCP peer at Backstory: Docker NAT may make it a gateway address.
 Trusting a shared gateway also requires controls excluding other callers behind
 that gateway. Do not substitute Cloudflare's public edge IP ranges or all Docker
 networks for the connector's actual origin-side peer. Follow the generic guide's
-build, account and verification workflow, then the edge requirements below.
+image-pull, account and verification workflow, then the edge requirements below.
 
 ## Edge and authentication requirements
 
@@ -160,14 +163,13 @@ Plan deliberate image updates. Outbound connectivity must meet Cloudflare's
 [tunnel firewall requirements](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/tunnel-with-firewall/);
 the app itself has no egress network.
 
-### Build the app and prepare accounts
+### Pull the app and prepare accounts
 
-Build current reviewed source once on the **selected Docker endpoint**. The
-tunnel manifest has no build context, so explicitly select the base file for this
-one command even though `.env` selects the tunnel file:
+Set `BACKSTORY_IMAGE=ghcr.io/bcl1713/backstory:1.0.0` in `.env`. The tunnel
+manifest has no build context; pull the published image on the selected endpoint:
 
 ```sh
-docker compose -f compose.yaml build web
+docker compose pull
 docker compose config
 docker compose run --rm --no-deps web python manage.py check --deploy --fail-level WARNING
 docker compose run --rm --no-deps web python manage.py migrate
@@ -180,9 +182,8 @@ Use the hidden interactive prompts for separate named human and assistant accoun
 Inspect config for correct paths, selected user, token **path only**, no host ports,
 private origin membership and exact trusted `/32`. Read the actual storage text:
 expect `ready: marker_present`, not merely exit zero. No connector starts in
-these account commands. An image from an authorized registry is another option;
-no public Backstory registry image is promised. The selected endpoint must be
-able to obtain exactly the image tag in `.env`.
+these account commands. The selected endpoint must be able to pull exactly the GHCR image tag in `.env`.
+The app is published for amd64 and arm64; no application build is needed.
 
 ### Configure the selected tunnel and start when ready
 

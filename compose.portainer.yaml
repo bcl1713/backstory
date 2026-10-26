@@ -1,4 +1,4 @@
-# Docker Standalone only; build the image separately. See docs/setup.md.
+# Docker Standalone; use the published GHCR image. See docs/portainer.md.
 services:
   web:
     image: ${BACKSTORY_IMAGE:?Set an image already available on the selected Docker endpoint or registry}

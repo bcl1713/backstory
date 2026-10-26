@@ -1,5 +1,8 @@
 # Environment configuration
 
+For a clone-free installation using `ghcr.io/bcl1713/backstory:1.0.0`, start with
+the [Portainer / Compose guide](portainer.md) and `portainer.env.example`.
+
 This is the reference for environment variables consumed by Backstory settings,
 startup, Compose and its background worker. Start with the [setup steps](setup.md)
 for storage preparation and interactive account creation. The examples below are
@@ -71,8 +74,9 @@ overwrite `X-Forwarded-Proto` with the single value `https`. Follow the full
 replace firewall/network restrictions. The client-IP header defaults to `none`.
 
 For **Portainer Docker Standalone**, upload `compose.portainer.yaml` and supply
-the same `BACKSTORY_*` values plus `BACKSTORY_IMAGE=backstory:local` (or the actual
-available image tag). Build or distribute the image to that endpoint first.
+the same `BACKSTORY_*` values plus
+`BACKSTORY_IMAGE=ghcr.io/bcl1713/backstory:1.0.0`. The endpoint pulls the published
+image; no build or repository checkout is required.
 `COMPOSE_FILE` and `COMPOSE_PROJECT_NAME` do not select the Web editor manifest or
 stack name: select those explicitly in Portainer. Bind paths are on the endpoint
 host, not the browser or Portainer container. Startup migrates the database;
@@ -176,7 +180,7 @@ cannot be established by rendering a manifest.
 | --- | --- | --- | --- |
 | `COMPOSE_FILE` | CLI selection of manifests; not a Portainer stack variable. | Colon-separated filenames on Linux; default auto-discovers `compose.yaml`. | `compose.yaml:compose.host-data.yaml`. Omission selects named-data-volume setup; wrong filename fails CLI config. Bundled tunnel uses `compose.cloudflare.yaml`. |
 | `COMPOSE_PROJECT_NAME` | Optional CLI installation identity; choose a stable unique name. | Compose project name (lowercase letters/digits, hyphens/underscores, begins alphanumeric); default checkout directory name. | `backstory-wikitest`. Changing it can select a different named volume/network and conflict with an existing host port. Portainer uses its explicit stack name. |
-| `BACKSTORY_IMAGE` | Image tag/reference; required for build-free Portainer/tunnel files. | Docker image reference; base default `backstory:local`, no default in standalone/tunnel. | `backstory:local`. Base builds it; other manifests require an already available image on the selected endpoint/registry. Missing required input fails rendering; unavailable image fails startup/pull. |
+| `BACKSTORY_IMAGE` | Image tag/reference; required for build-free Portainer/tunnel files. | Docker image reference; base default `backstory:local`, no default in standalone/tunnel. | `ghcr.io/bcl1713/backstory:1.0.0` for standalone/tunnel. Base source workflow builds `backstory:local`; build-free manifests pull the selected registry image. Missing required input fails rendering; unavailable image fails startup/pull. |
 | `BACKSTORY_UID` | Optional non-root process user; choose to match effective host storage ownership. | Supported recipe: positive numeric UID; default `10001`. | `1000`. Omission retains image owner. Wrong mapping causes storage access failures; never solve that by running as root or changing live wiki permissions. |
 | `BACKSTORY_GID` | Optional non-root process group, coupled to UID and storage access. | Supported recipe: positive numeric GID; default `10001`. | `1000`. Omission retains image group; wrong mapping can deny access. Rootless/userns deployments require separate mapping verification. |
 | `BACKSTORY_DATA_HOST_PATH` | Required only for host-data overlay, Portainer and bundled tunnel; private host data bind. | Existing canonical absolute POSIX directory, disjoint from wiki/checkout; no default. | `/srv/backstory-data`. Missing substitution fails rendering; missing directory fails Docker startup (`create_host_path: false`). Ignored by base named-volume setup. |

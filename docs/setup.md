@@ -1,4 +1,8 @@
-# Set up Backstory
+# Set up Backstory from source
+
+**For the published v1 image, use the [Portainer / Compose deployment guide](portainer.md).**
+It requires no checkout or build. This page retains the source-build and
+disposable-fixture workflows.
 
 **Already have a wiki? [Connect the existing folder](#2b-start-with-an-existing-wiki).**
 Backstory edits Markdown files where they are; no import or conversion is needed.
@@ -18,10 +22,10 @@ Use Linux, Git, Docker Engine and the Docker Compose plugin. Check
 `git --version`, `docker version` and `docker compose version`. Connecting an
 existing wiki needs no host Python or Node: they run inside the image.
 
-Until this release is merged, clone the feature branch:
+To build the v1.0.0 source release yourself:
 
 ```sh
-git clone --branch feat/backstory-release-one https://github.com/bcl1713/backstory.git
+git clone --branch v1.0.0 https://github.com/bcl1713/backstory.git
 cd backstory
 ```
 
@@ -269,13 +273,12 @@ All bind paths refer to that **endpoint host**, not your browser computer or the
 Portainer container. Use absolute canonical paths, verified owners and disjoint
 wiki/data roots outside the checkout.
 
-The image must already exist on the selected endpoint or in an accessible
-registry. No public Backstory registry image is promised. On that endpoint, from
-this checkout with the configured `.env`, run `docker compose build`. Keep the
-same `BACKSTORY_IMAGE` tag in Portainer (set `BACKSTORY_IMAGE=backstory:local`
-explicitly when using the default local build). A web-editor stack cannot build this
-checkout from `build: .`; the standalone file therefore has no build context.
-Distributing an image to a different endpoint is a separate operator step.
+Use `BACKSTORY_IMAGE=ghcr.io/bcl1713/backstory:1.0.0` to pull the published
+amd64/arm64 image. The [complete image deployment guide](portainer.md) and release
+assets let you deploy without this checkout. A web-editor stack uses the
+standalone file, which has no build context. If deliberately testing a source
+build instead, build it on the selected endpoint and set its actual local image
+tag explicitly.
 
 When proceeding with your own deployment, select the intended Standalone
 environment, then **Stacks → Add stack** and a stable installation name. Paste

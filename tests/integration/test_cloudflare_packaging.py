@@ -150,7 +150,7 @@ def test_example_dotenv_selects_tunnel_manifest_with_plain_compose(tmp_path):
     deployment = rendered(result)
     assert set(deployment['services']) == {'web', 'cloudflared'}
     web, connector = (deployment['services'][name] for name in ['web', 'cloudflared'])
-    assert web['image'] == 'backstory:local'
+    assert web['image'] == 'ghcr.io/bcl1713/backstory:1.0.0'
     assert web['user'] == connector['user'] == '1000:1000'
     assert web['environment']['BACKSTORY_IDENTITY_PATH'] == '.backstory-marker'
     assert web['environment']['BACKSTORY_ALLOWED_HOSTS'] == 'wiki.example.test'

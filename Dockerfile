@@ -12,6 +12,9 @@ RUN npm run build && npm prune --omit=dev --ignore-scripts --no-audit --no-fund 
 
 FROM ghcr.io/astral-sh/uv:0.12.19 AS uv
 FROM python:3.14.9-slim-bookworm AS runtime
+ARG BACKSTORY_VERSION=1.0.0
+LABEL org.opencontainers.image.source="https://github.com/bcl1713/backstory" \
+    org.opencontainers.image.version="$BACKSTORY_VERSION"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 COPY --from=uv /uv /usr/local/bin/uv
