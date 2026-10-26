@@ -135,7 +135,7 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
                 state, paths = 'missing', ()
             if state == 'resolved':
                 return LinkResult(state, reverse('wiki:note', args=[paths[0]]) + suffix, label)
-            action = '/new/link/' + '?' + urlencode({'source': source_path, 'target': target})
+            action = reverse('wiki:linked-new') + '?' + urlencode({'source': source_path, 'target': target})
             if state == 'ambiguous':
                 return LinkResult(state, None, label, action_href=action, choices=paths)
             parsed = urlsplit(path)

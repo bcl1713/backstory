@@ -59,14 +59,14 @@ Task 1's resolution, renders the existing editor with `filename` and
 `link_fragment`, or an explicit choice/open-existing page. `new_note` stays
 compatible. The optional chosen path is validated as an explicit user choice.
 
-- [ ] Write and run failing HTTP tests for prefilled creation, chooser, explicit
+- [x] Write and run failing HTTP tests for prefilled creation, chooser, explicit
   new-path choice, concurrent target appearance, strict query encoding, auth,
   forbidden folders and storage unavailable. GET must write no wiki files.
-- [ ] Implement the revalidating GET entry point and templates; enforce existing
+- [x] Implement the revalidating GET entry point and templates; enforce existing
   parent folders and Markdown path policy. Existing targets get an Open action.
-- [ ] Verify explicit `If-None-Match: *` saves, collision refusal, formatting,
+- [x] Verify explicit `If-None-Match: *` saves, collision refusal, formatting,
   indexing delay, and source-byte preservation using real synthetic storage.
-- [ ] Run creation and save-security suites; expect green; commit.
+- [x] Run creation and save-security suites; expect green; commit.
 
 ### Task 3: Live activation, retained drafts and refresh
 

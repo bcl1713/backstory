@@ -100,3 +100,83 @@ def test_pending_and_partial_index_cannot_establish_missing(ready):
     for target in ['Fresh', 'Ideas/New']:
         result = resolve_link('Notes/Source.md', target, 'wiki')
         assert result.state == 'unavailable' and result.action_href is None
+
+
+def test_link_creation_get_prefills_existing_editor_without_writes(ready, reader):
+    before = {str(p.relative_to(ready)): p.stat().st_mtime_ns for p in ready.rglob('*')}
+    response = reader.get('/new/link/', {'source': 'Notes/Source.md', 'target': 'Ideas/New#Details|Label'})
+    assert response.status_code == 200
+    html = response.content.decode()
+    assert 'id="note-filename"' in html and 'value="New.md"' in html
+    assert 'Ideas' in html and 'preview-details' in html
+    assert response['Cache-Control'] == 'no-store'
+    assert {str(p.relative_to(ready)): p.stat().st_mtime_ns for p in ready.rglob('*')} == before
+
+
+def test_link_entry_rechecks_existing_note_instead_of_offering_creation(ready, reader):
+    result = resolve_link('Notes/Source.md', 'Ideas/New#Part', 'wiki')
+    (ready / 'Ideas/New.md').write_text('# Created concurrently\n')
+    response = reader.get(result.action_href)
+    assert response.status_code == 200
+    assert b'/notes/Ideas/New.md#preview-part' in response.content
+    assert b'Open existing note' in response.content
+    assert b'id="note-filename"' not in response.content
+    assert (ready / 'Ideas/New.md').read_text() == '# Created concurrently\n'
+
+
+def test_ambiguous_entry_requires_explicit_destination_choice(ready, reader):
+    for folder in ['a', 'b']:
+        (ready / folder).mkdir()
+        (ready / folder / 'Target.md').write_text('---\naliases: [Shared]\n---\n# Target\n')
+    from indexing.queue import request_scan
+    request_scan('rebuild')
+    drain(worker)
+    query = {'source': 'Notes/Source.md', 'target': 'Shared#Part|Label'}
+    response = reader.get('/new/link/', query)
+    assert response.status_code == 200
+    assert b'/notes/a/Target.md#preview-part' in response.content
+    assert b'/notes/b/Target.md#preview-part' in response.content
+    assert b'id="note-filename"' not in response.content
+    response = reader.get('/new/link/', {**query, 'destination': 'Ideas/Shared.md'})
+    assert response.status_code == 200 and b'value="Shared.md"' in response.content
+    assert not (ready / 'Ideas/Shared.md').exists()
+
+
+@pytest.mark.parametrize('query', [
+    'source=Notes/Source.md&target=%FF',
+    'source=Notes/Source.md&target=%ZZ',
+    'source=Notes/Source.md&target=Fresh&destination=%FF.md',
+    'source=Notes/Source.md&target=Fresh&destination=../outside.md',
+    'source=Notes/Source.md&target=Fresh&destination=AGENTS.md',
+    'source=Notes/Source.md&target=Fresh&destination=Missing/New.md',
+    'source=Notes/Source.md&target=Fresh&destination=picture.png',
+])
+def test_link_entry_rejects_invalid_encoding_and_unsafe_destinations(ready, reader, query):
+    assert reader.get('/new/link/?' + query).status_code == 404
+
+
+def test_link_entry_auth_method_readiness_and_literal_percent_path(ready, reader):
+    from django.test import Client
+    query = {'source': 'Notes/Source.md', 'target': '%2e%2e#Details|Label'}
+    assert Client().get('/new/link/', query).status_code == 302
+    assert reader.post('/new/link/', query).status_code == 405
+    response = reader.get('/new/link/', query)
+    assert response.status_code == 200 and b'value="%2e%2e.md"' in response.content
+    (ready / '.backstory-marker').unlink()
+    assert reader.get('/new/link/', query).status_code == 503
+
+
+def test_link_creation_uses_guarded_save_and_keeps_original_source(ready, reader, monkeypatch):
+    source = (ready / 'Notes/Source.md').read_bytes()
+    query = {'source': 'Notes/Source.md', 'target': 'Ideas/New#Part|Label'}
+    assert reader.get('/new/link/', query).status_code == 200
+    body = json.dumps({'source': '# New\n', 'mode': 'formatted'})
+    assert reader.post('/save/Ideas/New.md', data=body, content_type='application/json').status_code == 428
+    from wiki import saves
+    monkeypatch.setattr(saves, 'enqueue_note', lambda *args: False)
+    response = reader.post('/save/Ideas/New.md', data=body, content_type='application/json', HTTP_IF_NONE_MATCH='*')
+    assert response.status_code == 200 and response.json()['state'] == 'saved_index_delayed'
+    assert reader.post('/save/Ideas/New.md', data=body, content_type='application/json', HTTP_IF_NONE_MATCH='*').status_code == 412
+    result = resolve_link('Notes/Source.md', 'Ideas/New#Part|Label', 'wiki')
+    assert result.href == '/notes/Ideas/New.md#preview-part'
+    assert (ready / 'Notes/Source.md').read_bytes() == source
