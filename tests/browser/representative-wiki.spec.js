@@ -32,7 +32,7 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   const folder = await page.request.get('/folders/daily/2026');
   expect((await folder.json()).entries.length).toBeLessThanOrEqual(100);
   await page.goto('/search/?q=synthetic');
-  await expect(page.getByRole('status')).toContainText('partial');
+  await expect(page.getByRole('main').getByRole('status')).toContainText('partial');
   const requests = [];
   page.on('request', r => requests.push(new URL(r.url()).pathname));
   await page.goto('/notes/reference/Large.md');
@@ -68,7 +68,7 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   await page.getByRole('link', { name: 'Open safe server preview' }).click();
   expect(external).toEqual([]);
   await page.goto('/search/?q=synthetic');
-  await expect(page.getByRole('status')).toContainText('ready');
+  await expect(page.getByRole('main').getByRole('status')).toContainText('ready');
   const search = await page.request.get('/search/?q=synthetic');
   expect((await search.body()).length).toBeLessThan(50000);
   await page.goto('/notes/Slice.md');

@@ -191,7 +191,7 @@ for (const presentation of ['live', 'source']) {
     const { rm } = await import('node:fs/promises');
     await rm(created, { force: true });
     await login(page, '/?folder=Drafts');
-    await page.getByRole('link', { name: 'New note in this folder' }).click();
+    await page.getByRole('navigation', { name: 'Folder', exact: true }).getByRole('link', { name: 'New note in this folder' }).click();
     await page.getByLabel('Note filename').fill('Missing/note.md');
     await page.getByRole('button', { name: 'Create note', exact: true }).click();
     await expect(page.locator('[data-editor-status]')).toContainText('current folder');

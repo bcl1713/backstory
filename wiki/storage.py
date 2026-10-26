@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import errno
 import hashlib
+import heapq
 import os
 import secrets
 import stat
@@ -133,22 +134,44 @@ class _Listing:
     path: str
     fingerprint: tuple
     policy: str
-    iterator: object
+    after: tuple | None
     descriptor: int
     expires: float
 
     def close(self):
-        self.iterator.close()
         os.close(self.descriptor)
 
 
-# Process-local cursors deliberately expire/restart on worker changes. Retain only
-# one open directory iterator per cursor, never a tree or all filenames in RAM.
+# Process-local cursors deliberately expire/restart on worker changes. Retain a
+# pinned directory and the last sort key, never a tree or all filenames in RAM.
 _CURSORS = OrderedDict()
 _CURSOR_LOCK = threading.Lock()
 _CURSOR_TTL = 60
 _CURSOR_CAP = 32
-_SCAN_CAP = 1000
+
+
+def _entry_key(entry):
+    return entry.kind != "folder", entry.name.casefold(), entry.name
+
+
+def _folder_entries(directory, path, after):
+    with os.scandir(directory) as iterator:
+        for entry in iterator:
+            candidate = f"{path}/{entry.name}" if path else entry.name
+            try:
+                validate_path(candidate, "content")
+                info = entry.stat(follow_symlinks=False)
+            except (PathDenied, FileNotFoundError):
+                continue
+            if stat.S_ISDIR(info.st_mode):
+                kind = "folder"
+            elif stat.S_ISREG(info.st_mode):
+                kind = "file"
+            else:
+                continue
+            item = FolderEntry(candidate, entry.name, kind)
+            if after is None or _entry_key(item) > after:
+                yield item
 
 
 def list_folder(path: str, cursor: str | None = None, limit: int = 100) -> FolderPage:
@@ -173,43 +196,20 @@ def list_folder(path: str, cursor: str | None = None, limit: int = 100) -> Folde
                         raise CursorInvalid()
                 else:
                     descriptor = os.dup(directory)
-                    try:
-                        iterator = os.scandir(descriptor)
-                    except BaseException:
-                        os.close(descriptor)
-                        raise
-                    listing = _Listing(path, fingerprint, policy, iterator, descriptor, now + _CURSOR_TTL)
-                entries = []
-                exhausted = False
-                for _ in range(_SCAN_CAP):
-                    try:
-                        entry = next(listing.iterator)
-                    except StopIteration:
-                        exhausted = True
-                        break
-                    candidate = f"{path}/{entry.name}" if path else entry.name
-                    try:
-                        validate_path(candidate, "content")
-                        info = entry.stat(follow_symlinks=False)
-                    except (PathDenied, FileNotFoundError):
-                        continue
-                    if stat.S_ISDIR(info.st_mode):
-                        kind = "folder"
-                    elif stat.S_ISREG(info.st_mode):
-                        kind = "file"
-                    else:
-                        continue
-                    entries.append(FolderEntry(candidate, entry.name, kind))
-                    if len(entries) == limit:
-                        break
+                    listing = _Listing(path, fingerprint, policy, None, descriptor, now + _CURSOR_TTL)
+                # Global ordering requires inspecting the immediate directory.
+                # Select only a page in memory; rescan after the last key on the
+                # next request rather than caching every name or descendants.
+                entries = heapq.nsmallest(limit, _folder_entries(directory, path, listing.after), key=_entry_key)
                 # Check the pinned directory and freshly resolved name: rename or
                 # replacement during enumeration must not yield a usable cursor.
                 with open_directory(path) as current:
                     if _fingerprint(listing.descriptor) != fingerprint or _fingerprint(current) != fingerprint:
                         raise CursorInvalid()
                 next_cursor = None
-                if not exhausted:
+                if len(entries) == limit:
                     next_cursor = secrets.token_urlsafe(24)
+                    listing.after = _entry_key(entries[-1])
                     listing.expires = now + _CURSOR_TTL
                     while len(_CURSORS) >= _CURSOR_CAP:
                         _CURSORS.popitem(last=False)[1].close()

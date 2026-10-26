@@ -128,6 +128,28 @@ def test_folder_pages_are_bounded(wiki):
         storage.list_folder("", page.next_cursor, 1)
 
 
+def test_folder_pages_sort_directories_first_then_names_across_pages(wiki):
+    storage = module("wiki.storage")
+    # Create in an order that differs from alphabetical order, including case ties.
+    for name in ["zebra.md", "Beta.md", "apple.md", "Apple.md", "日本語.md"]:
+        (wiki / name).write_text("synthetic")
+    for name in ["zoo", "beta", "Alpha"]:
+        (wiki / name).mkdir()
+    (wiki / "Alpha/never-enumerated.md").write_text("synthetic")
+    (wiki / ".hidden").mkdir()
+    (wiki / "linked").symlink_to(wiki / "Alpha", target_is_directory=True)
+    cursor = None
+    names = []
+    for _ in range(10):
+        page = storage.list_folder("", cursor, 2)
+        names.extend(entry.name for entry in page.entries)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert cursor is None
+    assert names == ["Alpha", "beta", "zoo", "Apple.md", "apple.md", "Beta.md", "zebra.md", "日本語.md"]
+
+
 def test_policy_changes_invalidate_cursor(wiki, settings):
     storage = module("wiki.storage")
     (wiki / "a.md").write_text("synthetic")

@@ -37,7 +37,7 @@ test('folder archival previews exact link changes and refreshes navigation', asy
   await expect(page.getByRole('status').filter({ hasText: 'completed' })).toBeVisible();
   expect(await readFile(`${runtime}/wiki/${root}/Index.md`, 'utf8')).toBe(`# Active\n[[${root}/Archives/Project/Project|Project alias]]\n`);
   await page.getByRole('link', { name: 'Open destination', exact: true }).click();
-  await expect(page.getByRole('link', { name: 'Project.md', exact: true })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Folder', exact: true }).getByRole('link', { name: 'Project.md', exact: true })).toBeVisible();
 });
 
 test('unsaved note draft blocks its move entry point without discarding editor history', async ({ page }) => {
