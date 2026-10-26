@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -41,9 +42,11 @@ test('inactive aliases and ordinary links have safe destinations; only selected 
   await select(page, source.indexOf('[[Other]]') + 3, source.indexOf('Wiki alias'));
   await expect(editor(page).getByRole('link', { name: 'Other', exact: true })).toHaveCount(0);
   await select(page, 0);
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
   await expect(alias).toHaveCount(0);
   await expect(page.locator('.cm-content')).toContainText('[[Other#Details|Wiki alias]]');
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   await expect(alias).toBeVisible();
   expect(await read(page)).toBe(source);

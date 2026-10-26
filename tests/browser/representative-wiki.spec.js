@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -37,11 +38,13 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   await page.goto('/notes/reference/Large.md');
   await page.waitForFunction(() => document.querySelector('[data-markdown-editor]')?.markdownEditor);
   expect(Buffer.byteLength(await source(page))).toBe(699000);
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+End');
   await page.keyboard.insertText('\nOrdinary large note draft\n');
   const edited = await source(page);
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+z');
@@ -49,6 +52,7 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   await page.keyboard.press('Control+Shift+Z');
   expect(await source(page)).toBe(edited);
   // Explicit protected recovery during paused maintenance; it does not save.
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Store protected draft', exact: true }).click();
   await expect(page.locator('[data-editor-status]')).toContainText('Protected draft stored');
   await python("import django; django.setup(); from indexing.worker import run_batch\nfor n in range(500):\n r=run_batch(now=10000000000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)");
@@ -60,6 +64,7 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   expect((await context.cookies()).filter(c => !['sessionid', 'csrftoken'].includes(c.name))).toEqual([]);
   page.once('dialog', d => d.accept());
   await page.goto('/notes/Slice.md');
+  await revealChrome(page);
   await page.getByRole('link', { name: 'Open safe server preview' }).click();
   expect(external).toEqual([]);
   await page.goto('/search/?q=synthetic');
@@ -68,12 +73,14 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   expect((await search.body()).length).toBeLessThan(50000);
   await page.goto('/notes/Slice.md');
   for (const target of ['No such note', 'synthetic-duplicate', '']) {
+    await revealChrome(page);
     await page.getByLabel('Link target', { exact: true }).fill(target);
     if (target) {
       await page.getByRole('button', { name: 'Resolve link' }).click();
       await expect(page.locator('[data-link-result]')).toContainText(target === 'synthetic-duplicate' ? 'ambiguous' : 'missing');
     } else {
       await page.getByRole('button', { name: 'Resolve link' }).click();
+      await revealChrome(page);
       expect(await page.getByLabel('Link target', { exact: true }).evaluate(el => el.validity.valueMissing)).toBe(true);
     }
   }

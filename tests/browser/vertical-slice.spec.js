@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, stat, readdir, unlink } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -21,6 +22,7 @@ async function replace(page, value) {
   await page.keyboard.insertText(value);
 }
 async function action(page, label, route = '/save/') {
+  await revealChrome(page);
   const [response] = await Promise.all([
     page.waitForResponse(response => response.url().includes(route) && response.request().method() === 'POST'),
     page.getByRole('button', { name: label, exact: true }).click(),
@@ -28,6 +30,7 @@ async function action(page, label, route = '/save/') {
   return response;
 }
 async function mode(page, presentation) {
+  await revealChrome(page);
   if (presentation === 'source') await page.getByRole('button', { name: 'Raw source', exact: true }).click();
 }
 
@@ -60,10 +63,12 @@ for (const presentation of ['live', 'source']) {
     await page.getByRole('button', { name: 'Apply formatted source' }).click();
     const formatted = await readSource(page);
     expect(formatted).not.toBe(submitted);
+    await revealChrome(page);
     await page.getByRole('button', { name: 'Raw source', exact: true }).click();
     await page.locator('.cm-content').focus();
     await page.keyboard.press('Control+z');
     expect(await readSource(page)).toBe(submitted);
+    await revealChrome(page);
     await page.getByRole('button', { name: 'Live preview', exact: true }).click();
     await page.locator('.cm-content').focus();
     await page.keyboard.press('Control+Shift+Z');
@@ -170,7 +175,9 @@ for (const presentation of ['live', 'source']) {
       expect(await readSource(page)).toBe(draft);
       await expect(page.locator('[data-editor-status]')).toContainText('Draft retained');
       await writeFile(identityPath, identity);
+      await revealChrome(page);
       await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+      await revealChrome(page);
       await page.getByRole('button', { name: 'Live preview', exact: true }).click();
       expect(saves).toHaveLength(1);
       expect(await readFile(target)).toEqual(original);
@@ -227,9 +234,11 @@ test('two authenticated editors expose base/current/draft and confirmed reload n
   await expect(second.getByLabel('Base source', { exact: true })).toHaveValue('# Original\n');
   await expect(second.getByLabel('Current disk source', { exact: true })).toHaveValue('# First writer\n');
   await secondContext.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await revealChrome(second);
   await second.getByRole('button', { name: 'Copy draft', exact: true }).click();
   expect(await second.evaluate(() => navigator.clipboard.readText())).toContain('# My preserved draft');
   const download = second.waitForEvent('download');
+  await revealChrome(second);
   await second.getByRole('button', { name: 'Download draft' }).click();
   const downloaded = await download;
   expect((await readFile(await downloaded.path())).toString()).toContain('# My preserved draft');
@@ -247,6 +256,7 @@ test('two authenticated editors expose base/current/draft and confirmed reload n
 test('dirty navigation, logout and unload are guarded; keyboard Save and textarea use the same write path', async ({ page }) => {
   await login(page);
   await replace(page, '# Guarded draft\n');
+  await revealChrome(page);
   for (const selector of [page.getByRole('link', { name: 'Backstory', exact: true }), page.getByRole('button', { name: 'Sign out' })]) {
     page.once('dialog', dialog => dialog.dismiss());
     await selector.click();
@@ -256,6 +266,7 @@ test('dirty navigation, logout and unload are guarded; keyboard Save and textare
   page.once('dialog', dialog => dialog.dismiss());
   await page.reload({ timeout: 3000 }).catch(() => {});
   expect(await readSource(page)).toContain('# Guarded draft');
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Plain text fallback' }).click();
   await page.getByLabel('Markdown source (plain text fallback)').fill('# Fallback draft\n');
   const saved = page.waitForResponse(response => response.url().includes('/save/') && response.request().method() === 'POST');
@@ -356,11 +367,13 @@ for (const presentation of ['live', 'source']) test(`${presentation}: accepted n
     expect(await readSource(page)).toBe(exactOriginal);
     await page.getByRole('button', { name: 'Apply formatted source' }).click();
     expect(await readSource(page)).toBe('# Mixed\n\nBody\n');
+    await revealChrome(page);
     await page.getByRole('button', { name: 'Raw source', exact: true }).click();
     await page.locator('.cm-content').focus();
     await page.keyboard.press('Control+z');
     expect(await readSource(page)).toBe(exactOriginal);
     await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
+    await revealChrome(page);
     await page.getByRole('button', { name: 'Live preview', exact: true }).click();
     await page.locator('.cm-content').focus();
     await page.keyboard.press('Control+Shift+Z');

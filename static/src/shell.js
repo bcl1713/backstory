@@ -1,5 +1,38 @@
+const zenToggle = document.querySelector('[data-zen-toggle]');
+if (zenToggle) {
+  document.body.classList.add('zen-enabled');
+  zenToggle.hidden = false;
+  const setChrome = open => {
+    document.body.classList.toggle('chrome-open', open);
+    zenToggle.setAttribute('aria-expanded', String(open));
+    const navigation = document.querySelector('[data-site-navigation]');
+    if (navigation) navigation.open = open;
+    if (open) {
+      document.querySelector('[data-site-navigation] a')?.focus();
+    } else {
+      const parent = document.querySelector('[data-markdown-editor]');
+      if (parent?.markdownEditor && !parent.hidden) parent.markdownEditor.focus();
+      else document.querySelector('#source')?.focus();
+    }
+    document.dispatchEvent(new Event('zen-navigation-change'));
+  };
+  zenToggle.addEventListener('click', () => setChrome(zenToggle.getAttribute('aria-expanded') !== 'true'));
+  document.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === 'Period') {
+      event.preventDefault();
+      event.stopPropagation();
+      setChrome(zenToggle.getAttribute('aria-expanded') !== 'true');
+    } else if (event.key === 'Escape' && zenToggle.getAttribute('aria-expanded') === 'true') {
+      // A formatting proposal owns Escape first; its handler returns focus.
+      const proposal = document.querySelector('[data-format-proposal]');
+      if (proposal && !proposal.hidden) return;
+      event.preventDefault();
+      setChrome(false);
+    }
+  }, true);
+}
 const navigation = document.querySelector('[data-site-navigation]');
-if (navigation) {
+if (navigation && !zenToggle) {
   const media = matchMedia('(min-width: 601px)');
   const resize = () => { navigation.open = media.matches; };
   resize();
@@ -47,13 +80,12 @@ if (pathElement && sidebar) {
 // Explicit browser-local calendar date: never substitute the server's date.
 const noteNavigation = document.querySelector('[data-note-navigation]');
 if (noteNavigation) {
-  let lastDay = '';
   let busy = false;
   const refresh = async () => {
     const now = new Date();
     const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (busy || lastDay === day + timezone) return;
+    if (busy) return;
     busy = true;
     const context = noteNavigation.querySelector('[data-today-context]');
     const today = noteNavigation.querySelector('[data-today-result]');
@@ -83,7 +115,6 @@ if (noteNavigation) {
         recent.append(li);
       }
       status.textContent = `Index ${result.index_state}. ${result.recent.length ? 'Up to five existing notes, by indexed modification time.' : 'No recent notes available.'}`;
-      lastDay = day + timezone;
     } catch {
       today.textContent = 'Today unavailable. Check storage or sign in again.';
       recent.replaceChildren();
@@ -94,4 +125,5 @@ if (noteNavigation) {
   window.addEventListener('focus', refresh);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
   navigation?.addEventListener('toggle', () => { if (navigation.open) refresh(); });
+  document.addEventListener('zen-navigation-change', refresh);
 }

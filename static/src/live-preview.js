@@ -45,11 +45,13 @@ function buildDecorations(view) {
       }
       return false;
     }
-    // Never partly hide a block intersecting any cursor or selection range.
-    if (blocks.test(node.name) && selected(node)) return false;
-    if (/^ATXHeading[1-6]$/.test(node.name)) {
-      ranges.push(Decoration.line({ class: `lp-heading lp-h${node.name.at(-1)}` }).range(state.doc.lineAt(node.from).from));
+    const heading = /^(ATXHeading[1-6]|SetextHeading[12])$/.test(node.name);
+    if (heading) {
+      const level = node.name.at(-1);
+      ranges.push(Decoration.line({ class: `lp-heading lp-h${level}`, attributes: { role: 'heading', 'aria-level': level } }).range(state.doc.lineAt(node.from).from));
     }
+    // Heading semantics persist even while the selected block reveals source.
+    if (blocks.test(node.name) && selected(node)) return false;
     if (node.name === 'StrongEmphasis') mark(node.from, node.to, 'lp-strong');
     if (node.name === 'Emphasis') mark(node.from, node.to, 'lp-emphasis');
     if (node.name === 'InlineCode') mark(node.from, node.to, 'lp-code');

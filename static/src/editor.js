@@ -48,6 +48,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         history(), keymap.of([...defaultKeymap, ...historyKeymap]), drawSelection(),
         markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
         EditorView.lineWrapping,
+        EditorView.theme({}, { dark: true }),
         EditorView.contentAttributes.of({ 'aria-label': 'Markdown editor', spellcheck: 'false' }),
         EditorView.cspNonce.of(nonce),
         EditorView.exceptionSink.of(() => onFailure()),
@@ -92,8 +93,7 @@ function attachNoteEditor() {
   const newline = JSON.parse(document.querySelector('#note-newline').textContent);
   // A user may edit the initially available textarea while the module loads.
   // Preserve those edits; untouched text keeps its original mixed line endings.
-  const normalized = initialSource.replace(/\r\n|\r/g, '\n');
-  const source = fallback.value === normalized ? initialSource : fallback.value.replaceAll('\n', newline);
+  const source = fallback.value === fallback.defaultValue ? initialSource : fallback.value.replaceAll('\n', newline);
   const readiness = document.querySelector('[data-editor-readiness]');
   let api;
   let fallbackSource = source;

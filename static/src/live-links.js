@@ -99,7 +99,11 @@ export function createLiveLinksExtension({ getPath = () => '' } = {}) {
       const { state } = this.view;
       const path = getPath();
       const links = linksIn(this.view);
-      const keys = new Set(links.slice(0, limit).map(link => JSON.stringify([path, link.kind, link.target])));
+      const keys = new Set();
+      for (const link of links) {
+        keys.add(JSON.stringify([path, link.kind, link.target]));
+        if (keys.size === limit) break;
+      }
       for (const key of this.cache.keys()) if (!keys.has(key)) this.cache.delete(key);
       this.queue = this.queue.filter(entry => this.cache.get(entry.key) === entry);
       const ranges = [];

@@ -33,9 +33,9 @@
 
 **Interfaces:** Syntax extension recognizes WikiLink nodes; `createLiveLinksExtension({getPath})` renders links and resolves via `/resolve/`. The editor supplies a current path callback, including after creating a note.
 
-- [ ] Add synthetic browser regressions for inactive alias links, active source lines, keyboard/touch navigation, unsafe/missing/ambiguous links, stale responses and source preservation. Run and confirm failure from absent rendering.
-- [ ] Implement syntax-aware bounded resolution and accessible inline widgets. Keep ordinary links consistent, source selections unchanged, draft guards active and DOM text inert.
-- [ ] Build assets and run focused link/preview/browser regressions; inspect output. Commit the independent change.
+- [x] Add synthetic browser regressions for inactive alias links, active source lines, keyboard/touch navigation, unsafe/missing/ambiguous links, stale responses and source preservation. Run and confirm failure from absent rendering.
+- [x] Implement syntax-aware bounded resolution and accessible inline widgets. Keep ordinary links consistent, source selections unchanged, draft guards active and DOM text inert.
+- [x] Build assets and run focused link/preview/browser regressions; inspect output. Commit the independent change.
 
 ### Task 2: Honest editor presentations and navigation (#8)
 
@@ -43,9 +43,9 @@
 
 **Interfaces:** One mode state (`loading`, `live`, `source`, `plain`) controls selected buttons, readiness and visible surfaces. `/navigation/` returns Today resolution plus up to five recently modified indexed notes, revalidated against storage policy.
 
-- [ ] Add failing browser tests for loading/ready, all three modes and complete long-note textarea access with unsaved source preserved. Add backend tests for date/timezone validation, missing/ambiguous Today and policy-checked recent notes.
-- [ ] Implement presentation state and label the plain textarea as complete-document source. Use the browser's current local date and named timezone, shown explicitly. Today resolves the date-named existing note using the safe resolver; recently modified entries reuse index data, with freshness shown. No source is created by navigation.
-- [ ] Run targeted browser, navigation, authorization and resolution tests. Commit the independent change.
+- [x] Add failing browser tests for loading/ready, all three modes and complete long-note textarea access with unsaved source preserved. Add backend tests for date/timezone validation, missing/ambiguous Today and policy-checked recent notes.
+- [x] Implement presentation state and label the plain textarea as complete-document source. Use the browser's current local date and named timezone, shown explicitly. Today resolves the date-named existing note using the safe resolver; recently modified entries reuse index data, with freshness shown. No source is created by navigation.
+- [x] Run targeted browser, navigation, authorization and resolution tests. Commit the independent change.
 
 ### Task 3: Default Zen presentation (#1)
 
@@ -53,6 +53,15 @@
 
 **Interfaces:** Shared semantic CSS color tokens and shared note font metrics. A discoverable navigation/control toggle and keyboard shortcut reveal chrome, Escape returns to editing; persistent save status/errors remain outside hidden chrome.
 
-- [ ] Add failing tests for default Zen, reveal/return focus, desktop 80ch column, heading semantics/grid, mobile no overflow, and visible conflict/error states.
-- [ ] Fetch the official theme reference and JetBrains Mono font/license. Implement Tokyo Night tokens, font ligatures, semantic headings, responsive column and collapsible controls/navigation without changing document state.
-- [ ] Build assets; run full Python, formatter and browser suites. Review desktop/mobile screenshots. Obtain a fresh final code review, fix material findings with regressions, and report any remaining limitations. Commit the independent change.
+- [x] Add failing tests for default Zen, reveal/return focus, desktop 80ch column, heading semantics/grid, mobile no overflow, and visible conflict/error states.
+- [x] Fetch the official theme reference and JetBrains Mono font/license. Implement Tokyo Night tokens, font ligatures, semantic headings, responsive column and collapsible controls/navigation without changing document state.
+- [x] Build assets; run full Python, formatter and browser suites. Review desktop/mobile screenshots. Obtain a fresh final code review, fix material findings with regressions, and report any remaining limitations. Commit the independent change.
+
+## Final verification
+
+- Python: 802 passed.
+- Formatter: 21 passed (packaged subprocesses require execution permissions in this sandbox).
+- Browser: 66 passed, including the generated 1,000-note corpus, long-note source, both timezone boundaries, save/conflict/recovery and desktop/mobile Zen.
+- Fresh review findings fixed with regressions: leading blank/mixed-newline startup, narrow-panel control occlusion, distinct link-limit accounting, same-day navigation refresh.
+- Desktop/mobile screenshots and conflict presentation inspected.
+- Keep the local feature branch for review; no live wiki or deployment changes.
