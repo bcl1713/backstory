@@ -9,6 +9,7 @@
   --focus: #e0af68;
   --error: #f7768e;
   --selection: #283457;
+  --selection-text: #c0caf5;
   --cursor: #c0caf5;
   --heading-1: #bb9af7;
   --heading-2: #7aa2f7;
@@ -31,6 +32,6 @@ button { background: var(--surface-raised); color: var(--foreground); border: 1p
 a { color: var(--link); text-underline-offset: .2em; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .errorlist { color: var(--error); }
-::selection { background: var(--selection); color: var(--foreground); }
+::selection { background: var(--selection); color: var(--selection-text); }
 pre, code { font-family: var(--note-font); }
 h1, h2, h3, h4, h5, h6 { overflow-wrap: anywhere; }

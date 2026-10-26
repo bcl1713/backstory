@@ -62,9 +62,29 @@ date-named note through the safe resolver; it never creates one. Recently
 modified notes use the existing index and recheck current path policy/existence.
 See [preview and navigation details](preview.md) for syntax and index boundaries.
 
-Colors are shared CSS custom properties, providing the foundation for #3;
-user-facing color customization remains a separate follow-up. The palette comes
-from [Tokyo Night Night](https://github.com/folke/tokyonight.nvim/blob/main/extras/windows_terminal/tokyonight_night.json).
+Open **Menu → Color scheme → Import Alacritty theme** and select a theme `.toml`
+file, for example from [Alacritty themes](https://github.com/alacritty/alacritty-theme).
+The editor, plain text fallback and wiki interface immediately use its colors.
+The choice is remembered in this browser for this Backstory installation;
+**Restore Tokyo Night** returns to the default. If browser storage is disabled,
+colors can still be changed for the current page. Theme changes preserve your
+draft, undo history, document bytes, formatting settings and writing-column size.
+
+Choose a file with `colors.primary.background` and `colors.primary.foreground`.
+The importer also uses normal/bright ANSI accents, cursor and selection colors.
+It accepts ordinary TOML tables, dotted keys, inline tables, `#RRGGBB` and legacy
+`0xRRGGBB` strings, plus Alacritty's `CellForeground`/`CellBackground` references
+for cursor and selection. Light and dark themes work. Files are limited to
+256 KiB. Invalid files leave your current colors in place. The primary text pair
+must have at least 4.5:1 contrast; faint accents fall back to readable palette
+colors. Selection text may be adjusted for readability.
+
+Only colors are imported. Files are read locally in the browser; font/window
+settings and referenced `import` files are ignored. If your `alacritty.toml` only
+imports another theme, choose that theme's palette file directly.
+
+The default palette comes from
+[Tokyo Night Night](https://github.com/folke/tokyonight.nvim/blob/main/extras/windows_terminal/tokyonight_night.json).
 [JetBrains Mono v2.304](https://github.com/JetBrains/JetBrainsMono/tree/v2.304)
 is included under the [SIL Open Font License](../assets/fonts/OFL.txt); builds
 copy the font and its license into local static assets. No font service is used.
