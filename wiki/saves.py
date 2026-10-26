@@ -19,6 +19,7 @@ from .policy import validate_path
 from .revisions import application_lock, get_recovery, issue_recovery, store_required_backup
 from .staging import finish_stage, register_stage
 from .storage import _os_error, open_directory, read_note, require_ready
+from .relocations import wiki_write_lock
 
 
 def validate_save(actor, path, source):
@@ -73,7 +74,7 @@ def format_with_recovery(actor, path, source, base):
     """Explicit Format with original precondition can enable safe source recovery."""
     validate_save(actor, path, source)
     try:
-        with application_lock("note:" + path):
+        with wiki_write_lock(), application_lock("note:" + path):
             current = _current(path)
             conflict = _check_base(current, base, source)
             if conflict:
@@ -114,7 +115,7 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
     if not isinstance(mode, str) or mode not in {"formatted", "source_recovery"}:
         raise StorageError("invalid_save_mode")
     try:
-        with application_lock("note:" + path):
+        with wiki_write_lock(), application_lock("note:" + path):
             recovery = get_recovery(actor, path, base_revision, submitted_source, recovery_token) if mode == "source_recovery" else None
             current = _current(path)
             conflict = _check_base(current, base_revision, submitted_source)

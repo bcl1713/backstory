@@ -1,0 +1,25 @@
+{% extends 'wiki/shell.html' %}
+{% block title %}Move or rename · Backstory{% endblock %}
+{% block content %}
+<h1>Move or rename</h1>
+{% if diagnostic %}<p role="alert">{{ diagnostic }}. No unreviewed change will be applied. A started operation retains its recovery journal; inspect its status before retrying.</p>{% endif %}
+{% if writes_paused and not pending_moves %}<p role="alert">Writes are paused for an interrupted move. The account that started it or your administrator must recover it before new writes can proceed.</p>{% endif %}
+{% if pending_moves %}<section aria-label="Move recovery"><h2>Recovery needed</h2><p>New writes are paused until the interrupted move is resumed or rolled back.</p><ul>{% for pending in pending_moves %}<li><a href="{% url 'wiki:move-operation' pending.pk %}">{{ pending.source }} → {{ pending.destination }}</a> · {{ pending.reason_code }}</li>{% endfor %}</ul></section>{% endif %}
+{% if operation %}
+{% if operation.plan.conflicts %}<section aria-label="Recovery conflicts"><h2>Conflicting paths</h2><p>These paths changed outside the reviewed operation. Preserve and reconcile the external edits before resuming; unrelated bytes will not be overwritten.</p><ul>{% for path in operation.plan.conflicts %}<li>{{ path }}</li>{% endfor %}</ul></section>{% endif %}
+<p role="status">{{ operation.state }}{% if operation.reason_code %}: {{ operation.reason_code }}{% endif %}</p>
+<dl><dt>Source</dt><dd>{{ operation.source }}</dd><dt>Destination</dt><dd>{{ operation.destination }}</dd><dt>Discovery scheduling</dt><dd>{{ operation.index_state }}</dd></dl>{% if index %}<p>Current index: {{ index.state }}. <a href="{% url 'wiki:status' %}">Check discovery status</a>.</p>{% endif %}
+{% if operation.state == 'completed' %}<p>The filesystem move and reviewed link changes are complete. Search and link discovery update in the background; see <a href="{% url 'wiki:status' %}">index status</a>.</p>{% if result %}<p><a href="{{ result.href }}">Open destination</a></p>{% endif %}
+{% elif operation.state == 'cancelled' %}<p>The operation was cancelled. If it had started, its reviewed changes were rolled back. History and drafts are retained.</p>
+{% else %}
+<p>Review this exact inventory and the source diffs below. Destination parents must already exist. This operation repairs link destinations only; it does not rearrange Active or Archived headings.</p>
+<p>Other editor tabs retain their drafts and original revisions. A later save from a stale tab is rejected; compare with the destination before saving.</p>
+<form method="post">{% csrf_token %}{% if operation.plan.recovery_direction == 'rollback' %}<button name="action" value="rollback">Resume rollback</button>{% elif operation.state == 'preview' %}<button name="action" value="commit">Confirm move and link updates</button><button name="action" value="rollback">Cancel preview</button>{% else %}<p>Some steps may already be on disk. Resume verifies the journaled bytes and skips completed steps. Rollback reverses only verified changes. Neither action overwrites unrelated edits.</p><button name="action" value="commit">Resume move</button><button name="action" value="rollback">Roll back move</button>{% endif %}</form>
+{% endif %}
+<section aria-label="Source inventory"><h2>Source inventory</h2><ul>{% for entry in operation.plan.inventory %}<li>{{ entry.path }} · {{ entry.kind }}{% if entry.kind == 'file' %} · {{ entry.size }} bytes{% endif %}</li>{% endfor %}</ul></section>
+<section aria-label="Reviewed link updates"><h2>Link updates</h2>{% for change in operation.plan.changes %}<article><h3>{{ change.path }}{% if change.path != change.destination %} → {{ change.destination }}{% endif %}</h3><ul>{% for link in change.links %}<li><code>{{ link.before }}</code> → <code>{{ link.after }}</code></li>{% endfor %}</ul><pre tabindex="0" aria-label="Link change diff">{{ change.diff }}</pre></article>{% empty %}<p>No link updates needed.</p>{% endfor %}</section>
+{% else %}
+<p>Choose a note or folder and its full destination path. For example: <code>01-Projects/sample-project</code> → <code>04-Archives/01-Projects/sample-project</code>. Create the destination parent through your normal storage administration first.</p>
+<form method="post">{% csrf_token %}<p><label for="move-source">Source path</label><input id="move-source" name="source" value="{{ source }}" maxlength="4096" required></p><p><label for="move-destination">Destination path</label><input id="move-destination" name="destination" value="{{ destination }}" maxlength="4096" required></p><button type="submit">Preview move</button></form>
+{% endif %}
+{% endblock %}

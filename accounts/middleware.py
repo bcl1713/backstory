@@ -23,5 +23,9 @@ class SessionPolicyMiddleware:
                     logout(request)
                 request.session.set_expiry(max(1, int(min(sessions.idle(device.remembered), device.absolute_expires_at - timestamp).total_seconds())))
         if not request.user.is_authenticated and request.path not in {'/accounts/login/', '/health/'} and not request.path.startswith('/static/'):
+            if request.path.startswith('/tools/'):
+                from django.http import JsonResponse
+                return JsonResponse({'state': 'error', 'reason_code': 'authentication_required',
+                                     'untrusted_content': True}, status=401)
             return redirect_to_login(request.path)
         return self.get_response(request)

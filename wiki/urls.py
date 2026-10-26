@@ -1,9 +1,12 @@
-from django.urls import path
-from . import views
+from django.urls import include, path
+from . import views, relocation_views
 from indexing import views as index_views
 
 app_name = "wiki"
 urlpatterns = [
+    path("tools/", include("wiki.tool_urls")),
+    path("move/", relocation_views.move, name="move"),
+    path("move/<uuid:operation_id>/", relocation_views.operation, name="move-operation"),
     path("navigation/", views.navigation, name="navigation"),
     path("revisions/<int:revision_id>/", views.revision, name="revision"),
     path("drafts/<int:draft_id>/", views.draft, name="draft"),

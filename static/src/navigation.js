@@ -102,6 +102,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     document.title = `${path} · Backstory`;
     find('[data-server-preview]').href = '/preview/' + encode(path);
     find('[data-source-download]').href = '/source/' + encode(path);
+    find('[data-move-link]').href = '/move/?' + new URLSearchParams({ source: path });
     find('[data-secondary-links]').hidden = false;
     find('[data-link-discovery]').hidden = false;
     saveButton.textContent = 'Save';
@@ -352,6 +353,13 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   });
   const retainedDiagnostics = parse('#note-diagnostics');
   if (Array.isArray(retainedDiagnostics)) diagnostics(retainedDiagnostics);
+  document.addEventListener('click', event => {
+    const move = event.target.closest('a[href]');
+    if (!move || new URL(move.href, location.href).pathname !== '/move/' || !dirty()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    say('Save or store your draft before moving. Unsaved source and editor history are retained.');
+  }, true);
   installDraftGuards(dirty);
   find('[data-editor-actions]').hidden = false;
   saveButton.hidden = false;

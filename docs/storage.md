@@ -60,8 +60,9 @@ Folder requests enumerate one directory, never descendants: maximum 100 returned
 entries and 1,000 inspected directory entries per page. Ordering follows the
 filesystem. The process retains at most 32 iterators for 60 seconds; cursors
 contain no filenames. Mutation, policy changes, expiry, a consumed cursor, or a
-process restart requests a fresh listing (HTTP 409). No persistent tree cache or
-whole-wiki request is used. Run one Gunicorn process with four threads (the image
+process restart requests a fresh listing (HTTP 409). Ordinary browsing uses no persistent tree cache or whole-wiki request.
+The explicit [move preview](relocation.md) is a separate bounded inventory and
+review workflow; it stops when its complete-link inventory cannot be established. Run one Gunicorn process with four threads (the image
 default) so successive requests share the bounded cursor cache. Multiple
 independent web processes require sticky routing or a different shared cursor
 strategy. This does not remove the need for shared cross-process save locks.

@@ -182,7 +182,10 @@ def attachment(request, path):
 @require_GET
 def status(request):
     from indexing.worker import index_status
-    return render(request, "wiki/status.html", {"readiness": check_readiness(), "index": index_status()})
+    from .models import MoveOperation
+    pending = MoveOperation.objects.filter(state__in=['applying', 'recovery_required'])
+    return render(request, "wiki/status.html", {"readiness": check_readiness(), "index": index_status(),
+        "moves_pending": pending.filter(actor=request.user), "writes_paused": pending.exists()})
 
 
 @login_required
