@@ -78,6 +78,12 @@ jobs:
       - run: uv sync --frozen
       - run: npm ci
       - run: npm run build
+      - name: Use the upstream Ubuntu archive for browser dependencies
+        run: |
+          # The Azure mirror has stalled small dependency downloads in CI.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+          fi
       - run: npx playwright install --with-deps --only-shell chromium
       # Each runner owns its server, SQLite database and synthetic wiki.
       - run: npm run test:browser -- --shard=${{ matrix.shard }}/4
