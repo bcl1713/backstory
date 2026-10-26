@@ -136,7 +136,7 @@ test('tool save refuses an unsaved editor draft and preserves undo history', asy
   expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Original\n');
 });
 
-test('tool save retains a clean editor base so later human edits encounter a conflict', async ({ page }) => {
+test('tool save refreshes a clean editor and later human Save uses the refreshed base', async ({ page }) => {
   await writeFile(`${runtime}/wiki/Tool stale.md`, '# Original\n');
   await stubHost(page);
   await login(page);
@@ -145,13 +145,14 @@ test('tool save retains a clean editor base so later human edits encounter a con
   const base = await callTool(page, 'read_note', { path: 'Tool stale.md' });
   const saved = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Assistant\n' });
   expect(saved.state).toBe('saved');
-  expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Original\n');
+  await expect.poll(() => page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Assistant\n');
   await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.setSource('# Human draft\n'));
+  const response = page.waitForResponse(r => r.url().includes('/save/Tool%20stale.md'));
   await page.locator('[data-save]').click();
-  await expect(page.locator('[data-conflict]')).toBeVisible();
-  await expect(page.locator('#conflict-base')).toHaveValue('# Original\n');
-  await expect(page.locator('#conflict-current')).toHaveValue('# Assistant\n');
-  await expect(page.locator('#conflict-draft')).toHaveValue('# Human draft\n');
+  const confirmed = await response;
+  expect(confirmed.status()).toBe(200);
+  expect(confirmed.request().headers()['if-match']).toBe(saved.revision);
+  await expect(page.locator('[data-conflict]')).toBeHidden();
 });
 
 test('edits during a tool save survive and concurrent editor operations are held', async ({ page }) => {

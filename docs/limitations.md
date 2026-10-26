@@ -64,9 +64,10 @@ base source/revision, encoding metadata and diagnostics in application SQLite.
 It never writes the wiki or enables an automatic retry. Drafts are private to
 the account that stored them; **Protected drafts** remains available when wiki
 marker readiness fails, including after a process restart. Recovery reads protected
-bytes without opening the note's live path. Return of storage never refreshes
-that draft's base or saves it. Compare base/current/draft and explicitly accept
-the displayed current revision for manual merging before saving again.
+bytes without opening the note's live path. Once storage returns, the open editor
+can merge nonconflicting external changes against the recovered base; local
+differences remain unsaved. Conflicts retain that base and draft for comparison
+and an explicit reload or manual merge. No recovery or refresh saves the wiki.
 
 Wiki history is shared with authenticated active accounts and rechecks content
 policy. Open an original revision from `/history/<note-path>` and choose

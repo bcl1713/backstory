@@ -106,12 +106,14 @@ because its response was lost.
 An editor on the current page must be ready before a tool write. A save to that
 editor's note refuses unsaved drafts or in-progress editor operations. While a
 tool writes that note, editor Save/Format/Restore/draft-storage actions are held; typing
-continues. Tool saves never replace an open editor's text, undo history or base
-revision. The page indicates that disk may have changed; subsequent human Save
-uses its original revision and opens the existing conflict comparison. Drafts
-in other tabs likewise retain their original revision and encounter a conflict
-on Save. Reloading or accepting the current revision for manual merging remains
-an explicit human choice. No browser-persistent draft store is introduced.
+continues. After the tool finishes, the editor reads authoritative source again.
+A clean editor refreshes; edits typed during the write merge only when safe and
+remain unsaved. Overlapping edits retain the draft and original revision and show
+comparison/recovery controls. Other tabs periodically make the same checks.
+Tool writes remain guarded against unsaved drafts and pending conflict decisions;
+they never bypass a conflict or implicitly publish merged human edits. See
+[editor synchronization](editor.md) for reload, manual merge and undo behavior.
+No browser-persistent draft store is introduced.
 
 Filesystem editors do not participate in application locks. Final revision
 checks and saved readback reduce races but do not provide atomic compare-and-swap

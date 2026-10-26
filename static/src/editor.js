@@ -1,4 +1,4 @@
-import { Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { ChangeSet, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, keymap, drawSelection } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
@@ -6,6 +6,7 @@ import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
 import { createLiveLinksExtension, wikiLinks } from './live-links.js';
+import { sourceChanges } from './source-merge.js';
 
 export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onFailure = () => {}, nonce = '', getPath = () => '' }) {
   const presentation = new Compartment();
@@ -74,6 +75,16 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         annotations: [Transaction.userEvent.of('input'), isolateHistory.of('full')],
       });
     },
+    applyExternalSource(nextSource, preferredNewline) {
+      if (getSource() === nextSource && (!preferredNewline || preferredNewline === view.state.field(lineEndings).separator)) return;
+      const text = nextSource.replace(/\r\n|\r/g, '\n');
+      const changes = ChangeSet.of(sourceChanges(view.state.doc.toString(), text), view.state.doc.length);
+      view.dispatch({
+        changes,
+        effects: [restoreEndings.of(endingsFrom(nextSource, preferredNewline || view.state.field(lineEndings).separator)), view.scrollSnapshot().map(changes)],
+        annotations: [Transaction.userEvent.of('input.external'), isolateHistory.of('full')],
+      });
+    },
     setMode(mode) {
       if (!['live', 'source'].includes(mode)) throw new TypeError('Unknown editor mode');
       view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? liveExtensions() : []), annotations: Transaction.addToHistory.of(false) });
@@ -97,6 +108,10 @@ function attachNoteEditor() {
   const readiness = document.querySelector('[data-editor-readiness]');
   let api;
   let fallbackSource = source;
+  let fallbackNewline = newline;
+  let fallbackComposing = false;
+  fallback.addEventListener('compositionstart', () => { fallbackComposing = true; });
+  fallback.addEventListener('compositionend', () => { fallbackComposing = false; });
   let onChange = () => {};
   const changed = value => {
     fallbackSource = value;
@@ -132,11 +147,22 @@ function attachNoteEditor() {
   controls.querySelectorAll('[data-editor-mode]').forEach(button => button.addEventListener('click', () => setPresentation(button.dataset.editorMode)));
   fallback.addEventListener('input', () => {
     if (api) api.view.dispatch({ changes: { from: 0, to: api.view.state.doc.length, insert: fallback.value }, annotations: Transaction.userEvent.of('input') });
-    else changed(fallback.value.replaceAll('\n', newline));
+    else changed(fallback.value.replaceAll('\n', fallbackNewline));
   });
   const editor = {
     getSource: () => api ? api.getSource() : fallbackSource,
     setSource: value => { if (api) api.setSource(value); else { fallback.value = value; changed(value); } },
+    applyExternalSource: (value, preferredNewline) => {
+      const changes = ChangeSet.of(sourceChanges(fallback.value, value.replace(/\r\n|\r/g, '\n')), fallback.value.length);
+      const start = changes.mapPos(fallback.selectionStart), end = changes.mapPos(fallback.selectionEnd);
+      const direction = fallback.selectionDirection, top = fallback.scrollTop, left = fallback.scrollLeft;
+      fallbackNewline = preferredNewline || value.match(/\r\n|\r|\n/)?.[0] || fallbackNewline;
+      if (api) api.applyExternalSource(value, preferredNewline);
+      else changed(value);
+      fallback.setSelectionRange(start, end, direction);
+      fallback.scrollTop = top; fallback.scrollLeft = left;
+    },
+    isComposing: () => fallbackComposing || api?.view.composing || false,
     focus: () => api && !parent.hidden ? api.focus() : fallback.focus(),
     showFallback,
   };

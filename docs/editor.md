@@ -31,6 +31,26 @@ textarea. The selected button and readiness label identify the visible
 presentation. Edits made while the enhanced editor loads are retained. All
 presentations share the same draft, and switching never saves or formats it.
 
+Open notes check authoritative source every five seconds while visible, when the
+tab regains focus, and after a browser tool finishes writing the same note. A
+clean editor reloads automatically. Changes in separate passages merge into an
+unsaved draft; only **Save** publishes your local edits. Source checks pause
+during editor operations, formatting review and text composition.
+
+Overlapping changes keep your draft and loaded base intact. A persistent
+**External note changes** banner offers comparison, copy/download and another
+check. **Reload current source** reads again and asks before discarding unsaved
+edits. If the disk or draft changes during that decision, review again.
+**Accept current revision for manual merge** retains the draft while adopting
+the freshly checked disk version as the next save base; edit and Save explicitly.
+Deleted/moved notes, unavailable storage and failed reads retain the draft.
+
+Refreshes map the selection and preserve scrolling where possible. Each refresh
+or automatic merge is a separate undo step. Undo restores text only: the latest
+adopted revision remains the save base, and restored differences are unsaved.
+Formatting, source recovery and conditional-save checks still apply. Historical
+revision views keep their selected snapshot instead of following live changes.
+
 Inactive-line wikilinks and ordinary labeled Markdown links can be clicked,
 tapped or focused with Tab and followed with Enter. Move into their line with
 the arrow keys to edit Markdown directly; selections reveal source on each line

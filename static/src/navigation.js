@@ -1,3 +1,6 @@
+import { mergeSources } from './source-merge.js';
+import { installNoteSync, readNoteSnapshot } from './note-sync.js';
+
 // These guards retain the in-memory draft; no browser persistence is used.
 export function installDraftGuards(isDirty) {
   let leaving = false;
@@ -37,6 +40,9 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   let csrf = find('[name=csrfmiddlewaretoken]').value;
   let busy = false;
   let toolBusy = false;
+  let reviewBusy = false;
+  let syncVersion = 0;
+  let conflictReview = false;
   let recovery = null;
   let proposal = null;
   let proposalSource = null;
@@ -53,12 +59,15 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   const dirty = () => editor.getSource() !== baseSource || (isNew && !path && Boolean(filename?.value.trim()));
   const say = message => { status.textContent = message; };
   const syncButtons = () => {
-    saveButton.disabled = busy || toolBusy;
-    formatButton.disabled = busy || toolBusy;
+    const held = busy || toolBusy || reviewBusy;
+    saveButton.disabled = held;
+    formatButton.disabled = held;
     recoveryButton.hidden = !recovery;
-    if (restoreButton) restoreButton.disabled = busy || toolBusy || editor.getSource() !== initialSource;
-    recoveryButton.disabled = busy || toolBusy;
-    if (filename) filename.disabled = busy || toolBusy || !isNew || Boolean(path);
+    if (restoreButton) restoreButton.disabled = held || editor.getSource() !== initialSource;
+    recoveryButton.disabled = held;
+    find('[data-reload-current]').disabled = held || !conflict;
+    find('[data-manual-merge]').disabled = held || !conflict;
+    if (filename) filename.disabled = held || !isNew || Boolean(path);
   };
   const clearProposal = () => { proposal = null; proposalSource = null; find('[data-format-proposal]').hidden = true; };
   const displayProposal = (result, submitted, rejected = false) => {
@@ -117,33 +126,79 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     }
     return folder ? `${folder}/${name}` : name;
   };
-  const showConflict = async (result, requestedPath) => {
+  const banner = message => {
+    find('[data-sync-message]').textContent = message;
+    find('[data-sync-banner]').hidden = false;
+  };
+  const clearConflict = () => {
     conflict = null;
+    conflictReview = false;
+    find('[data-conflict]').hidden = true;
+    find('[data-sync-banner]').hidden = true;
+  };
+  const showComparison = (snapshot, message = 'This note changed outside this view. Your draft is retained. Compare the sources, copy or download your draft, or explicitly reload the latest source.') => {
+    conflict = snapshot;
+    conflictReview = true;
     find('[data-conflict]').hidden = false;
     find('#conflict-base').value = baseSource;
     find('#conflict-draft').value = editor.getSource();
-    find('#conflict-current').value = '';
-    find('[data-reload-current]').disabled = true;
-    find('[data-manual-merge]').disabled = true;
-    find('[data-conflict-status]').textContent = 'Reading the current disk version for comparison…';
-    say('Revision conflict. Draft and original revision retained.');
-    try {
-      const response = await fetch('/source/' + encode(requestedPath), { credentials: 'same-origin', cache: 'no-store' });
-      if (!authenticated(response)) return;
-      if (response.status === 404 && result.revision === null) {
-        conflict = { source: '', revision: null, path: requestedPath };
-        find('[data-conflict-status]').textContent = 'The current file is absent. Accepting this version requires a new create-if-absent save.';
-      } else if (response.ok && response.headers.get('ETag')) {
-        const source = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await response.arrayBuffer());
-        conflict = { source, revision: response.headers.get('ETag'), path: requestedPath };
-        find('[data-conflict-status]').textContent = 'This is the disk version read for comparison. Reload and merge require an explicit choice; Save checks it again.';
-      } else throw new Error('comparison unavailable');
-      find('#conflict-current').value = conflict.source;
-      find('[data-reload-current]').disabled = false;
-      find('[data-manual-merge]').disabled = false;
-    } catch {
-      find('[data-conflict-status]').textContent = 'Current source is unavailable. Draft and original revision retained; copy or download your draft.';
+    find('#conflict-current').value = snapshot.source;
+    find('[data-conflict-status]').textContent = 'Current disk snapshot shown below. Reload and manual merge recheck it before applying your choice. Undo changes text only; Save still checks the adopted revision.';
+    banner(message);
+    syncButtons();
+  };
+  const syncFailure = error => {
+    // A failed read is never a valid empty note or an invitation to recreate it.
+    conflict = null;
+    find('[data-conflict-status]').textContent = 'The current disk source cannot be confirmed. Draft and original revision retained.';
+    const message = error.kind === 'missing' ? 'This note was deleted or moved. Draft retained; locate the note before saving.'
+      : error.kind === 'storage' ? 'Storage is unavailable. Draft retained; check Storage status, then check again.'
+        : error.kind === 'authentication' ? 'Sign in again to check external changes. Draft retained.'
+          : 'External changes could not be read. Draft retained; check the connection and try again.';
+    banner(message);
+    say(message);
+    if (error.kind === 'authentication') reauthenticate();
+    syncButtons();
+  };
+  const adoptSnapshot = snapshot => {
+    baseSource = snapshot.source;
+    baseRevision = snapshot.revision;
+    bom = snapshot.bom;
+    find('#note-newline').textContent = JSON.stringify(snapshot.newline);
+    syncVersion++;
+    invalidateRecovery();
+    clearProposal();
+  };
+  const receiveSnapshot = snapshot => {
+    if (conflictReview) { showComparison(snapshot); return; }
+    if (snapshot.revision === baseRevision) { find('[data-sync-banner]').hidden = true; return; }
+    const local = editor.getSource();
+    const merged = mergeSources(baseSource, local, snapshot.source);
+    if (merged === null) {
+      showComparison(snapshot);
+      say('External revision conflict. Draft and original revision retained.');
+      return;
     }
+    adoptSnapshot(snapshot);
+    editor.applyExternalSource(merged, snapshot.newline);
+    clearConflict();
+    syncButtons();
+    say(dirty() ? 'External changes merged. Local edits remain unsaved.' : 'Reloaded external changes. Unchanged.');
+  };
+  const synchronization = installNoteSync({
+    getState: () => ({ path, revision: baseRevision, version: syncVersion,
+      blocked: isNew || Boolean(restorationId) || busy || toolBusy || reviewBusy || proposalSource !== null || editor.isComposing() }),
+    onSnapshot: receiveSnapshot, onFailure: syncFailure,
+  });
+  const showConflict = async requestedPath => {
+    conflictReview = true;
+    conflict = null;
+    banner('This note changed outside this view. Reading the current source for comparison; your draft is retained.');
+    syncButtons();
+    try {
+      showComparison(await readNoteSnapshot(requestedPath, AbortSignal.timeout(15000)));
+      say('Revision conflict. Draft and original revision retained.');
+    } catch (error) { syncFailure(error); }
   };
   const captureRecovery = (result, submitted) => {
     if (typeof result.recovery_token === 'string' && editor.getSource() === submitted) {
@@ -153,7 +208,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   };
 
   async function perform(kind) {
-    if (busy || toolBusy) return;
+    if (busy || toolBusy || reviewBusy) return;
     const requestedPath = requestPath();
     if (!requestedPath) return;
     const submitted = editor.getSource();
@@ -165,6 +220,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       return;
     }
     busy = true;
+    syncVersion++;
     syncButtons();
     say(kind === 'format' ? 'Checking proposed formatting…' : 'Saving…');
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRFToken': csrf, ...(revision === null ? { 'If-None-Match': '*' } : { 'If-Match': revision }) };
@@ -178,7 +234,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       const result = await response.json();
       if (response.status === 412) {
         clearProposal();
-        await showConflict(result, requestedPath);
+        await showConflict(requestedPath);
         return;
       }
       if (Array.isArray(result.diagnostics)) diagnostics(result.diagnostics);
@@ -220,8 +276,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       }
       invalidateRecovery();
       clearProposal();
-      find('[data-conflict]').hidden = true;
-      conflict = null;
+      clearConflict();
       const outcome = result.state === 'noop'
         ? (sourceRecovery ? 'Unchanged source on disk; formatting skipped.' : 'Unchanged on disk.')
         : (sourceRecovery ? 'Saved without formatting.' : 'Saved.');
@@ -242,6 +297,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); perform('save'); }
   });
   find('[data-apply-format]').addEventListener('click', () => {
+    if (busy || toolBusy || reviewBusy) return;
     if (!proposal || editor.getSource() !== proposal.submitted) { clearProposal(); say('Draft changed. Run Format again.'); return; }
     const source = proposal.source;
     clearProposal();
@@ -254,48 +310,58 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       clearProposal(); say(dirty() ? 'Unsaved changes' : 'Unchanged'); formatButton.focus();
     }
   });
-  const acceptConflictRevision = () => {
-    path = conflict.path;
-    baseRevision = conflict.revision;
-    baseSource = conflict.source;
-    isNew = baseRevision === null;
-    if (!isNew) {
-      history.replaceState(null, '', '/notes/' + encode(path));
-      updateLinks();
-    } else saveButton.textContent = 'Create note';
+  const acceptConflictRevision = snapshot => {
+    path = snapshot.path;
+    adoptSnapshot(snapshot);
+    isNew = false;
+    history.replaceState(null, '', '/notes/' + encode(path));
+    updateLinks();
   };
   if (filename) filename.addEventListener('input', () => {
     invalidateRecovery();
     clearProposal();
-    conflict = null;
-    find('[data-conflict]').hidden = true;
+    clearConflict();
     say(dirty() ? 'Unsaved new note' : 'Unchanged');
   });
-  find('[data-reload-current]').addEventListener('click', () => {
-    if (!conflict || !window.confirm('Replace your draft with the displayed disk version? Copy or download your draft first.')) return;
-    acceptConflictRevision();
-    editor.setSource(conflict.source);
-    invalidateRecovery();
-    clearProposal();
-    find('[data-conflict]').hidden = true;
-    conflict = null;
-    say('Reloaded the displayed disk version. Unchanged.');
+  const chooseConflict = async reload => {
+    if (!conflict || busy || toolBusy || reviewBusy || editor.isComposing()) return;
+    const displayed = conflict, local = editor.getSource();
+    reviewBusy = true;
+    syncVersion++;
+    syncButtons();
+    try {
+      let latest = await readNoteSnapshot(displayed.path, AbortSignal.timeout(15000));
+      const changed = () => latest.revision !== displayed.revision || editor.getSource() !== local || editor.isComposing();
+      if (changed()) { showComparison(latest, 'The disk source or your draft changed during review. Draft retained; compare again before choosing.'); return; }
+      if (reload && dirty()) {
+        if (!window.confirm('Replace your unsaved draft with the latest disk version? Copy or download your draft first.')) return;
+        // The confirmation can remain open while another writer publishes.
+        latest = await readNoteSnapshot(displayed.path, AbortSignal.timeout(15000));
+        if (changed()) { showComparison(latest, 'The disk source or your draft changed during confirmation. Draft retained; review again.'); return; }
+      }
+      acceptConflictRevision(latest);
+      if (reload) editor.applyExternalSource(latest.source, latest.newline);
+      clearConflict();
+      say(reload ? 'Reloaded the latest disk version. Unchanged.' : 'Current revision accepted for manual merge. Draft retained; review and edit it, then explicitly Save.');
+      if (!reload) editor.focus();
+    } catch (error) { syncFailure(error); }
+    finally { reviewBusy = false; syncButtons(); }
+  };
+  find('[data-reload-current]').addEventListener('click', () => chooseConflict(true));
+  find('[data-manual-merge]').addEventListener('click', () => chooseConflict(false));
+  find('[data-sync-check]').addEventListener('click', () => synchronization.check());
+  find('[data-sync-review]').addEventListener('click', () => {
+    if (find('[data-conflict]').hidden) { void synchronization.check(); return; }
+    find('[data-conflict]').scrollIntoView({ block: 'start' });
+    find('#conflict-current').focus({ preventScroll: true });
   });
-  find('[data-manual-merge]').addEventListener('click', () => {
-    if (!conflict) return;
-    acceptConflictRevision();
-    invalidateRecovery();
-    clearProposal();
-    find('[data-reload-current]').disabled = true;
-    find('[data-manual-merge]').disabled = true;
-    say('Current revision accepted for manual merge. Draft retained; review and edit it, then explicitly Save.');
-    editor.focus();
-  });
+  find('[data-sync-copy]').addEventListener('click', () => find('[data-copy-draft]').click());
+  find('[data-sync-download]').addEventListener('click', () => find('[data-download-draft]').click());
   find('[data-store-draft]').addEventListener('click', async () => {
-    if (busy || toolBusy) return;
+    if (busy || toolBusy || reviewBusy) return;
     const requestedPath = requestPath();
     if (!requestedPath) return;
-    busy = true; syncButtons();
+    busy = true; syncVersion++; syncButtons();
     try {
       const response = await fetch('/drafts/', {method: 'POST', credentials: 'same-origin', cache: 'no-store',
         headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
@@ -323,8 +389,9 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   });
   find('[data-reauth-form]').addEventListener('submit', async event => {
     event.preventDefault();
-    if (busy || toolBusy) return;
+    if (busy || toolBusy || reviewBusy) return;
     busy = true;
+    syncVersion++;
     syncButtons();
     const button = event.target.querySelector('button');
     button.disabled = true;
@@ -355,24 +422,27 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   });
   const retainedDiagnostics = parse('#note-diagnostics');
   if (Array.isArray(retainedDiagnostics)) diagnostics(retainedDiagnostics);
-  // Tools never adopt a new base or overwrite the editor, including edits made
-  // during a request. A later human Save uses the existing conflict/merge UI.
+  // Tool writes keep their existing draft and operation guards. Synchronization
+  // reads authoritative source after completion, including uncertain outcomes.
   document.addEventListener('backstory:tool-save-start', event => {
     const guard = event.detail;
     guard.editorReady = true;
     const editorPath = path || (filename?.value.trim() ? [folder, filename.value.trim()].filter(Boolean).join('/') : '');
     if (guard.path !== editorPath) return;
-    if (busy || toolBusy) { guard.reason_code = 'editor_busy'; return; }
+    if (busy || toolBusy || reviewBusy || conflictReview || editor.isComposing()) { guard.reason_code = 'editor_busy'; return; }
     if (dirty()) { guard.reason_code = 'unsaved_editor_draft'; return; }
     toolBusy = true;
+    syncVersion++;
     syncButtons();
     say('Browser tool save in progress. Editor source and original revision retained.');
   });
   document.addEventListener('backstory:tool-save-finish', event => {
     if (event.detail.path !== path || !toolBusy) return;
     toolBusy = false;
+    syncVersion++;
     syncButtons();
-    say('Browser tool request finished. Disk may have changed. Editor source and original revision retained; compare before saving.');
+    say('Browser tool request finished. Checking external changes; draft retained.');
+    void synchronization.check();
   });
   document.addEventListener('click', event => {
     const move = event.target.closest('a[href]');
