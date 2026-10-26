@@ -1,3 +1,5 @@
+import { mountFileTree } from './file-tree.js';
+
 const zenToggle = document.querySelector('[data-zen-toggle]');
 if (zenToggle) {
   document.body.classList.add('zen-enabled');
@@ -47,10 +49,10 @@ if (navigation && !zenToggle) {
 const pathElement = document.querySelector('#note-path');
 const folderElement = document.querySelector('#note-folder');
 const sidebar = document.querySelector('[data-folder-sidebar]');
-if (pathElement && sidebar) {
-  const path = JSON.parse(pathElement.textContent);
-  const folder = path ? path.split('/').slice(0, -1).join('/') : JSON.parse(folderElement.textContent);
-  const encode = path => path.split('/').map(encodeURIComponent).join('/');
+const path = pathElement ? JSON.parse(pathElement.textContent) : '';
+const folder = path ? path.split('/').slice(0, -1).join('/') : folderElement ? JSON.parse(folderElement.textContent) : new URLSearchParams(location.search).get('folder') || '';
+if (sidebar) mountFileTree(sidebar, path, folder);
+if (pathElement) {
   const folderHref = path => '/?' + new URLSearchParams({ folder: path });
   const link = (text, href) => { const a = document.createElement('a'); a.textContent = text; a.href = href; return a; };
   const breadcrumb = document.querySelector('[data-breadcrumb]');
@@ -61,21 +63,7 @@ if (pathElement && sidebar) {
     if (path && index === parts.length - 1) breadcrumb.append(document.createTextNode(part));
     else breadcrumb.append(link(part, folderHref(parts.slice(0, index + 1).join('/'))));
   });
-  const list = document.createElement('ul');
-  sidebar.append(link('Wiki root', '/'), link('New note in this folder', '/new/?' + new URLSearchParams({ folder })), list);
-  // Exactly one bounded parent-folder page; no recursive tree or index request.
-  fetch('/folders/' + encode(folder), { credentials: 'same-origin', cache: 'no-store', redirect: 'error' })
-    .then(response => { if (!response.ok) throw new Error(); return response.json(); })
-    .then(page => {
-      for (const entry of page.entries) {
-        const item = document.createElement('li');
-        item.append(link(entry.name, entry.kind === 'folder' ? folderHref(entry.path) : (entry.path.toLowerCase().endsWith('.md') ? '/notes/' : '/attachments/') + encode(entry.path)));
-        list.append(item);
-      }
-      if (page.next_cursor) sidebar.append(link('More in this folder', '/?' + new URLSearchParams({ folder, cursor: page.next_cursor })));
-    })
-    .catch(() => { const message = document.createElement('p'); message.textContent = 'Folder unavailable. Use Storage status to retry.'; sidebar.append(message); });
-} else if (sidebar) sidebar.hidden = true;
+}
 
 // Explicit browser-local calendar date: never substitute the server's date.
 const noteNavigation = document.querySelector('[data-note-navigation]');

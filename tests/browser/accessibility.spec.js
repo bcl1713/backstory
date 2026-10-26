@@ -9,10 +9,13 @@ async function tabTo(page, target) {
   await expect(target).toBeVisible();
   // Folder links grow with the disposable corpus; traverse a complete possible
   // focus cycle rather than assuming a fixed number of controls on the page.
-  const controls = await page.locator('a[href], button, input, textarea, select, summary, [tabindex]').count();
+  const focusable = page.locator('a[href], button, input, textarea, select, summary, [tabindex]');
+  let controls = await focusable.count();
   for (let n = 0; n < controls + 2; n++) {
     if (await target.evaluate(el => el === document.activeElement)) return;
     await page.keyboard.press('Tab');
+    // The file tree can finish loading during traversal, adding more stops.
+    controls = Math.max(controls, await focusable.count());
   }
   if (await target.evaluate(el => el === document.activeElement)) return;
   throw new Error('Control cannot be reached using Tab');
@@ -35,7 +38,7 @@ test('keyboard navigation reaches folders, search, editor modes, proposal dismis
   await writeFile(`${runtime}/wiki/Keyboard.md`, '# Keyboard\n');
   await login(page);
   await activate(page, page.getByRole('link', { name: 'Skip to content' }));
-  await activate(page, page.getByRole('link', { name: 'Keyboard.md', exact: true }));
+  await activate(page, page.getByRole('navigation', { name: 'Folder', exact: true }).getByRole('link', { name: 'Keyboard.md', exact: true }));
   await activate(page, page.getByRole('button', { name: 'Navigation and controls', exact: true }));
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Keyboard.md');
   await expect(page.getByRole('navigation', { name: 'Folder sidebar' })).toContainText('Other.md');

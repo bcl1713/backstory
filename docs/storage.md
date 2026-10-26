@@ -56,11 +56,17 @@ Unicode are denied. Source reads are capped at 2 MiB and require valid UTF-8;
 errors return fixed diagnostics, never partial editable source. Snapshots retain
 exact original bytes, BOM, newline style and a quoted SHA-256 revision.
 
-Folder requests enumerate one directory, never descendants: maximum 100 returned
-entries and 1,000 inspected directory entries per page. Ordering follows the
-filesystem. The process retains at most 32 iterators for 60 seconds; cursors
-contain no filenames. Mutation, policy changes, expiry, a consumed cursor, or a
-process restart requests a fresh listing (HTTP 409). Ordinary browsing uses no persistent tree cache or whole-wiki request.
+Folder requests enumerate one directory, never descendants, returning at most
+100 entries per page. Directories come first, then files, alphabetically ignoring
+case, with exact names breaking case ties. Each page scans the immediate directory
+and retains only the next page in memory to keep ordering consistent across
+pages. Large directories therefore take more enumeration work per page. The
+process retains at most 32 pinned directory descriptors and last sort keys for
+60 seconds; opaque cursors expose no filenames. Mutation, policy changes, expiry,
+a consumed cursor, or a process restart requests a fresh listing (HTTP 409).
+The menu's file tree loads folders as they are expanded, opens the visible
+ancestors of the current note, and provides Show more for additional pages.
+Ordinary browsing uses no persistent tree cache or whole-wiki request.
 The explicit [move preview](relocation.md) is a separate bounded inventory and
 review workflow; it stops when its complete-link inventory cannot be established. Run one Gunicorn process with four threads (the image
 default) so successive requests share the bounded cursor cache. Multiple
