@@ -1,29 +1,34 @@
-"""Small read-only JSON boundary for browser tools; existing session auth only."""
+"""Small JSON boundary for browser tools; existing session and save services."""
 from dataclasses import asdict
 from functools import wraps
+import json
 from urllib.parse import urlencode
 
 from django.http import JsonResponse
+from django.core.exceptions import RequestDataTooBig
 from django.urls import reverse
 
 from indexing.search import search_notes
 from .contracts import PathDenied, StorageError
 from .policy import authorize_content
 from .storage import list_folder, read_note, require_ready
+from .saves import parse_precondition, save_note
 
 
 def _json(data, status=200):
     return JsonResponse({'untrusted_content': True, **data}, status=status)
 
 
-def _tool(view):
+def _tool(view=None, *, methods=('GET',)):
+    if view is None:
+        return lambda view: _tool(view, methods=methods)
     @wraps(view)
     def boundary(request):
         if not request.user.is_authenticated or not request.user.is_active:
             return _json({'state': 'error', 'reason_code': 'authentication_required'}, 401)
-        if request.method != 'GET':
+        if request.method not in methods:
             response = _json({'state': 'error', 'reason_code': 'method_not_allowed'}, 405)
-            response['Allow'] = 'GET'
+            response['Allow'] = ', '.join(methods)
             return response
         try:
             return view(request)
@@ -34,6 +39,66 @@ def _tool(view):
                 'restart': error.reason_code in {'cursor_invalid', 'search_cursor_expired'},
             }, error.status)
     return boundary
+
+
+def csrf_failure(request, reason=''):
+    if request.path.startswith('/tools/'):
+        return _json({'state': 'error', 'reason_code': 'csrf_failed'}, 403)
+    from django.views.csrf import csrf_failure as default_failure
+    return default_failure(request, reason=reason)
+
+
+@_tool(methods=('POST',))
+def save(request):
+    if request.content_type != 'application/json':
+        raise StorageError('invalid_save_request')
+    try:
+        body = json.loads(request.body)
+        if (not isinstance(body, dict) or set(body) - {'path', 'source', 'revision'}
+                or not isinstance(body.get('source'), str)):
+            raise ValueError
+    except RequestDataTooBig:
+        raise StorageError('note_too_large', 413) from None
+    except (ValueError, UnicodeError):
+        raise StorageError('invalid_save_request') from None
+    path = authorize_content(request, body.get('path'))
+    if not path.lower().endswith('.md'):
+        raise PathDenied()
+    if 'revision' not in body:
+        raise StorageError('precondition_required', 428)
+    # A tool can only replace an existing read revision. No create or recovery.
+    if body['revision'] is None:
+        raise StorageError('invalid_precondition')
+    base = parse_precondition(body['revision'], None)
+    result = save_note(request.user, path, body['source'], base)
+    data = asdict(result)
+    data.pop('recovery_token', None)
+    data.pop('status', None)
+    data.update(path=path, href=reverse('wiki:note', args=[path]), authoritative=False)
+    status = result.status
+    if result.state in {'saved', 'saved_index_delayed', 'noop'}:
+        try:
+            observed = read_note(path)
+            if observed.revision != result.revision:
+                raise StorageError('saved_readback_changed', 503)
+        except StorageError:
+            data.update(state='uncertain', reason_code='saved_readback_unconfirmed', read_before_retry=True)
+            status = 503
+        else:
+            data.update(source=observed.source, revision=observed.revision,
+                        bom=observed.bom, newline=observed.newline, authoritative=True)
+    elif result.state == 'uncertain':
+        data['read_before_retry'] = True
+    # Index failure must never turn a successful publication into a retry signal.
+    from indexing.worker import index_status
+    try:
+        data['index'] = asdict(index_status())
+    except Exception:
+        data['index'] = {'state': 'unavailable'}
+    response = _json(data, status)
+    if data['authoritative']:
+        response['ETag'] = data['revision']
+    return response
 
 
 def _paging(request, default):

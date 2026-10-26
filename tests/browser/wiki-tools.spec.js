@@ -32,7 +32,7 @@ test('signed-in tools read current source through fixed endpoints and never exec
   await page.goto('/accounts/login/');
   expect(await page.evaluate(() => Object.keys(window.registeredWikiTools))).toEqual([]);
   await login(page);
-  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['list_notes', 'read_note', 'search_notes']);
+  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['list_notes', 'read_note', 'save_note', 'search_notes']);
   const requests = [];
   page.on('request', request => { if (request.url().includes('/tools/')) requests.push(request); });
   const result = await page.evaluate(async () => {
@@ -93,4 +93,152 @@ test('tool transport rejects redirect and HTML responses and validates arguments
   expect(result.reason_code).toBe('invalid_response');
   result = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.read_note.execute({ path: 'Slice.md', url: 'https://example.invalid/' })));
   expect(result.reason_code).toBe('invalid_arguments');
+});
+
+async function callTool(page, name, input) {
+  await expect.poll(() => page.evaluate(name => Boolean(window.registeredWikiTools[name]), name)).toBe(true);
+  return page.evaluate(async ({ name, input }) => JSON.parse(await window.registeredWikiTools[name].execute(input)), { name, input });
+}
+
+test('tool save replaces a read revision with formatting and authoritative readback', async ({ page }) => {
+  await writeFile(`${runtime}/wiki/Tool save.md`, '# Original\n');
+  await stubHost(page);
+  await login(page);
+  const base = await callTool(page, 'read_note', { path: 'Tool save.md' });
+  const saved = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Replacement\n\n**strong**   text\n' });
+  expect(saved).toMatchObject({ state: 'saved', authoritative: true, source: '# Replacement\n\n**strong** text\n' });
+  const readback = await callTool(page, 'read_note', { path: base.path });
+  expect(readback.revision).toBe(saved.revision);
+  expect(readback.source).toBe(saved.source);
+  expect(await page.evaluate(() => window.registeredWikiTools.save_note.annotations)).toMatchObject({ readOnlyHint: false, untrustedContentHint: true });
+  const stale = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Stale\n' });
+  expect(stale.state).toBe('conflict');
+  const failed = await callTool(page, 'save_note', { path: base.path, revision: saved.revision, source: '---\nx: [\n---\n' });
+  expect(failed.state).toBe('format_failed');
+  expect(failed.diagnostics.length).toBeGreaterThan(0);
+  expect(await readFile(`${runtime}/wiki/Tool save.md`, 'utf8')).toBe(saved.source);
+});
+
+test('tool save refuses an unsaved editor draft and preserves undo history', async ({ page }) => {
+  await writeFile(`${runtime}/wiki/Tool draft.md`, '# Original\n');
+  await stubHost(page);
+  await login(page);
+  await page.goto('/notes/Tool%20draft.md');
+  await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
+  const base = await callTool(page, 'read_note', { path: 'Tool draft.md' });
+  await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.setSource('# Human draft\n'));
+  const result = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Assistant\n' });
+  expect(result.reason_code).toBe('unsaved_editor_draft');
+  expect(await readFile(`${runtime}/wiki/Tool draft.md`, 'utf8')).toBe('# Original\n');
+  expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Human draft\n');
+  await page.locator('.cm-content').focus();
+  await page.keyboard.press('Control+z');
+  expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Original\n');
+});
+
+test('tool save retains a clean editor base so later human edits encounter a conflict', async ({ page }) => {
+  await writeFile(`${runtime}/wiki/Tool stale.md`, '# Original\n');
+  await stubHost(page);
+  await login(page);
+  await page.goto('/notes/Tool%20stale.md');
+  await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
+  const base = await callTool(page, 'read_note', { path: 'Tool stale.md' });
+  const saved = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Assistant\n' });
+  expect(saved.state).toBe('saved');
+  expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Original\n');
+  await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.setSource('# Human draft\n'));
+  await page.locator('[data-save]').click();
+  await expect(page.locator('[data-conflict]')).toBeVisible();
+  await expect(page.locator('#conflict-base')).toHaveValue('# Original\n');
+  await expect(page.locator('#conflict-current')).toHaveValue('# Assistant\n');
+  await expect(page.locator('#conflict-draft')).toHaveValue('# Human draft\n');
+});
+
+test('edits during a tool save survive and concurrent editor operations are held', async ({ page }) => {
+  await writeFile(`${runtime}/wiki/Tool pending.md`, '# Original\n');
+  await stubHost(page);
+  await login(page);
+  await page.goto('/notes/Tool%20pending.md');
+  await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
+  const base = await callTool(page, 'read_note', { path: 'Tool pending.md' });
+  await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.save_note))).toBe(true);
+  let held;
+  await page.route('**/tools/save/', route => { held = route; });
+  await page.evaluate(input => { window.pendingToolSave = window.registeredWikiTools.save_note.execute(input); }, { path: base.path, revision: base.revision, source: '# Assistant\n' });
+  await expect.poll(() => Boolean(held)).toBe(true);
+  await expect(page.locator('[data-save]')).toBeDisabled();
+  await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.setSource('# Newer human draft\n'));
+  const concurrent = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Concurrent\n' });
+  expect(concurrent.reason_code).toBe('save_in_progress');
+  await held.continue();
+  const saved = await page.evaluate(async () => JSON.parse(await window.pendingToolSave));
+  expect(saved.state).toBe('saved');
+  await expect(page.locator('[data-save]')).toBeEnabled();
+  expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Newer human draft\n');
+  await page.locator('[data-save]').click();
+  await expect(page.locator('[data-conflict]')).toBeVisible();
+});
+
+test('lost tool save acknowledgement reports uncertainty and never retries', async ({ page }) => {
+  await writeFile(`${runtime}/wiki/Tool uncertain.md`, '# Original\n');
+  await stubHost(page);
+  await login(page);
+  const base = await callTool(page, 'read_note', { path: 'Tool uncertain.md' });
+  let requests = 0;
+  await page.route('**/tools/save/', async route => {
+    requests++;
+    await route.fetch(); // Real publication, then lose only its acknowledgement.
+    await route.abort('failed');
+  });
+  const result = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Published\n' });
+  expect(result).toMatchObject({ state: 'uncertain', read_before_retry: true });
+  expect(requests).toBe(1);
+  const observed = await callTool(page, 'read_note', { path: base.path });
+  expect(observed.source).toBe('# Published\n');
+  expect(observed.revision).not.toBe(base.revision);
+});
+
+test('tool save treats malformed acknowledgement as uncertain and rejects unsafe arguments before sending', async ({ page }) => {
+  await stubHost(page);
+  await login(page);
+  const base = await callTool(page, 'read_note', { path: 'Slice.md' });
+  let requests = 0;
+  await page.route('**/tools/save/', route => {
+    requests++;
+    return route.fulfill({ contentType: 'application/json', body: '{"state":"saved","untrusted_content":true}' });
+  });
+  const args = { path: base.path, revision: base.revision, source: '# Draft\n' };
+  expect((await callTool(page, 'save_note', { ...args, mode: 'source_recovery' })).reason_code).toBe('invalid_arguments');
+  expect((await callTool(page, 'save_note', { ...args, revision: '*' })).reason_code).toBe('invalid_arguments');
+  expect(requests).toBe(0);
+  expect(await callTool(page, 'save_note', args)).toMatchObject({ state: 'uncertain', read_before_retry: true });
+  expect(requests).toBe(1);
+});
+
+test('expired tool writes return authentication errors and leave disk unchanged', async ({ page, context }) => {
+  await writeFile(`${runtime}/wiki/Tool expired.md`, '# Original\n');
+  await stubHost(page);
+  await login(page);
+  const base = await callTool(page, 'read_note', { path: 'Tool expired.md' });
+  await context.clearCookies();
+  const result = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Draft\n' });
+  expect(result.reason_code).toBe('authentication_required');
+  expect(await readFile(`${runtime}/wiki/Tool expired.md`, 'utf8')).toBe('# Original\n');
+});
+
+test('a host synchronously rejecting the save tool still discovers usable read tools', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.registeredWikiTools = {};
+    Object.defineProperty(document, 'modelContext', { value: {
+      registerTool(tool, { signal }) {
+        if (tool.name === 'save_note') throw new Error('Synthetic write registration unsupported');
+        window.registeredWikiTools[tool.name] = tool;
+        signal.addEventListener('abort', () => { delete window.registeredWikiTools[tool.name]; });
+      },
+    } });
+  });
+  await login(page);
+  const result = await callTool(page, 'read_note', { path: 'Slice.md' });
+  expect(result.authoritative).toBe(true);
+  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['list_notes', 'read_note', 'search_notes']);
 });
