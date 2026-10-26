@@ -9,7 +9,7 @@ import posixpath
 import re
 import stat
 from typing import Literal
-from urllib.parse import quote, unquote_to_bytes, urlsplit
+from urllib.parse import quote, unquote_to_bytes, urlencode, urlsplit
 
 from django.urls import reverse
 
@@ -40,18 +40,22 @@ def _decoded(value):
     return unquote_to_bytes(value).decode("utf-8", errors="strict")
 
 
-def _regular(path):
+def _entry_kind(path):
     parent, _, name = path.rpartition("/")
     with open_directory(parent) as directory:
         try:
             info = os.stat(name, dir_fd=directory, follow_symlinks=False)
         except FileNotFoundError:
-            return False
+            return "missing"
     if stat.S_ISDIR(info.st_mode):
-        return False
+        return "directory"
     if not stat.S_ISREG(info.st_mode):
         raise StorageError("path_denied", 404)
-    return True
+    return "file"
+
+
+def _regular(path):
+    return _entry_kind(path) == "file"
 
 
 def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"]) -> LinkResult:
@@ -80,16 +84,21 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
         suffix = "#" + quote("preview-" + heading_slug(fragment), safe="-_") if fragment else ""
         if not path:
             return LinkResult("resolved", suffix or "#", label)
-        if path.startswith("/"):
+        rooted = kind == "wiki" and path.startswith("/") and not path.startswith("//")
+        if path.startswith("/") and not rooted:
             return LinkResult("missing", None, label)
+        if rooted:
+            path = path[1:]
         relative = posixpath.normpath(posixpath.join(posixpath.dirname(source_path), path))
         root_path = posixpath.normpath(path)
         # A parent-relative wikilink has no valid root-relative interpretation;
         # apply it to its source directory before enforcing the final policy.
         root_candidate = kind == "wiki" and root_path != ".." and not root_path.startswith("../")
-        bases = [root_path, relative] if root_candidate else [relative]
+        bases = [root_path] if rooted else [root_path, relative] if root_candidate else [relative]
         require_ready()
         visited = set()
+        create_paths = []
+        blocked_creation = False
         for base in bases:
             candidates = [base, base + ".md"] if kind == "wiki" and not base.lower().endswith(".md") else [base]
             for candidate in candidates:
@@ -99,14 +108,19 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
                 try:
                     validate_path(candidate, "content")
                 except StorageError:
-                    continue  # excluded paths behave exactly like absent paths
+                    blocked_creation = True
+                    continue  # excluded paths never offer creation
                 try:
-                    exists = _regular(candidate)
+                    entry_kind = _entry_kind(candidate)
                 except StorageError as error:
                     if error.reason_code == "not_found":
                         continue
                     raise
-                if exists:
+                if entry_kind == "directory":
+                    blocked_creation = True
+                if entry_kind == "missing" and candidate.lower().endswith(".md"):
+                    create_paths.append(candidate)
+                if entry_kind == "file":
                     route = "wiki:note" if candidate.lower().endswith(".md") else "wiki:attachment"
                     return LinkResult("resolved", reverse(route, args=[candidate]) + suffix, label)
         if kind == 'wiki':
@@ -116,8 +130,18 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
                 state, paths = resolve_indexed_name(path)
             except OperationalError:
                 return unavailable
+            # A leading slash selects a path in the wiki root, never a global alias.
+            if rooted and state != 'unavailable':
+                state, paths = 'missing', ()
             if state == 'resolved':
                 return LinkResult(state, reverse('wiki:note', args=[paths[0]]) + suffix, label)
+            action = '/new/link/' + '?' + urlencode({'source': source_path, 'target': target})
+            if state == 'ambiguous':
+                return LinkResult(state, None, label, action_href=action, choices=paths)
+            parsed = urlsplit(path)
+            note_target = not parsed.scheme and not parsed.netloc and posixpath.splitext(path)[1].lower() in {'', '.md'}
+            if state == 'missing' and create_paths and not blocked_creation and note_target:
+                return LinkResult(state, None, label, action_href=action, create_path=create_paths[0])
             return LinkResult(state, None, label)
         return LinkResult("missing", None, label)
     except (StorageError, OSError, ValueError, UnicodeError):
