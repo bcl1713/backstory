@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { writeFile, readFile, stat } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -14,8 +15,10 @@ for (const malformed of [false, true]) test(`corpus ${malformed ? 'malformed' : 
   await page.goto('/notes/Corpus.md');
   const read = () => page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource());
   for (let i = 0; i < 3; i++) {
+    await revealChrome(page);
     await page.getByRole('button', { name: 'Raw source', exact: true }).click();
     expect(await read()).toBe(source);
+    await revealChrome(page);
     await page.getByRole('button', { name: 'Live preview', exact: true }).click();
     expect(await read()).toBe(source);
   }

@@ -5,9 +5,11 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
+import { createLiveLinksExtension, wikiLinks } from './live-links.js';
 
-export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onFailure = () => {}, nonce = '' }) {
+export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onFailure = () => {}, nonce = '', getPath = () => '' }) {
   const presentation = new Compartment();
+  const liveExtensions = () => [createLivePreviewExtension(), createLiveLinksExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
   const uniformEndings = new Map(['\n', '\r\n', '\r'].map(value => [value, { separator: value }]));
   const endingsFrom = (text, preferred) => {
@@ -44,12 +46,13 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         invertedEffects.of(transaction => transaction.docChanged || transaction.effects.some(effect => effect.is(restoreEndings))
           ? [restoreEndings.of(transaction.startState.field(lineEndings))] : []),
         history(), keymap.of([...defaultKeymap, ...historyKeymap]), drawSelection(),
-        markdown({ base: markdownLanguage, extensions: [frontMatter], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
+        markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
         EditorView.lineWrapping,
+        EditorView.theme({}, { dark: true }),
         EditorView.contentAttributes.of({ 'aria-label': 'Markdown editor', spellcheck: 'false' }),
         EditorView.cspNonce.of(nonce),
         EditorView.exceptionSink.of(() => onFailure()),
-        presentation.of(createLivePreviewExtension()),
+        presentation.of(liveExtensions()),
         EditorView.updateListener.of(update => {
           if (update.docChanged || update.startState.field(lineEndings) !== update.state.field(lineEndings)) onChange(getSource());
         }),
@@ -73,7 +76,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
     },
     setMode(mode) {
       if (!['live', 'source'].includes(mode)) throw new TypeError('Unknown editor mode');
-      view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? createLivePreviewExtension() : []), annotations: Transaction.addToHistory.of(false) });
+      view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? liveExtensions() : []), annotations: Transaction.addToHistory.of(false) });
     },
     focus() { view.focus(); },
     destroy() { removeHeadingNavigation(); view.destroy(); },
@@ -86,39 +89,47 @@ function attachNoteEditor() {
   const fallback = document.querySelector('#source');
   const fallbackRegion = document.querySelector('[data-source-fallback]');
   const controls = document.querySelector('[data-editor-controls]');
-  const source = JSON.parse(document.querySelector('#note-source').textContent);
+  const initialSource = JSON.parse(document.querySelector('#note-source').textContent);
   const newline = JSON.parse(document.querySelector('#note-newline').textContent);
-  fallback.value = source;
+  // A user may edit the initially available textarea while the module loads.
+  // Preserve those edits; untouched text keeps its original mixed line endings.
+  const source = fallback.value === fallback.defaultValue ? initialSource : fallback.value.replaceAll('\n', newline);
+  const readiness = document.querySelector('[data-editor-readiness]');
   let api;
   let fallbackSource = source;
   let onChange = () => {};
   const changed = value => {
     fallbackSource = value;
-    if (fallback.value !== value.replaceAll('\r\n', '\n').replaceAll('\r', '\n')) fallback.value = value;
+    if (fallback.value !== value.replace(/\r\n|\r/g, '\n')) fallback.value = value;
     onChange(value);
   };
-  const showFallback = () => {
-    if (api) fallback.value = api.getSource();
-    parent.hidden = true;
-    fallbackRegion.hidden = false;
-    fallback.focus();
-  };
-  try {
-    api = mountMarkdownEditor({ parent, source, newline, nonce: parent.dataset.styleNonce || '', onChange: changed, onFailure: () => queueMicrotask(showFallback) });
-    parent.markdownEditor = api;
-    fallbackRegion.hidden = true;
+  const setPresentation = (mode, failed = false, focus = true) => {
+    const plain = mode === 'plain' || !api;
+    if (plain && api) fallback.value = api.getSource();
+    if (!plain) api.setMode(mode);
+    parent.hidden = plain;
+    fallbackRegion.hidden = !plain;
+    parent.dataset.presentation = plain ? 'plain' : mode;
+    controls.querySelectorAll('[data-editor-mode]').forEach(button => {
+      button.setAttribute('aria-pressed', String(button.dataset.editorMode === parent.dataset.presentation));
+      button.disabled = !api && button.dataset.editorMode !== 'plain';
+    });
+    const name = plain ? 'Plain text fallback' : mode === 'source' ? 'Raw source' : 'Live preview';
+    readiness.textContent = failed ? 'Enhanced editor unavailable. Ready · Plain text fallback · Complete document source.' : `Ready · ${name}${plain ? ' · Complete document source' : ''}`;
     controls.hidden = false;
-    controls.querySelectorAll('[data-editor-mode]').forEach(button => button.addEventListener('click', () => {
-      parent.hidden = false;
-      fallbackRegion.hidden = true;
-      api.setMode(button.dataset.editorMode);
-      controls.querySelectorAll('[data-editor-mode]').forEach(other => other.setAttribute('aria-pressed', String(other === button)));
-    }));
-    controls.querySelector('[data-plain-fallback]').addEventListener('click', showFallback);
+    if (focus) { if (plain) fallback.focus(); else api.focus(); }
+  };
+  const showFallback = () => setPresentation('plain');
+  try {
+    api = mountMarkdownEditor({ parent, source, newline, getPath: () => JSON.parse(document.querySelector('#note-path').textContent), nonce: parent.dataset.styleNonce || '', onChange: changed,
+      onFailure: () => queueMicrotask(() => setPresentation('plain', true)) });
+    parent.markdownEditor = api;
+    setPresentation('live', false, false);
   } catch {
-    showFallback();
-    document.querySelector('[data-editor-status]').textContent = 'Plain text editor available';
+    parent.replaceChildren();
+    setPresentation('plain', true, false);
   }
+  controls.querySelectorAll('[data-editor-mode]').forEach(button => button.addEventListener('click', () => setPresentation(button.dataset.editorMode)));
   fallback.addEventListener('input', () => {
     if (api) api.view.dispatch({ changes: { from: 0, to: api.view.state.doc.length, insert: fallback.value }, annotations: Transaction.userEvent.of('input') });
     else changed(fallback.value.replaceAll('\n', newline));
@@ -129,6 +140,7 @@ function attachNoteEditor() {
     focus: () => api && !parent.hidden ? api.focus() : fallback.focus(),
     showFallback,
   };
-  onChange = mountNoteActions({ editor, initialSource: source, isNew: parent.dataset.isNew === 'true', bom: parent.dataset.bom === 'true' });
+  onChange = mountNoteActions({ editor, initialSource, isNew: parent.dataset.isNew === 'true', bom: parent.dataset.bom === 'true' });
+  if (source !== initialSource) onChange(source);
 }
 attachNoteEditor();

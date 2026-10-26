@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { readFile, stat } from 'node:fs/promises';
 import { bytes, source, runtime } from './support/server.js';
@@ -26,16 +27,21 @@ test('opening, selection and repeated modes preserve exact source, bytes, revisi
   page.on('request', request => { if (/\/(format|save)\//.test(request.url())) requests.push(request.url()); });
   const before = await stat(`${runtime}/wiki/Slice.md`);
   const response = await open(page);
+  await revealChrome(page);
   await expect(page.getByRole('button', { name: 'Live preview', exact: true })).toHaveAttribute('aria-pressed', 'true');
   expect(await readSource(page)).toBe(source);
   await page.screenshot({ path: '/tmp/backstory-release-one/reports/live-preview-live.png', fullPage: true });
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
   await page.screenshot({ path: '/tmp/backstory-release-one/reports/live-preview-source.png', fullPage: true });
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   await select(page, 12);
   const original = await selection(page);
   for (let i = 0; i < 4; i++) {
+    await revealChrome(page);
     await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+    await revealChrome(page);
     await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   }
   expect(await selection(page)).toEqual(original);
@@ -61,7 +67,9 @@ test('active blocks and multiline selections reveal syntax and preserve reversed
   await select(page, end, offset);
   expect(await selection(page)).toEqual({ anchor: end, head: offset });
   await expect(content).toContainText('[relative link](Other.md#Details)');
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   expect(await selection(page)).toEqual({ anchor: end, head: offset });
   await expect(content).toContainText('| unchanged | 7 |');
@@ -84,10 +92,12 @@ test('keyboard edits and undo redo survive mode changes without putting decorati
   await page.keyboard.type('A real edit');
   const changed = await readSource(page);
   expect(changed).toContain('A real edit');
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+z');
   expect(await readSource(page)).toBe(source);
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+Shift+Z');
@@ -95,16 +105,18 @@ test('keyboard edits and undo redo survive mode changes without putting decorati
   await expect(page.getByRole('status').filter({ hasText: 'Unsaved changes' })).toBeVisible();
 });
 
-test('HTML and external images are inert; ordinary touch places cursor and plain source remains usable', async ({ page }) => {
+test('HTML and external images are inert; source lines and plain fallback remain editable', async ({ page }) => {
   const external = [];
   page.on('request', request => { if (request.url().includes('example.invalid')) external.push(request.url()); });
   await open(page);
   expect(await page.evaluate(() => window.noteExecuted)).toBeUndefined();
-  expect(await editor(page).locator('img[src],script,a[href]').count()).toBe(0);
+  expect(await editor(page).locator('img[src],script').count()).toBe(0);
   expect(external).toEqual([]);
-  await page.locator('.lp-link').first().tap();
+  await select(page, source.indexOf('relative link'));
+  await page.locator('.cm-content').focus();
   expect(page.url()).toContain('/notes/Slice.md');
   await expect(page.locator('.cm-editor.cm-focused')).toBeVisible();
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Plain text fallback' }).click();
   const fallback = page.getByRole('textbox', { name: 'Markdown source (plain text fallback)' });
   await expect(fallback).toBeVisible();
@@ -130,6 +142,7 @@ for (const presentation of ['live', 'source']) {
   ]) {
     test(`${presentation}: accepted ${ending} newline-only source changes undo and redo exact serialization`, async ({ page }) => {
       await open(page);
+      await revealChrome(page);
       if (presentation === 'source') await page.getByRole('button', { name: 'Raw source', exact: true }).click();
       const formatted = original.replace(/\r\n|\r/g, '\n');
       await editor(page).evaluate((el, value) => el.markdownEditor.setSource(value), original);
@@ -137,13 +150,16 @@ for (const presentation of ['live', 'source']) {
       const beforeSelection = await selection(page);
       await editor(page).evaluate((el, value) => el.markdownEditor.setSource(value), formatted);
       expect(await readSource(page)).toBe(formatted);
+      await revealChrome(page);
       await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+      await revealChrome(page);
       await page.getByRole('button', { name: 'Live preview', exact: true }).click();
       expect(await readSource(page)).toBe(formatted);
       await page.locator('.cm-content').focus();
       await page.keyboard.press('Control+z');
       expect(await readSource(page)).toBe(original);
       expect(await selection(page)).toEqual(beforeSelection);
+      await revealChrome(page);
       await page.getByRole('button', { name: 'Raw source', exact: true }).click();
       expect(await readSource(page)).toBe(original);
       await page.locator('.cm-content').focus();
@@ -174,13 +190,16 @@ test('inactive autolinks, bare URLs, email and unsupported references stay visib
   }
   await select(page, links.indexOf('example.invalid/auto'));
   await expect(content).toContainText('<https://example.invalid/auto>');
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
   await expect(content).toContainText('[label](Other.md)');
   await expect(content).toContainText('<reader@example.invalid>');
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   await select(page, 0);
   await expect(content).toContainText('<https://example.invalid/auto>');
   expect(await readSource(page)).toBe(links);
-  expect(await editor(page).locator('a[href],img[src]').count()).toBe(0);
+  await expect(editor(page).getByRole('link', { name: 'label', exact: true })).toHaveAttribute('href', '/notes/Other.md');
+  expect(await editor(page).locator('img[src]').count()).toBe(0);
   expect(requests).toEqual([]);
 });

@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, rename, mkdir, rmdir } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -15,12 +16,14 @@ const source = async page => {
   return page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource());
 };
 async function action(page, name, route='/save/') {
+  await revealChrome(page);
   const [response] = await Promise.all([page.waitForResponse(r => r.url().includes(route) && r.request().method()==='POST'), page.getByRole('button',{name,exact:true}).click()]);
   return response;
 }
 for (const mode of ['live','source']) test(`${mode}: protected draft survives reauthentication, empty mountpoint and fresh browser recovery without replay`, async ({page, context, browser}) => {
   await writeFile(target, original);
   await login(page);
+  await revealChrome(page);
   if (mode==='source') await page.getByRole('button',{name:'Raw source',exact:true}).click();
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+a');
@@ -49,7 +52,9 @@ for (const mode of ['live','source']) test(`${mode}: protected draft survives re
     await expect.poll(async () => {
       try { return (await page.request.get('/accounts/login/')).status(); } catch { return 0; }
     }).toBe(200);
+    await revealChrome(page);
     await page.getByRole('button',{name:'Raw source',exact:true}).click();
+    await revealChrome(page);
     await page.getByRole('button',{name:'Live preview',exact:true}).click();
     expect(await source(page)).toBe(draft);
     const second = await browser.newContext();
@@ -85,6 +90,7 @@ for (const mode of ['live','source']) test(`${mode}: shared history requires exp
   expect((await action(page,'Save')).status()).toBe(200);
   await page.goto('/history/Recovery.md');
   await page.getByRole('link',{name:'Open original for comparison and explicit restoration'}).first().click();
+  await revealChrome(page);
   if(mode==='source') await page.getByRole('button',{name:'Raw source',exact:true}).click();
   expect(await source(page)).toBe('\ufeff# History\r\n');
   expect((await action(page,'Restore this revision','/restore/')).status()).toBe(412);

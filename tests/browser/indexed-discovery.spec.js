@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -15,20 +16,25 @@ async function login(page) {
   await page.getByRole('button', { name: 'Sign in' }).click();
 }
 
-test('explicit link discovery is inert until requested and preserves the editor document', async ({ page }) => {
+test('explicit link discovery complements inline resolution and preserves the editor document', async ({ page }) => {
   await login(page);
   const requests = [];
   page.on('request', request => { if (/\/(resolve|index|search)\//.test(request.url())) requests.push(request.url()); });
   await page.goto('/notes/Slice.md');
   const source = await page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource());
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   await page.locator('.cm-content').click();
-  expect(requests).toEqual([]);
+  await expect(page.locator('[data-markdown-editor]').getByRole('link', { name: 'Wiki alias', exact: true })).toHaveAttribute('href', '/notes/Other.md#preview-details');
+  expect(requests.filter(url => /\/(index|search)\//.test(url))).toEqual([]);
+  const before = requests.length;
+  await revealChrome(page);
   await page.getByLabel('Link target', { exact: true }).fill('Other#Details|Local target');
   await page.getByRole('button', { name: 'Resolve link', exact: true }).click();
   await expect(page.locator('[data-link-result] a')).toHaveAttribute('href', '/notes/Other.md#preview-details');
-  expect(requests).toHaveLength(1);
+  expect(requests).toHaveLength(before + 1);
   expect(await page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource())).toBe(source);
   await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
 });
@@ -63,7 +69,7 @@ test('representative search reports partial state, then opens current disk conte
   expect(secondPage.every(href => href.startsWith('/notes/daily/2026/') && !firstPage.includes(href))).toBe(true);
   await writeFile(`${runtime}/wiki/Search observer.md`, '# Current external disk content\n');
   await page.goto('/search/?' + new URLSearchParams({ q: 'observerneedleunique' }));
-  await page.getByRole('link', { name: 'Search observer', exact: true }).click();
+  await page.locator('main').getByRole('link', { name: 'Search observer', exact: true }).click();
   await expect(page.locator('.cm-content')).toContainText('Current external disk content');
   const fresh = await readFile(`${runtime}/wiki/Search observer.md`, 'utf8');
   expect(await page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource())).toBe(fresh);
@@ -81,6 +87,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: direct and
   await page.goto('/notes/Heading.md#preview-caf%C3%A9-heading-1');
   const editor = page.locator('[data-markdown-editor]');
   await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
+  await revealChrome(page);
   await page.getByRole('button', { name: presentation === 'source' ? 'Raw source' : 'Live preview', exact: true }).click();
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);
   await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
@@ -92,6 +99,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: direct and
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);
   await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
   await page.goto('/notes/Slice.md');
+  await revealChrome(page);
   await page.getByLabel('Link target', { exact: true }).fill('Heading#Café heading-1|Second heading');
   await page.getByRole('button', { name: 'Resolve link', exact: true }).click();
   await page.locator('[data-link-result] a').click();
@@ -131,6 +139,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: resolved r
   await login(page);
   await page.goto('/notes/References.md');
   const editor = page.locator('[data-markdown-editor]');
+  await revealChrome(page);
   await page.getByRole('button', { name: presentation === 'source' ? 'Raw source' : 'Live preview', exact: true }).click();
   await page.evaluate(() => { location.hash = '#preview-label'; });
   await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
@@ -144,11 +153,13 @@ for (const presentation of ['live', 'source']) test(`${presentation}: resolved r
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);
   await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
   await page.goto('/notes/Slice.md');
+  await revealChrome(page);
   await page.getByLabel('Link target', { exact: true }).fill('References#Label|Reference heading');
   await page.getByRole('button', { name: 'Resolve link', exact: true }).click();
   await page.locator('[data-link-result] a').click();
   await page.waitForFunction(() => document.querySelector('[data-markdown-editor]')?.markdownEditor);
   await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
+  await revealChrome(page);
   await page.getByRole('button', { name: presentation === 'source' ? 'Raw source' : 'Live preview', exact: true }).click();
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);
   expect(await readFile(path, 'utf8')).toBe(source);

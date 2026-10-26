@@ -22,7 +22,7 @@ source-relative URLs, decoded once. Wikilinks use literal paths, including liter
 percent signs, and allow `[[path|label]]` with optional `.md`. They prefer exact
 root-relative paths, then exact source-relative paths. Parent-relative links may
 stay within the root. Absolute and outside-root paths, symlinks and excluded
-components are unavailable. No indexed alias/ID/basename fallback exists yet.
+components are unavailable. When exact paths are absent, indexed aliases, IDs and basenames resolve only from a complete, current, unambiguous index.
 Markdown can address filenames containing literal `#` using `%23`.
 
 Heading slugs lowercase Unicode text, remove punctuation other than underscores
@@ -54,3 +54,33 @@ error status. Normal mounted-filesystem race and blocking-I/O limits still apply
 Renderer configuration follows the [markdown-it-py API](https://markdown-it-py.readthedocs.io/en/latest/using.html),
 the [task-list plugin API](https://mdit-py-plugins.readthedocs.io/en/latest/_modules/mdit_py_plugins/tasklists.html)
 and the [nh3 allowlist API](https://nh3.readthedocs.io/en/stable/index.html).
+
+Inline live preview recognizes wikilinks through its Markdown parser, including
+`[[topics/example|Example topic]]`. Inactive lines show clickable labels resolved
+by the same authenticated resolver as server preview. Move the caret onto a line
+with the arrow keys to reveal its Markdown; selections reveal every intersected
+line. Ordinary single-line labeled Markdown links behave the same way. Tab and
+Enter follow rendered links; mouse/touch activation does not first move the caret
+into their source. The normal unsaved-draft warning still applies.
+
+Missing, ambiguous and unavailable links show non-navigable labels with a status
+in their accessible description. Code, escaped syntax, front matter and unsupported
+multiline links stay literal. Resolution is capped at 200 distinct destinations
+with at most four requests in flight. Mode switches and rendering never edit source.
+
+The presentation controls report exactly one active mode: **Live preview**, **Raw
+source** (the enhanced, virtualized editor), or **Plain text fallback**. Choose
+Plain text fallback for complete document source in one labeled textarea, including
+front matter and the end of a long note. Loading and ready states are separate
+from save status; edits made in the initial textarea while the enhanced editor
+loads are retained. Switching presentations shares the current draft and never
+saves or formats it.
+
+**Today** uses the browser's local calendar date and named IANA timezone, both
+shown next to the control. It resolves an existing `YYYY-MM-DD` note with the
+normal exact-path/basename resolver; ambiguous or unavailable targets remain
+non-navigable. It never creates a note. Reopening navigation or returning to the
+browser refreshes the date across midnight or a timezone change. **Recently
+modified** lists up to five eligible existing notes by indexed modification time,
+with index readiness shown; opening one always reads current disk content. This
+is index-backed navigation, not per-user visit tracking.

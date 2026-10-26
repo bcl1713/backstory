@@ -45,28 +45,22 @@ function buildDecorations(view) {
       }
       return false;
     }
-    // Never partly hide a block intersecting any cursor or selection range.
-    if (blocks.test(node.name) && selected(node)) return false;
-    if (/^ATXHeading[1-6]$/.test(node.name)) {
-      ranges.push(Decoration.line({ class: `lp-heading lp-h${node.name.at(-1)}` }).range(state.doc.lineAt(node.from).from));
+    const heading = /^(ATXHeading[1-6]|SetextHeading[12])$/.test(node.name);
+    if (heading) {
+      const level = node.name.at(-1);
+      ranges.push(Decoration.line({ class: `lp-heading lp-h${level}`, attributes: { role: 'heading', 'aria-level': level } }).range(state.doc.lineAt(node.from).from));
     }
+    // Heading semantics persist even while the selected block reveals source.
+    if (blocks.test(node.name) && selected(node)) return false;
     if (node.name === 'StrongEmphasis') mark(node.from, node.to, 'lp-strong');
     if (node.name === 'Emphasis') mark(node.from, node.to, 'lp-emphasis');
     if (node.name === 'InlineCode') mark(node.from, node.to, 'lp-code');
     if (node.name === 'ListMark') mark(node.from, node.to, 'lp-list-marker');
     if (node.name === 'Image' || node.name === 'HTMLTag') return false;
-    if (node.name === 'Link') {
-      // The label stays inert text. Navigation remains the secondary safe preview.
-      if (!node.node.getChild('URL') || state.doc.lineAt(node.from).number !== state.doc.lineAt(node.to).number) return false;
-      mark(node.from, node.to, 'lp-link');
-    }
+    // A separate decoration plugin owns labeled links and line activity.
+    if (node.name === 'Link' || node.name === 'WikiLink') return false;
     if (['EmphasisMark', 'CodeMark', 'HeaderMark'].includes(node.name)) hide(node);
-    // Autolinks, bare URLs and email have no separate label: retain all source.
-    // Only a supported, single-line labeled Link may conceal its destination.
-    if (['LinkMark', 'URL'].includes(node.name)) {
-      const link = node.node.parent;
-      if (link?.name === 'Link' && link.getChild('URL') && state.doc.lineAt(link.from).number === state.doc.lineAt(link.to).number) hide(node);
-    }
+
   } });
   return Decoration.set(ranges, true);
 }

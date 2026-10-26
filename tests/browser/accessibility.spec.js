@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -30,14 +31,15 @@ test('keyboard navigation reaches folders, search, editor modes, proposal dismis
   await login(page);
   await activate(page, page.getByRole('link', { name: 'Skip to content' }));
   await activate(page, page.getByRole('link', { name: 'Keyboard.md', exact: true }));
+  await activate(page, page.getByRole('button', { name: 'Navigation and controls', exact: true }));
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Keyboard.md');
   await expect(page.getByRole('navigation', { name: 'Folder sidebar' })).toContainText('Other.md');
   await activate(page, page.getByRole('button', { name: 'Raw source', exact: true }));
   await activate(page, page.getByRole('button', { name: 'Live preview', exact: true }));
   await tabTo(page, page.getByRole('textbox', { name: 'Markdown editor', exact: true }));
   await expect(page.locator('.cm-editor')).toHaveClass(/cm-focused/);
-  const focusStyle = await page.locator('.cm-editor').evaluate(el => getComputedStyle(el).outlineWidth);
-  expect(parseFloat(focusStyle)).toBeGreaterThan(0);
+  const focusStyle = await page.locator('.cm-content').evaluate(el => getComputedStyle(el).boxShadow);
+  expect(focusStyle).not.toBe('none');
   await page.keyboard.press('ArrowRight');
   await activate(page, page.getByRole('button', { name: 'Format', exact: true }));
   await expect(page.locator('[data-format-proposal]')).toBeVisible();
@@ -70,22 +72,21 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await login(page);
     await page.goto('/notes/Slice.md');
     const nav = page.locator('[data-site-navigation]');
-    if (viewport.width < 600) {
-      await expect(nav).not.toHaveAttribute('open');
-      await page.getByText('Browse wiki', { exact: true }).tap();
-      await expect(nav).toHaveAttribute('open');
-      await page.keyboard.press('Escape');
-      await expect(nav).not.toHaveAttribute('open');
-      await expect(page.getByText('Browse wiki', { exact: true })).toBeFocused();
-    } else {
-      await expect(page.getByRole('navigation', { name: 'Folder sidebar' })).toBeVisible();
-    }
+    const toggle = page.getByRole('button', { name: 'Navigation and controls', exact: true });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.tap();
+    await expect(nav).toHaveAttribute('open');
+    await expect(page.getByRole('navigation', { name: 'Folder sidebar' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.cm-content')).toBeFocused();
     await page.locator('.cm-content').focus();
     await page.keyboard.press('Control+End');
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeInViewport();
     await expect(page.getByRole('button', { name: 'Format', exact: true })).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: `/tmp/backstory-release-one/reports/task11-${viewport.width}.png`, fullPage: true });
+    await revealChrome(page);
     await page.getByRole('button', { name: 'Raw source', exact: true }).click();
     await page.screenshot({ path: `/tmp/backstory-release-one/reports/task11-${viewport.width}-source.png`, fullPage: true });
   });

@@ -4,6 +4,7 @@ from indexing import views as index_views
 
 app_name = "wiki"
 urlpatterns = [
+    path("navigation/", views.navigation, name="navigation"),
     path("revisions/<int:revision_id>/", views.revision, name="revision"),
     path("drafts/<int:draft_id>/", views.draft, name="draft"),
     path("drafts/<int:draft_id>/download/", views.draft, {"download": True}, name="draft-download"),

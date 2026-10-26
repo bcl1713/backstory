@@ -13,6 +13,9 @@ non-root container supervises Gunicorn and background SQLite indexing.
 `.env`, interactive named users, an existing Cloudflare Tunnel or Nginx Proxy
 Manager for remote HTTPS, backups and upgrades.
 
+The [editor guide](docs/editor.md) covers Zen, navigation shortcuts, clickable
+live links and complete-document source access.
+
 For source builds or a disposable demo, start with [initial setup](docs/setup.md).
 The [configuration reference](docs/configuration.md) lists every variable.
 The [HTTPS proxy guide](docs/reverse-proxy.md) defines the shared header/network

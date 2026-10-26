@@ -97,6 +97,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     return true;
   };
   const updateLinks = () => {
+    find('#note-path').textContent = JSON.stringify(path);
     find('[data-note-title]').textContent = path;
     document.title = `${path} · Backstory`;
     find('[data-server-preview]').href = '/preview/' + encode(path);
@@ -365,8 +366,8 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   };
 }
 
-// Link lookup is explicitly requested. Editor selection/decorations never call
-// this endpoint or perform backlink, scan or index work.
+// This explicit lookup complements inline link rendering. Neither lookup
+// performs backlink traversal or schedules scans/index work.
 export function mountLinkDiscovery(getPath) {
   const form = document.querySelector('[data-link-discovery]');
   if (!form) return;
