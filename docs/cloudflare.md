@@ -7,6 +7,8 @@ below. The separate [bundled connector](#optional-bundled-connector) is an opt-i
 installation for operators who need a connector instance managed with Backstory.
 Ordinary Nginx Proxy Manager, Caddy and other reverse proxies keep the same
 [generic proxy contract](reverse-proxy.md).
+The [configuration reference](configuration.md) explains all environment inputs,
+defaults and startup errors, including which settings are derived by the manifest.
 
 These are operator instructions. No live Cloudflare account, tunnel, DNS, Access
 policy or public endpoint was created or changed for this feature. Local packaging
@@ -139,7 +141,9 @@ Create a new private `.env` from the tunnel example, refusing an existing file:
 (umask 077; set -C; cat cloudflare.env.example > .env)
 ```
 
-Edit every path, marker filename and public host/origin. `CLOUDFLARE_TUNNEL_TOKEN_FILE`
+Edit every path, UID/GID and public host/origin. The default marker is
+`.backstory-marker`; set `BACKSTORY_IDENTITY_PATH` only for a deliberately chosen
+custom root filename. `CLOUDFLARE_TUNNEL_TOKEN_FILE`
 contains the **absolute host path only**. Use absolute paths without `~` and single
 quotes for spaces; dotenv is data, so do not source/eval it. Keep
 `COMPOSE_FILE=compose.cloudflare.yaml` for ordinary Compose commands. The example

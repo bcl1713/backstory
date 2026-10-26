@@ -18,6 +18,9 @@ KEYS = (
     'BACKSTORY_BIND_ADDRESS', 'BACKSTORY_COOKIE_MODE', 'BACKSTORY_ALLOWED_HOSTS',
     'BACKSTORY_PROXY_MODE', 'BACKSTORY_CSRF_TRUSTED_ORIGINS',
     'BACKSTORY_TRUSTED_PROXY_IPS', 'BACKSTORY_PROXY_CLIENT_IP_HEADER',
+    'BACKSTORY_INDEX_BATCH_SIZE', 'BACKSTORY_INDEX_YIELD_SECONDS',
+    'BACKSTORY_INDEX_INCREMENTAL_SECONDS', 'BACKSTORY_INDEX_VERIFY_SECONDS',
+    'BACKSTORY_INDEX_QUEUE_LIMIT',
 )
 
 
@@ -202,3 +205,59 @@ def test_portainer_https_configuration_matches_local_hostdata(tmp_path):
     local = web_config(config(tmp_path, files='compose.yaml:compose.host-data.yaml', **values))
     assert 'build' not in standalone
     assert {key: value for key, value in local.items() if key != 'build'} == standalone
+
+
+@pytest.mark.parametrize('files', ['compose.yaml', 'compose.yaml:compose.host-data.yaml',
+                                 'compose.portainer.yaml', 'compose.cloudflare.yaml'])
+@pytest.mark.parametrize('overrides', [False, True])
+def test_worker_configuration_reaches_every_web_process(tmp_path, files, overrides):
+    expected = {
+        'BACKSTORY_INDEX_BATCH_SIZE': '7' if overrides else '20',
+        'BACKSTORY_INDEX_YIELD_SECONDS': '1.5' if overrides else '1',
+        'BACKSTORY_INDEX_INCREMENTAL_SECONDS': '600' if overrides else '300',
+        'BACKSTORY_INDEX_VERIFY_SECONDS': '43200' if overrides else '86400',
+        'BACKSTORY_INDEX_QUEUE_LIMIT': '500' if overrides else '1000',
+    }
+    values = expected if overrides else {}
+    if files == 'compose.cloudflare.yaml':
+        from tests.integration.test_cloudflare_packaging import config as tunnel_config, rendered
+        web = rendered(tunnel_config(tmp_path, **values))['services']['web']
+    else:
+        web = web_config(config(tmp_path, files=files, BACKSTORY_IMAGE='backstory:fixture',
+            BACKSTORY_DATA_HOST_PATH=str(tmp_path / 'data'), **values))
+    assert {key: web['environment'].get(key) for key in expected} == expected
+
+
+@pytest.mark.parametrize('proxy', [False, True])
+def test_minimal_example_renders_and_loads_settings_without_host_storage_access(tmp_path, proxy):
+    from tests.integration.test_configuration import load
+    # Render the actual distributed example, then use its process environment
+    # against disposable native targets. Never start a service or touch its binds.
+    for name in ['compose.yaml', 'compose.host-data.yaml', 'compose.portainer.yaml']:
+        shutil.copyfile(REPO / name, tmp_path / name)
+    example = (REPO / '.env.example').read_text()
+    (tmp_path / '.env').write_text(example)
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(('BACKSTORY_', 'COMPOSE_'))}
+    if proxy:
+        env.update(BACKSTORY_IMAGE='backstory:local', BACKSTORY_BIND_ADDRESS='192.0.2.10',
+            BACKSTORY_COOKIE_MODE='https', BACKSTORY_ALLOWED_HOSTS='wiki.example.test',
+            BACKSTORY_PROXY_MODE='trusted', BACKSTORY_CSRF_TRUSTED_ORIGINS='https://wiki.example.test',
+            BACKSTORY_TRUSTED_PROXY_IPS='192.0.2.20/32')
+    command = ['docker', 'compose']
+    if proxy:
+        command += ['-f', 'compose.portainer.yaml']
+    if not shutil.which('docker'):
+        pytest.skip('Docker Compose unavailable; packaging gate remains open')
+    result = subprocess.run(command + ['config', '--format', 'json'], cwd=tmp_path,
+                            env=env, text=True, capture_output=True, timeout=30)
+    web = web_config(result)
+    assert web['user'] == '1000:1000'
+    assert web['environment']['BACKSTORY_IDENTITY_PATH'] == '.backstory-marker'
+    assert web['environment']['BACKSTORY_PROXY_MODE'] == ('trusted' if proxy else 'off')
+    assert next(m for m in web['volumes'] if m['target'] == '/wiki')['read_only'] is True
+    settings_env = {**web['environment'], 'BACKSTORY_WIKI_ROOT': str(tmp_path / 'wiki'),
+                    'BACKSTORY_DATA_DIR': str(tmp_path / 'data')}
+    started = load(tmp_path, settings_env)
+    assert started.returncode == 0, started.stderr
+    assert not (tmp_path / 'wiki').exists()

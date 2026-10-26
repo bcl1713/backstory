@@ -6,6 +6,8 @@ account login. Nginx Proxy Manager, Caddy and other proxies use the same setting
 Prepare the [existing wiki and fresh private data](setup.md#2b-start-with-an-existing-wiki)
 first. This guide supplies configuration; it does not deploy or change your live
 proxy, firewall or server.
+The [configuration reference](configuration.md) provides the complete inventory,
+minimal local/HTTPS recipes, requirements, defaults and startup remedies.
 
 **Follow-up status:** Compose rendering, focused backend checks, a generated
 localhost TLS-proxy fixture and rebuilt-image acceptance passed. Combined

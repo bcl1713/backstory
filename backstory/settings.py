@@ -5,6 +5,11 @@ import secrets
 import tempfile
 
 from django.core.exceptions import ImproperlyConfigured
+from backstory.configuration import positive_integer, positive_seconds, PROXY_REMEDIES
+from backstory.checks import (
+    exact_host, exact_https_origin, host_source_configuration_errors,
+    proxy_configuration_errors, safe_origin_bind,
+)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -20,23 +25,28 @@ def root(name):
     path = Path(required(name))
     if not path.is_absolute():
         raise ImproperlyConfigured(f"{name} must be an absolute path")
-    return path.resolve()
+    try:
+        return path.resolve()
+    except (OSError, ValueError, RuntimeError):
+        raise ImproperlyConfigured(f"{name} must be a resolvable absolute path; check the mount and directory access") from None
 
 
 BACKSTORY_WIKI_ROOT = root("BACKSTORY_WIKI_ROOT")
 BACKSTORY_DATA_DIR = root("BACKSTORY_DATA_DIR")
 if BACKSTORY_WIKI_ROOT.is_relative_to(BACKSTORY_DATA_DIR) or BACKSTORY_DATA_DIR.is_relative_to(BACKSTORY_WIKI_ROOT):
-    raise ImproperlyConfigured("Wiki and application data roots must not overlap")
+    raise ImproperlyConfigured("BACKSTORY_WIKI_ROOT and BACKSTORY_DATA_DIR must not overlap; choose separate roots")
 # Host bind sources are provenance, not paths accessible inside this container.
 # Validate before creating private application state at the separate mount target.
 BACKSTORY_STORAGE_SOURCE_MODE = os.environ.get('BACKSTORY_STORAGE_SOURCE_MODE', 'native')
 BACKSTORY_WIKI_HOST_SOURCE = os.environ.get('BACKSTORY_WIKI_HOST_SOURCE')
 BACKSTORY_DATA_HOST_SOURCE = os.environ.get('BACKSTORY_DATA_HOST_SOURCE')
-from backstory.checks import host_source_configuration_errors
 _source_errors = host_source_configuration_errors(BACKSTORY_STORAGE_SOURCE_MODE,
     BACKSTORY_WIKI_HOST_SOURCE, BACKSTORY_DATA_HOST_SOURCE)
 if _source_errors:
-    raise ImproperlyConfigured('Invalid BACKSTORY host storage sources: ' + ', '.join(_source_errors))
+    raise ImproperlyConfigured('Invalid BACKSTORY host storage sources: ' + ', '.join(_source_errors)
+        + '; BACKSTORY_STORAGE_SOURCE_MODE must be native without host metadata, or host-bind with '
+        'BACKSTORY_WIKI_HOST_SOURCE and BACKSTORY_DATA_HOST_SOURCE set to disjoint canonical absolute '
+        'host paths; use the supplied manifest to derive them from the bind sources')
 
 # Administrative root marker: contents and legacy SHA-256 configuration are unused.
 BACKSTORY_IDENTITY_PATH = os.environ.get("BACKSTORY_IDENTITY_PATH", ".backstory-marker")
@@ -50,10 +60,10 @@ if BACKSTORY_COOKIE_MODE not in {"https", "localhost"}:
     raise ImproperlyConfigured("BACKSTORY_COOKIE_MODE must be https or localhost")
 _local = BACKSTORY_COOKIE_MODE == "localhost"
 ALLOWED_HOSTS = [host.strip() for host in required("BACKSTORY_ALLOWED_HOSTS").split(",") if host.strip()]
-if not ALLOWED_HOSTS or "*" in ALLOWED_HOSTS:
-    raise ImproperlyConfigured("Explicit BACKSTORY_ALLOWED_HOSTS are required")
+if not ALLOWED_HOSTS or not all(exact_host(host) for host in ALLOWED_HOSTS):
+    raise ImproperlyConfigured("BACKSTORY_ALLOWED_HOSTS must contain exact hostnames or IPs without schemes, ports or wildcards")
 if _local and any(host not in {"localhost", "127.0.0.1", "[::1]", "testserver"} for host in ALLOWED_HOSTS):
-    raise ImproperlyConfigured("localhost cookie mode requires loopback hosts")
+    raise ImproperlyConfigured("BACKSTORY_ALLOWED_HOSTS must contain only loopback hosts in BACKSTORY_COOKIE_MODE=localhost")
 
 # Trust is explicit and applies only to the actual TCP peer. Never use Django's
 # independent forwarding switches: the middleware validates before setting HTTPS.
@@ -62,19 +72,27 @@ BACKSTORY_TRUSTED_PROXY_IPS = tuple(value.strip() for value in os.environ.get(
     'BACKSTORY_TRUSTED_PROXY_IPS', '').split(',')) if os.environ.get('BACKSTORY_TRUSTED_PROXY_IPS') else ()
 BACKSTORY_PROXY_CLIENT_IP_HEADER = os.environ.get('BACKSTORY_PROXY_CLIENT_IP_HEADER', 'none')
 CSRF_TRUSTED_ORIGINS = [value.strip() for value in os.environ.get('BACKSTORY_CSRF_TRUSTED_ORIGINS', '').split(',') if value.strip()]
+if not _local and not all(exact_https_origin(origin, ALLOWED_HOSTS) for origin in CSRF_TRUSTED_ORIGINS):
+    raise ImproperlyConfigured("BACKSTORY_CSRF_TRUSTED_ORIGINS must contain exact HTTPS origins matching BACKSTORY_ALLOWED_HOSTS, without paths or trailing slashes")
 SECURE_PROXY_SSL_HEADER = None
 USE_X_FORWARDED_HOST = False
 USE_X_FORWARDED_PORT = False
 BACKSTORY_BIND_ADDRESS = os.environ.get('BACKSTORY_BIND_ADDRESS', '127.0.0.1')
-from backstory.checks import proxy_configuration_errors, safe_origin_bind
 if not safe_origin_bind(BACKSTORY_BIND_ADDRESS, BACKSTORY_COOKIE_MODE):
     raise ImproperlyConfigured('BACKSTORY_BIND_ADDRESS must be a literal IP; localhost cookies require a loopback bind')
 _proxy_errors = proxy_configuration_errors(BACKSTORY_PROXY_MODE, BACKSTORY_COOKIE_MODE,
     ALLOWED_HOSTS, CSRF_TRUSTED_ORIGINS, BACKSTORY_TRUSTED_PROXY_IPS, BACKSTORY_PROXY_CLIENT_IP_HEADER)
 if _proxy_errors:
-    raise ImproperlyConfigured('Invalid BACKSTORY proxy configuration: ' + ', '.join(_proxy_errors))
+    raise ImproperlyConfigured('Invalid BACKSTORY proxy configuration: '
+        + '; '.join(f'{code}: {PROXY_REMEDIES[code]}' for code in _proxy_errors))
 
-BACKSTORY_DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+# Parse maintenance configuration before creating any private state.
+BACKSTORY_INDEX_BATCH_SIZE = positive_integer("BACKSTORY_INDEX_BATCH_SIZE", 20)
+BACKSTORY_INDEX_YIELD_SECONDS = positive_seconds("BACKSTORY_INDEX_YIELD_SECONDS", 1)
+BACKSTORY_INDEX_INCREMENTAL_SECONDS = positive_integer("BACKSTORY_INDEX_INCREMENTAL_SECONDS", 300)
+BACKSTORY_INDEX_VERIFY_SECONDS = positive_integer("BACKSTORY_INDEX_VERIFY_SECONDS", 86400)
+BACKSTORY_INDEX_QUEUE_LIMIT = positive_integer("BACKSTORY_INDEX_QUEUE_LIMIT", 1000)
+BACKSTORY_REVISION_QUOTA_BYTES = positive_integer("BACKSTORY_REVISION_QUOTA_BYTES", 64 * 1024 * 1024)
 
 
 def persistent_secret():
@@ -97,11 +115,20 @@ def persistent_secret():
     with os.fdopen(fd) as stream:
         value = stream.read(256)
     if len(value) < 64:
-        raise ImproperlyConfigured("Application secret is invalid; restore protected application state")
+        raise ImproperlyConfigured("BACKSTORY_DATA_DIR application-secret is invalid; restore protected application state from backup")
     return value
 
 
-SECRET_KEY = persistent_secret()
+try:
+    BACKSTORY_DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    # A readable existing secret alone cannot establish that SQLite, drafts and
+    # recovery state will be writable. Catch common UID/GID/mount errors early.
+    if not os.access(BACKSTORY_DATA_DIR, os.R_OK | os.W_OK | os.X_OK):
+        raise PermissionError
+    SECRET_KEY = persistent_secret()
+except (OSError, UnicodeError):
+    raise ImproperlyConfigured("BACKSTORY_DATA_DIR must be a writable private directory with a readable application-secret; "
+        "check its mount and effective UID/GID ownership; restore existing protected state from backup if damaged") from None
 DEBUG = False
 INSTALLED_APPS = [
     "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions",
@@ -160,13 +187,6 @@ BACKSTORY_ATTACHMENT_RANGE_MAX_BYTES = 8 * 1024 * 1024
 DATA_UPLOAD_MAX_MEMORY_SIZE = BACKSTORY_NOTE_MAX_BYTES * 6 + 1024
 BACKSTORY_EXCLUSIONS = tuple(filter(None, (item.strip() for item in os.environ.get("BACKSTORY_EXCLUSIONS", "").split(","))))
 
-# Background maintenance defaults; requests never start scans.
-BACKSTORY_INDEX_BATCH_SIZE = int(os.environ.get("BACKSTORY_INDEX_BATCH_SIZE", "20"))
-BACKSTORY_INDEX_YIELD_SECONDS = float(os.environ.get("BACKSTORY_INDEX_YIELD_SECONDS", "1"))
-BACKSTORY_INDEX_INCREMENTAL_SECONDS = int(os.environ.get("BACKSTORY_INDEX_INCREMENTAL_SECONDS", "300"))
-BACKSTORY_INDEX_VERIFY_SECONDS = int(os.environ.get("BACKSTORY_INDEX_VERIFY_SECONDS", "86400"))
-BACKSTORY_INDEX_QUEUE_LIMIT = int(os.environ.get("BACKSTORY_INDEX_QUEUE_LIMIT", "1000"))
-
 BACKSTORY_SESSION_IDLE_SECONDS = 12 * 3600
 BACKSTORY_SESSION_ABSOLUTE_SECONDS = 24 * 3600
 BACKSTORY_REMEMBERED_IDLE_SECONDS = 14 * 86400
@@ -191,4 +211,3 @@ LOGGING = {
 }
 
 BACKSTORY_REVISION_RETENTION_DAYS = 30
-BACKSTORY_REVISION_QUOTA_BYTES = int(os.environ.get('BACKSTORY_REVISION_QUOTA_BYTES', str(64 * 1024 * 1024)))

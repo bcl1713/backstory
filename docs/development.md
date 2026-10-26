@@ -2,6 +2,9 @@
 
 For a Compose installation or an existing wiki, start with the [setup guide](setup.md).
 This page covers native development against generated disposable data.
+See the [configuration reference](configuration.md) for the complete environment
+inventory. Native commands do not load a Compose `.env`; export actual native
+wiki/data roots to both processes. Container mount-source values are different.
 
 Use generated synthetic storage only. Install Python 3.14, uv 0.12.19 and
 Node 22 LTS (22.12 or newer). Lockfiles pin dependencies; the image pins Python

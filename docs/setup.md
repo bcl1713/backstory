@@ -147,30 +147,18 @@ existing file so it cannot overwrite another installation's configuration:
 (umask 077; set -C; cat .env.example > .env)
 ```
 
-Edit `.env`, replacing paths and marker filename with the approved values. Host
+Edit `.env`, replacing paths and IDs with the approved values. Host
 paths must be absolute, with no `~`; single quotes allow spaces. This is dotenv data, not a
 shell script: do not `source` or `eval` it.
 
 ```dotenv
 COMPOSE_PROJECT_NAME=backstory-wikitest
 COMPOSE_FILE=compose.yaml:compose.host-data.yaml
-BACKSTORY_IMAGE=backstory:local
 BACKSTORY_UID=1000
 BACKSTORY_GID=1000
 BACKSTORY_WIKI_ROOT='/absolute/path/to/testwiki'
 BACKSTORY_DATA_HOST_PATH='/home/YOUR_USER/backstory-wikitest-data'
-BACKSTORY_IDENTITY_PATH=.backstory-marker
 BACKSTORY_WIKI_READ_ONLY=true
-BACKSTORY_BIND_ADDRESS=127.0.0.1
-BACKSTORY_PORT=8000
-BACKSTORY_COOKIE_MODE=localhost
-BACKSTORY_ALLOWED_HOSTS=localhost,127.0.0.1
-BACKSTORY_PROXY_MODE=off
-BACKSTORY_CSRF_TRUSTED_ORIGINS=
-BACKSTORY_TRUSTED_PROXY_IPS=
-BACKSTORY_PROXY_CLIENT_IP_HEADER=none
-BACKSTORY_EXCLUSIONS=
-BACKSTORY_REVISION_QUOTA_BYTES=67108864
 ```
 
 `COMPOSE_FILE` selects the host-data overlay automatically on every ordinary
@@ -179,11 +167,13 @@ missing wiki or data directory stops the container instead of creating a folder.
 The host wiki maps to `/wiki`; host application data maps to `/var/lib/backstory`.
 Do not set `BACKSTORY_DATA_DIR` for Compose: that key is for native development.
 
-Exclusions are comma-separated additional deny patterns, for example
-`private,work/*.md`; they cannot weaken built-in policy. Quota is logical recovery
-payload accounting, not SQLite file size. These settings are explicitly forwarded
-by the manifests. The security defaults above are for host-local HTTP. Change the
-security settings together using the [HTTPS proxy guide](reverse-proxy.md), rather
+This minimal recipe uses the default `.backstory-marker`, builds `backstory:local`,
+and serves host-local HTTP at `127.0.0.1:8000` with no forwarding trust.
+Override `BACKSTORY_IDENTITY_PATH` only for a deliberately selected custom marker.
+The [configuration reference](configuration.md) explains every variable, including
+optional exclusions, revision quota and worker settings, accepted values, defaults
+and omission/error behavior. Change the security settings together using the
+[HTTPS proxy guide](reverse-proxy.md), rather
 than exposing localhost cookie mode to a network interface. Exported shell
 variables override `.env`; start in a clean shell or
 unset previously exported `BACKSTORY_*` and `COMPOSE_*` values before using it.
@@ -282,7 +272,8 @@ wiki/data roots outside the checkout.
 The image must already exist on the selected endpoint or in an accessible
 registry. No public Backstory registry image is promised. On that endpoint, from
 this checkout with the configured `.env`, run `docker compose build`. Keep the
-same `BACKSTORY_IMAGE` tag in Portainer. A web-editor stack cannot build this
+same `BACKSTORY_IMAGE` tag in Portainer (set `BACKSTORY_IMAGE=backstory:local`
+explicitly when using the default local build). A web-editor stack cannot build this
 checkout from `build: .`; the standalone file therefore has no build context.
 Distributing an image to a different endpoint is a separate operator step.
 

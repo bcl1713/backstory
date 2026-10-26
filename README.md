@@ -8,6 +8,8 @@ non-root container supervises Gunicorn and background SQLite indexing.
 
 Start here: [initial setup](docs/setup.md). **Already have a wiki?
 [Connect the existing folder](docs/setup.md#2b-start-with-an-existing-wiki).**
+The [configuration reference](docs/configuration.md) has minimal local/HTTPS
+recipes and the complete variable inventory, requirements, defaults and remedies.
 Configure a private `.env`, then use ordinary `docker compose up -d --build`.
 The guide covers matching the wiki owner with fresh private application data,
 a build-free Portainer Standalone manifest, and an optional disposable demo.
