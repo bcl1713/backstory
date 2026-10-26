@@ -64,11 +64,14 @@ test('pointer and keyboard can follow rendered links without entering source fir
   await expect(page).toHaveURL(/\/notes\/Other.md#preview-details$/);
 });
 
-test('missing and ambiguous destinations stay non-navigable and code/escapes remain literal', async ({ page }) => {
+test('missing and ambiguous destinations offer explicit actions and code/escapes remain literal', async ({ page }) => {
   await open(page);
   await expect(editor(page).locator('.lp-link-missing')).toHaveText('Missing label');
   await expect(editor(page).locator('.lp-link-ambiguous')).toHaveText('Ambiguous label');
-  for (const name of ['Missing label', 'Ambiguous label', 'Code label', 'Escaped label', 'Fenced label']) {
+  for (const state of ['missing', 'ambiguous']) {
+    await expect(editor(page).locator(`a.lp-link-${state}`)).toHaveAttribute('href', /^\/new\/link\//);
+  }
+  for (const name of ['Code label', 'Escaped label', 'Fenced label']) {
     await expect(editor(page).getByRole('link', { name, exact: true })).toHaveCount(0);
   }
   expect(await read(page)).toBe(source);

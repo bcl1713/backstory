@@ -54,8 +54,27 @@ revision views keep their selected snapshot instead of following live changes.
 Inactive-line wikilinks and ordinary labeled Markdown links can be clicked,
 tapped or focused with Tab and followed with Enter. Move into their line with
 the arrow keys to edit Markdown directly; selections reveal source on each line
-they intersect. Missing, ambiguous and unavailable targets cannot be followed.
-Navigating away from an unsaved draft still requires the existing confirmation.
+they intersect. Missing wikilinks keep their warning color and offer **Create
+Note** with the intended filename prefilled. Review the filename, enter content,
+and choose **Create note** explicitly; previewing or activating a link creates
+nothing on disk. Headings and display labels stay part of the original link,
+not the new filename. Folders must already exist.
+
+Ambiguous names and aliases open a destination chooser. Select an existing note,
+or explicitly enter a new Markdown path. Unavailable storage or incomplete link
+resolution offers no creation action. Attachments and external links retain
+their existing behavior.
+
+When the source has unsaved changes, creating a linked note opens a separate tab;
+your source draft and undo history stay in the original tab. If the browser
+blocks the tab, an explicit new-tab link remains beside the save status. Link
+resolution refreshes when you return. Other navigation away from an unsaved
+draft still requires confirmation.
+
+If another writer creates the target first, the creation draft stays intact and
+**Open existing note** offers access to that note. Creation never adopts its
+revision for overwriting. Successful creation opens the saved note; a delayed
+discovery/index update is reported separately from save success.
 
 Today shows the browser-local date and named timezone. It opens an existing
 date-named note through the safe resolver; it never creates one. Recently
