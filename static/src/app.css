@@ -107,6 +107,8 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 .note-page .zen-chrome, .note-page [data-source-fallback] > label, .note-page [data-source-fallback] > p { margin-left: 1.5rem; margin-right: 1.5rem; }
 .note-page aside.zen-chrome { margin: 0; }
 .note-page .persistent-actions { padding-left: 1rem; padding-right: 1rem; }
+.sync-banner { position: sticky; top: 5rem; z-index: 8; padding: .75rem; background: var(--surface); border: 1px solid var(--border); }
+.sync-banner p { margin-top: 0; }
 @media (min-width: 601px) { [data-site-navigation] > summary { display: none; } }
 @media (max-width: 900px) {
   .note-page.chrome-open .app-layout { display: block; }

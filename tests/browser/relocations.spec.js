@@ -76,7 +76,8 @@ test('an open editor retains unsaved source and cannot recreate the old path aft
   await mover.getByRole('button', { name: 'Confirm move and link updates' }).click();
   await page.bringToFront();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.locator('[data-editor-status]')).toContainText('Revision conflict');
+  await expect(page.locator('[data-sync-message]')).toContainText('deleted or moved');
+  await expect(page.locator('[data-editor-status]')).toContainText('Draft retained');
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe('# Draft from another tab\n');
   expect(await readFile(`${runtime}/wiki/${root}/Archives/Project.md`, 'utf8')).toBe('# Project\n');
   await mover.close();

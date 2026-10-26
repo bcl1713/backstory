@@ -130,6 +130,7 @@ for (const presentation of ['live', 'source']) {
     await expect(page.getByLabel('Your draft', { exact: true })).toHaveValue(draft.replaceAll('\r\n', '\n'));
     const current = (await conflict.json()).revision;
     await page.getByRole('button', { name: 'Accept current revision for manual merge' }).click();
+    await expect(page.locator('[data-conflict]')).toBeHidden();
     await replace(page, '# Merged\n');
     const saved = await action(page, 'Save');
     expect(saved.status()).toBe(200);
@@ -242,12 +243,13 @@ test('two authenticated editors expose base/current/draft and confirmed reload n
   await second.getByRole('button', { name: 'Download draft' }).click();
   const downloaded = await download;
   expect((await readFile(await downloaded.path())).toString()).toContain('# My preserved draft');
-  second.once('dialog', dialog => dialog.dismiss());
+  const dismissed = new Promise(resolve => second.once('dialog', async dialog => { await dialog.dismiss(); resolve(); }));
   await second.getByRole('button', { name: 'Reload current source' }).click();
+  await dismissed;
   expect(await readSource(second)).toContain('# My preserved draft');
   second.once('dialog', dialog => dialog.accept());
   await second.getByRole('button', { name: 'Reload current source' }).click();
-  expect(await readSource(second)).toBe('# First writer\r\n');
+  await expect.poll(() => readSource(second)).toBe('# First writer\r\n');
   expect((await readFile(target)).toString()).toBe('\ufeff# First writer\r\n');
   await firstContext.close();
   await secondContext.close();
@@ -396,7 +398,7 @@ test('conflict reload and subsequent Save preserve a leading content FEFF separa
   await expect(page.getByLabel('Current disk source', { exact: true })).toHaveValue('\ufeff# Current\n');
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Reload current source' }).click();
-  expect(await readSource(page)).toBe(currentSource);
+  await expect.poll(() => readSource(page)).toBe(currentSource);
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+End');
   await page.keyboard.insertText('\nChanged\n');
