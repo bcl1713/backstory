@@ -16,7 +16,7 @@
 <button type="button" data-store-draft>Store protected draft</button><a data-stored-draft hidden>Open stored draft</a>
 <button type="button" data-copy-draft>Copy draft</button><button type="button" data-download-draft>Download draft</button>
 </div>
-<p class="zen-chrome" data-secondary-links {% if is_new %}hidden{% endif %}><a data-server-preview {% if not is_new %}href="{% url 'wiki:preview' note.path %}"{% endif %}>Open safe server preview</a> · <a data-source-download {% if not is_new %}href="{% url 'wiki:source' note.path %}"{% endif %} download>Download stored source</a></p>
+<p class="zen-chrome" data-secondary-links {% if is_new %}hidden{% endif %}><a data-move-link href="{% url 'wiki:move' %}?source={{ note.path|urlencode }}">Move / Rename this note</a> · <a data-server-preview {% if not is_new %}href="{% url 'wiki:preview' note.path %}"{% endif %}>Open safe server preview</a> · <a data-source-download {% if not is_new %}href="{% url 'wiki:source' note.path %}"{% endif %} download>Download stored source</a></p>
 <form class="zen-chrome" data-link-discovery {% if is_new %}hidden{% endif %} aria-label="Link discovery"><label for="link-target">Link target</label><input id="link-target" name="target" maxlength="4096" placeholder="Note path, ID or alias" required><label for="link-kind">Link syntax</label><select id="link-kind" name="kind"><option value="wiki">Wikilink</option><option value="markdown">Markdown relative link</option></select><button type="submit">Resolve link</button><p data-link-result role="status" aria-live="polite"></p></form>
 {% endblock %}
 {% block content %}

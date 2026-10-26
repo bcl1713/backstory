@@ -15,6 +15,9 @@ Manager for remote HTTPS, backups and upgrades.
 
 The [editor guide](docs/editor.md) covers Zen, navigation shortcuts, clickable
 live links and complete-document source access.
+[Move and archive](docs/relocation.md) covers reviewed note/folder relocation and
+recovery; [browser tools](docs/webmcp.md) describes the read-only WebMCP adapter
+and its remaining actual-host verification gate.
 
 For source builds or a disposable demo, start with [initial setup](docs/setup.md).
 The [configuration reference](docs/configuration.md) lists every variable.

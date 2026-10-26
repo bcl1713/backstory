@@ -6,10 +6,15 @@ import { runtime } from './support/server.js';
 // Removing semantic navigation, keyboard activation or persistent actions must
 // fail this workflow; all navigation below uses Tab/Enter, including login.
 async function tabTo(page, target) {
-  for (let n = 0; n < 65; n++) {
+  await expect(target).toBeVisible();
+  // Folder links grow with the disposable corpus; traverse a complete possible
+  // focus cycle rather than assuming a fixed number of controls on the page.
+  const controls = await page.locator('a[href], button, input, textarea, select, summary, [tabindex]').count();
+  for (let n = 0; n < controls + 2; n++) {
     if (await target.evaluate(el => el === document.activeElement)) return;
     await page.keyboard.press('Tab');
   }
+  if (await target.evaluate(el => el === document.activeElement)) return;
   throw new Error('Control cannot be reached using Tab');
 }
 async function activate(page, target) {

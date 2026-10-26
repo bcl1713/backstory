@@ -155,8 +155,9 @@ def store_draft(actor, path, base_revision, source, diagnostics, *, base_source=
         raise StorageError('invalid_draft') from None
     if max(len(raw), len(base)) > settings.BACKSTORY_NOTE_MAX_BYTES:
         raise StorageError('note_too_large', 413)
+    from .relocations import wiki_write_lock
     try:
-        with application_lock('revision-quota'), transaction.atomic():
+        with wiki_write_lock(), application_lock('revision-quota'), transaction.atomic():
             _prune(timezone.now())
             _check_quota(_record_charge(path, base_revision, raw, base, serialized.encode('utf-8'), newline.encode('utf-8'), b'1'))
             return RecoveryDraft.objects.create(actor=actor, path=path, base_revision=base_revision, source=raw, base_source=base, diagnostics=diagnostics, bom=bom, newline=newline)

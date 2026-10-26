@@ -33,3 +33,17 @@ class RecoveryDraft(models.Model):
     newline = models.CharField(max_length=2, default='\n')
     diagnostics = models.JSONField(default=list)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+
+class MoveOperation(models.Model):
+    """Durable reviewed relocation and roll-forward recovery journal."""
+    import uuid
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    source = models.CharField(max_length=4096)
+    destination = models.CharField(max_length=4096)
+    state = models.CharField(max_length=32, default='preview')
+    plan = models.JSONField()
+    reason_code = models.CharField(max_length=64, default='')
+    index_state = models.CharField(max_length=16, default='not_started')
+    created_at = models.DateTimeField(auto_now_add=True)
