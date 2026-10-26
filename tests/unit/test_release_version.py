@@ -22,11 +22,12 @@ def repo(tmp_path):
     return tmp_path
 
 
-def plan(repo):
+def plan(repo, channel=None):
     output = repo / 'outputs'
     output.unlink(missing_ok=True)
     result = subprocess.run(
-        [sys.executable, str(SCRIPT)], cwd=repo, text=True, capture_output=True,
+        [sys.executable, str(SCRIPT), *(['--channel', channel] if channel else [])],
+        cwd=repo, text=True, capture_output=True,
         env={**os.environ, 'GITHUB_OUTPUT': str(output)},
     )
     assert result.returncode == 0, result.stderr
@@ -110,3 +111,43 @@ def test_shallow_checkout_cannot_silently_bootstrap(repo, tmp_path_factory):
                             text=True, capture_output=True)
     assert result.returncode != 0
     assert 'full Git history' in result.stderr
+
+
+def test_dev_bootstrap_is_a_pinned_prerelease(repo):
+    sha = git(repo, 'rev-parse', '--short=12', 'HEAD')
+    assert plan(repo, 'dev') == {
+        'version': f'1.0.0-dev.1.g{sha}',
+        'tag': f'v1.0.0-dev.1.g{sha}', 'previous': '',
+    }
+
+
+def test_dev_retry_keeps_version_and_stable_promotion_ignores_prereleases(repo):
+    git(repo, 'tag', 'v1.2.3')
+    git(repo, 'checkout', '-b', 'dev')
+    git(repo, 'commit', '--allow-empty', '-m', 'feat: test before production')
+    first = plan(repo, 'dev')
+    sha = git(repo, 'rev-parse', '--short=12', 'HEAD')
+    assert first['version'] == f'1.3.0-dev.2.g{sha}'
+    git(repo, 'tag', first['tag'])
+    assert plan(repo, 'dev') == first
+    git(repo, 'checkout', 'main')
+    git(repo, 'merge', '--no-ff', 'dev', '-m', 'Merge dev into main')
+    assert plan(repo)['version'] == '1.3.0'
+
+
+def test_each_dev_commit_gets_a_distinct_version_without_consuming_stable_versions(repo):
+    git(repo, 'tag', 'v1.0.0')
+    git(repo, 'commit', '--allow-empty', '-m', 'fix: first test build')
+    first = plan(repo, 'dev')
+    git(repo, 'tag', first['tag'])
+    git(repo, 'commit', '--allow-empty', '-m', 'fix: second test build')
+    second = plan(repo, 'dev')
+    assert first['version'].startswith('1.0.1-dev.2.')
+    assert second['version'].startswith('1.0.1-dev.3.')
+    assert plan(repo)['version'] == '1.0.1'
+
+
+def test_unsupported_release_channel_is_rejected(repo):
+    result = subprocess.run([sys.executable, str(SCRIPT), '--channel', 'feature'],
+                            cwd=repo, text=True, capture_output=True)
+    assert result.returncode != 0

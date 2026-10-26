@@ -1,20 +1,41 @@
 name: synthetic correctness
 on:
-  push:
-    branches-ignore: [main]
   pull_request:
   workflow_call:
 permissions:
   contents: read
+
+# Release callers have their own non-canceling publication concurrency group.
+concurrency:
+  group: correctness-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  correctness:
+  branch-policy:
     runs-on: ubuntu-latest
+    steps:
+      - name: Promote dev through main
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$BASE_BRANCH" = main ] && { [ "$HEAD_BRANCH" != dev ] || [ "$HEAD_REPOSITORY" != "$REPOSITORY" ]; }; then
+            echo 'Merge feature branches into dev, then open a dev → main promotion PR.' >&2
+            exit 1
+          fi
+
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.12.19'
           python-version: '3.14'
+          enable-cache: true
       - uses: actions/setup-node@v4
         with:
           node-version: '22.23.4'
@@ -22,19 +43,116 @@ jobs:
       - run: uv sync --frozen
       - run: npm ci
       - run: npm run build
-      - run: uv run pytest
+      - run: uv run pytest -n 2 --dist loadfile --durations=20
+
+  formatter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: npm ci
       - run: npm run test:formatter
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:browser
-      - name: Disposable system and production configuration checks
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: npm run build
+      - name: Use the upstream Ubuntu archive for browser dependencies
         run: |
-          uv run python -m tests.fixtures.generate /tmp/backstory-ci --profile small --for-containers
+          # The Azure mirror has stalled small dependency downloads in CI.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+          fi
+      - run: npx playwright install --with-deps --only-shell chromium
+      # Each runner owns its server, SQLite database and synthetic wiki.
+      - run: npm run test:browser -- --shard=${{ matrix.shard }}/4
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-${{ matrix.shard }}
+          path: /tmp/backstory-release-one/reports/browser-artifacts
+          retention-days: 7
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - run: uv sync --frozen
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: backstory:ci
+          cache-from: |
+            type=gha,scope=ci-container
+            type=gha,scope=release-main
+          cache-to: type=gha,scope=ci-container,mode=max
+      - name: Disposable system and production configuration checks
+        env:
+          BACKSTORY_IMAGE: backstory:ci
+        run: |
+          uv run python -m tests.fixtures.generate "$RUNNER_TEMP/backstory-ci" --profile small --for-containers
           set -a
-          . /tmp/backstory-ci/fixture.env
+          . "$RUNNER_TEMP/backstory-ci/fixture.env"
           set +a
           uv run python manage.py check
           BACKSTORY_COOKIE_MODE=https BACKSTORY_ALLOWED_HOSTS=example.invalid uv run python manage.py check --deploy --fail-level WARNING
           docker compose config --quiet
-          docker compose build
-          docker compose run --rm web python manage.py check
-          docker compose down --volumes
+          docker compose run --pull never --rm web python manage.py check
+      - name: Clean up disposable container resources
+        if: always()
+        env:
+          BACKSTORY_IMAGE: backstory:ci
+        run: |
+          if [ -f "$RUNNER_TEMP/backstory-ci/fixture.env" ]; then
+            set -a
+            . "$RUNNER_TEMP/backstory-ci/fixture.env"
+            set +a
+            docker compose down --volumes
+          fi
+
+  # Keep one required check for branch protection and release workflow callers.
+  correctness:
+    if: always()
+    needs: [branch-policy, python, formatter, browser, container]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every correctness job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          failed = [name for name, job in results.items() if job['result'] != 'success']
+          if failed:
+              raise SystemExit('Correctness failed: ' + ', '.join(failed))
+          PY

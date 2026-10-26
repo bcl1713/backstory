@@ -49,6 +49,8 @@ Run correctness checks against disposable roots:
 
 ```sh
 uv run pytest
+# Same parallel Python execution used in CI:
+uv run pytest -n 2 --dist loadfile --durations=20
 npm run test:formatter
 npx playwright install chromium
 npm run test:browser
@@ -59,6 +61,17 @@ Browser tests own `/tmp/backstory-release-one/browser-runtime`, bind only
 `/tmp/backstory-release-one/reports`. They never load the caller's configured
 wiki. Python tests create and clean their own temporary roots. Formatter tests
 invoke the real packaged helper. There are no latency gates or benchmarks.
+
+CI runs four browser shards on separate runners, each with its own server. To
+run one shard locally use `npm run test:browser -- --shard=1/4`. Run local shards
+one at a time: they share the runtime directory and port. Keep Playwright's
+worker count at one. CI installs Chromium with `--only-shell` to reduce download
+time and retains failure traces/screenshots as artifacts.
+
+Open ordinary PRs against `dev`; successful dev merges publish a prerelease and
+`:dev` image. Promote through a `dev` → `main` merge PR for stable publication.
+See [release automation](releases.md) for branch protection, versioning and
+separate test/production stacks.
 
 Default production configuration is HTTPS with Secure cookies, HSTS and explicit
 hosts/origins. Local fixtures explicitly select localhost mode and proxy mode
