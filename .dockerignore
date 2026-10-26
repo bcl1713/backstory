@@ -1,0 +1,16 @@
+.git
+.venv
+node_modules
+.pytest_cache
+**/__pycache__
+.env
+.env.*
+!.env.example
+data
+fixtures
+tests
+staticfiles
+*.sqlite3*
+**/application-secret
+**/.secret-*
+docs/superpowers

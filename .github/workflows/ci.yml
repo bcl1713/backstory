@@ -1,0 +1,40 @@
+name: synthetic correctness
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  correctness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: npm run build
+      - run: uv run pytest
+      - run: npm run test:formatter
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+      - name: Disposable system and production configuration checks
+        run: |
+          uv run python -m tests.fixtures.generate /tmp/backstory-ci --profile small --for-containers
+          set -a
+          . /tmp/backstory-ci/fixture.env
+          set +a
+          uv run python manage.py check
+          BACKSTORY_COOKIE_MODE=https BACKSTORY_ALLOWED_HOSTS=example.invalid uv run python manage.py check --deploy --fail-level WARNING
+          docker compose config --quiet
+          docker compose build
+          docker compose run --rm web python manage.py check
+          docker compose down --volumes

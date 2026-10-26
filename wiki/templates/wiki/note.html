@@ -1,0 +1,32 @@
+{% extends 'wiki/shell.html' %}{% load static %}
+{% block title %}{% if is_new %}New note{% else %}{{ note.path }}{% endif %} · Backstory{% endblock %}
+{% block content %}
+<nav aria-label="Breadcrumb" data-breadcrumb></nav>
+<h1 data-note-title>{% if is_new %}New note{% else %}{{ note.path }}{% endif %}</h1>
+{% if is_new %}<p>Folder: <strong>{{ folder|default:'Wiki root' }}</strong>. The folder must already exist.</p><label for="note-filename">Note filename</label><input id="note-filename" maxlength="255" placeholder="New note.md" autocomplete="off">{% endif %}
+<p class="editor-help">Edit Markdown directly. Move into a block to reveal its source. Front matter, tables, code and unfamiliar syntax stay visible.</p>
+<div class="editor-controls" data-editor-controls hidden role="group" aria-label="Editor presentation">
+<button type="button" data-editor-mode="live" aria-pressed="true">Live preview</button>
+<button type="button" data-editor-mode="source" aria-pressed="false">Raw source</button>
+<button type="button" data-plain-fallback>Plain text fallback</button>
+</div>
+<div class="persistent-actions"><button type="button" data-save hidden>{% if is_new %}Create note{% else %}Save{% endif %}</button><button type="button" data-format hidden>Format</button><p role="status" aria-live="polite" data-editor-status>{% if recovered_draft %}Recovered draft. Compare with the current disk version before explicitly saving.{% else %}Unchanged{% endif %}</p></div>
+<div data-markdown-editor data-style-nonce="{{ request.csp_style_nonce }}" data-is-new="{% if is_new %}true{% else %}false{% endif %}" data-restoration-id="{{ restoration_id|default:'' }}" data-recovered="{% if recovered_draft %}true{% else %}false{% endif %}" data-bom="{% if note.bom %}true{% else %}false{% endif %}"></div>
+<div data-source-fallback><label for="source">Markdown source (plain text fallback)</label><textarea id="source" name="source" rows="28" cols="80">{{ note.source }}</textarea><p class="editor-help">You can select and copy this source in your browser. Save controls appear when scripting is available.</p></div>
+<div class="editor-controls" data-editor-actions hidden role="group" aria-label="Save and recovery">
+{% if restoration_id %}<button type="button" data-restore-revision>Restore this revision</button>{% endif %}
+<button type="button" data-source-recovery hidden>Save source without formatting</button>
+<button type="button" data-store-draft>Store protected draft</button><a data-stored-draft hidden>Open stored draft</a>
+<button type="button" data-copy-draft>Copy draft</button><button type="button" data-download-draft>Download draft</button>
+</div>
+<section data-diagnostics-region hidden aria-label="Formatting and save diagnostics"><h2>Diagnostics</h2><ul data-diagnostics></ul></section>
+<section data-format-proposal hidden aria-label="Proposed formatting"><h2 data-proposal-title>Proposed formatting</h2><p data-proposal-help>Review the changes. Applying them changes this draft; it does not save to disk.</p><details data-proposal-source-region><summary>Proposed source</summary><label for="format-proposal-source">Formatted source</label><textarea id="format-proposal-source" readonly rows="8"></textarea></details><pre data-format-diff tabindex="0" aria-label="Formatting diff"></pre><button type="button" data-apply-format>Apply formatted source</button><button type="button" data-dismiss-format>Dismiss proposed formatting</button></section>
+<section data-conflict hidden aria-label="Revision conflict"><h2>Revision conflict</h2><p>The disk version changed. Your draft and original revision have been retained. Compare the sources, download or copy your draft, then explicitly reload or accept the current revision for a manual merge.</p><label for="conflict-base">Base source</label><textarea id="conflict-base" rows="6" readonly></textarea><label for="conflict-current">Current disk source</label><textarea id="conflict-current" rows="6" readonly></textarea><label for="conflict-draft">Your draft</label><textarea id="conflict-draft" rows="6" readonly></textarea><p data-conflict-status role="status"></p><button type="button" data-reload-current disabled>Reload current source</button><button type="button" data-manual-merge disabled>Accept current revision for manual merge</button></section>
+<section data-reauth hidden aria-label="Sign in without leaving your draft"><h2>Sign in again</h2><p>Your draft remains in this tab. Signing in does not save or replay a request.</p><form data-reauth-form><label for="reauth-username">Username for sign-in</label><input id="reauth-username" name="username" autocomplete="username" value="{{ user.username }}" required><label for="reauth-password">Password for sign-in</label><input id="reauth-password" name="password" type="password" autocomplete="current-password" required><button type="submit">Sign in again</button></form></section>
+{% for diagnostic in preview.diagnostics %}<p role="status">{{ diagnostic }}</p>{% endfor %}
+<p data-secondary-links {% if is_new %}hidden{% endif %}><a data-server-preview {% if not is_new %}href="{% url 'wiki:preview' note.path %}"{% endif %}>Open safe server preview</a> · <a data-source-download {% if not is_new %}href="{% url 'wiki:source' note.path %}"{% endif %} download>Download stored source</a></p>
+<form data-link-discovery {% if is_new %}hidden{% endif %} aria-label="Link discovery"><label for="link-target">Link target</label><input id="link-target" name="target" maxlength="4096" placeholder="Note path, ID or alias" required><label for="link-kind">Link syntax</label><select id="link-kind" name="kind"><option value="wiki">Wikilink</option><option value="markdown">Markdown relative link</option></select><button type="submit">Resolve link</button><p data-link-result role="status" aria-live="polite"></p></form>
+<noscript><p>Saving and draft download require scripting. Select and copy your edited source above before leaving this page. The stored-source download contains the last disk version.</p></noscript>
+{% if recovered_draft %}{{ note.base_source|json_script:'note-base-source' }}{% else %}{{ note.source|json_script:'note-base-source' }}{% endif %}{{ note.diagnostics|json_script:'note-diagnostics' }}{{ note.source|json_script:'note-source' }}{{ note.newline|json_script:'note-newline' }}{{ note.revision|json_script:'note-revision' }}{{ note.path|json_script:'note-path' }}{{ folder|default:''|json_script:'note-folder' }}
+<script type="module" src="{% static 'editor.js' %}"></script>
+{% endblock %}

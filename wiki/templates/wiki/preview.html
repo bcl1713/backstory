@@ -1,0 +1,3 @@
+{% extends 'wiki/shell.html' %}
+{% block title %}Preview · {{ note.path }} · Backstory{% endblock %}
+{% block content %}<h1>Preview: {{ note.path }}</h1><p><a href="{% url 'wiki:note' note.path %}">View original source</a></p><section aria-label="Markdown preview">{% for diagnostic in preview.diagnostics %}<p role="status">{{ diagnostic }}</p>{% endfor %}{{ preview.html|safe }}</section>{% endblock %}

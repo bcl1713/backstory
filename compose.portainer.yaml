@@ -1,0 +1,49 @@
+# Docker Standalone; use the published GHCR image. See docs/portainer.md.
+services:
+  web:
+    image: ${BACKSTORY_IMAGE:?Set an image already available on the selected Docker endpoint or registry}
+    user: "${BACKSTORY_UID:-10001}:${BACKSTORY_GID:-10001}"
+    init: true
+    ports:
+      - target: 8000
+        published: "${BACKSTORY_PORT:-8000}"
+        host_ip: ${BACKSTORY_BIND_ADDRESS:-127.0.0.1}
+        protocol: tcp
+    environment:
+      BACKSTORY_STORAGE_SOURCE_MODE: host-bind
+      BACKSTORY_WIKI_HOST_SOURCE: ${BACKSTORY_WIKI_ROOT:?Set the approved existing host wiki directory}
+      BACKSTORY_DATA_HOST_SOURCE: ${BACKSTORY_DATA_HOST_PATH:?Set an existing private host application-data directory}
+      BACKSTORY_WIKI_ROOT: /wiki
+      BACKSTORY_DATA_DIR: /var/lib/backstory
+      BACKSTORY_IDENTITY_PATH: ${BACKSTORY_IDENTITY_PATH:-.backstory-marker}
+      BACKSTORY_BIND_ADDRESS: ${BACKSTORY_BIND_ADDRESS:-127.0.0.1}
+      BACKSTORY_COOKIE_MODE: ${BACKSTORY_COOKIE_MODE:-localhost}
+      BACKSTORY_ALLOWED_HOSTS: ${BACKSTORY_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      BACKSTORY_PROXY_MODE: ${BACKSTORY_PROXY_MODE:-off}
+      BACKSTORY_CSRF_TRUSTED_ORIGINS: ${BACKSTORY_CSRF_TRUSTED_ORIGINS:-}
+      BACKSTORY_TRUSTED_PROXY_IPS: ${BACKSTORY_TRUSTED_PROXY_IPS:-}
+      BACKSTORY_PROXY_CLIENT_IP_HEADER: ${BACKSTORY_PROXY_CLIENT_IP_HEADER:-none}
+      BACKSTORY_EXCLUSIONS: ${BACKSTORY_EXCLUSIONS:-}
+      BACKSTORY_REVISION_QUOTA_BYTES: ${BACKSTORY_REVISION_QUOTA_BYTES:-67108864}
+      BACKSTORY_INDEX_BATCH_SIZE: ${BACKSTORY_INDEX_BATCH_SIZE:-20}
+      BACKSTORY_INDEX_YIELD_SECONDS: ${BACKSTORY_INDEX_YIELD_SECONDS:-1}
+      BACKSTORY_INDEX_INCREMENTAL_SECONDS: ${BACKSTORY_INDEX_INCREMENTAL_SECONDS:-300}
+      BACKSTORY_INDEX_VERIFY_SECONDS: ${BACKSTORY_INDEX_VERIFY_SECONDS:-86400}
+      BACKSTORY_INDEX_QUEUE_LIMIT: ${BACKSTORY_INDEX_QUEUE_LIMIT:-1000}
+    volumes:
+      - type: bind
+        source: ${BACKSTORY_WIKI_ROOT:?Set the approved existing host wiki directory}
+        target: /wiki
+        read_only: ${BACKSTORY_WIKI_READ_ONLY:-false}
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${BACKSTORY_DATA_HOST_PATH:?Set an existing private host application-data directory}
+        target: /var/lib/backstory
+        read_only: false
+        bind:
+          create_host_path: false
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

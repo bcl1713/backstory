@@ -1,0 +1,31 @@
+{
+  "name": "backstory",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0 <23"
+  },
+  "scripts": {
+    "build": "node scripts/build-assets.mjs",
+    "test:formatter": "node --test tests/formatter/*.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "esbuild": "0.28.2"
+  },
+  "dependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/language": "6.13.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "ignore": "7.0.14",
+    "jsonc-parser": "3.3.1",
+    "markdownlint-cli2": "0.24.0",
+    "minimatch": "10.2.6",
+    "prettier": "3.9.10",
+    "yaml": "2.9.1"
+  }
+}
