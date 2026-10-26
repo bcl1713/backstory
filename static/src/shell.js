@@ -1,4 +1,7 @@
 import { mountFileTree } from './file-tree.js';
+import { mountThemes } from './themes.js';
+
+mountThemes();
 
 const zenToggle = document.querySelector('[data-zen-toggle]');
 if (zenToggle) {
