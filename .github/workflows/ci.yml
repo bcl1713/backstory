@@ -120,7 +120,7 @@ jobs:
           uv run python manage.py check
           BACKSTORY_COOKIE_MODE=https BACKSTORY_ALLOWED_HOSTS=example.invalid uv run python manage.py check --deploy --fail-level WARNING
           docker compose config --quiet
-          docker compose run --no-build --rm web python manage.py check
+          docker compose run --pull never --rm web python manage.py check
       - name: Clean up disposable container resources
         if: always()
         env:
