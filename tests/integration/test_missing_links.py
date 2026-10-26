@@ -180,3 +180,40 @@ def test_link_creation_uses_guarded_save_and_keeps_original_source(ready, reader
     result = resolve_link('Notes/Source.md', 'Ideas/New#Part|Label', 'wiki')
     assert result.href == '/notes/Ideas/New.md#preview-part'
     assert (ready / 'Notes/Source.md').read_bytes() == source
+
+
+def test_publication_race_with_identical_content_is_still_a_creation_collision(ready, reader, monkeypatch):
+    from wiki import saves
+    original_link = saves.os.link
+    def concurrent_create(staged, name, **kwargs):
+        (ready / 'Ideas/New.md').write_bytes(b'# New\n')
+        return original_link(staged, name, **kwargs)
+    monkeypatch.setattr(saves.os, 'link', concurrent_create)
+    response = reader.post('/save/Ideas/New.md', data=json.dumps({'source': '# New\n', 'mode': 'formatted'}),
+                           content_type='application/json', HTTP_IF_NONE_MATCH='*')
+    assert response.status_code == 412
+    assert response.json()['state'] == 'conflict'
+    assert (ready / 'Ideas/New.md').read_bytes() == b'# New\n'
+
+
+def test_unreadable_target_never_offers_creation(ready, monkeypatch):
+    from wiki import links
+    original = links.os.stat
+    def deny(name, *args, **kwargs):
+        if name == 'Unreadable.md':
+            raise PermissionError('synthetic denied target')
+        return original(name, *args, **kwargs)
+    monkeypatch.setattr(links.os, 'stat', deny)
+    result = resolve_link('Notes/Source.md', 'Unreadable', 'wiki')
+    assert result.state == 'unavailable' and result.action_href is None
+
+
+def test_alias_of_now_forbidden_note_does_not_become_a_creation_candidate(ready, settings):
+    (ready / 'Ideas/Private.md').write_text('---\naliases: [RestrictedAlias]\n---\n# Private\n')
+    from indexing.queue import request_scan
+    request_scan('rebuild')
+    drain(worker)
+    settings.BACKSTORY_EXCLUSIONS = ['Ideas/Private.md']
+    result = resolve_link('Notes/Source.md', 'RestrictedAlias', 'wiki')
+    assert result.state == 'missing' and result.action_href is None
+    assert result.choices == ()

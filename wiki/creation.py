@@ -61,7 +61,7 @@ def linked_note(request):
             raise StorageError('path_denied', 404)
         require_ready()
         return render(request, 'wiki/note.html', {
-            'is_new': True, 'folder': parent, 'filename': filename,
+            'is_new': True, 'linked_creation': True, 'folder': parent, 'filename': filename,
             'link_fragment': suffix,
             'note': {'path': '', 'source': '', 'newline': '\n', 'revision': None},
         })

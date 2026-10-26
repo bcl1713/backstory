@@ -48,7 +48,8 @@
 .lp-code { background: var(--surface-raised); border-radius: .2rem; }
 .lp-link { color: var(--link); text-decoration: underline; text-underline-offset: .2em; }
 .lp-rendered-link:not(a) { text-decoration-style: dotted; }
-.lp-link-missing, .lp-link-ambiguous, .lp-link-unavailable { color: var(--error); }
+.lp-link-missing, .lp-link-ambiguous, .lp-link-unavailable,
+.link-missing, .link-ambiguous, .link-unavailable { color: var(--error); }
 .lp-list-marker { color: var(--muted); }
 .cm-line.lp-source-region { background: var(--surface); color: var(--foreground); }
 /* Opaque raw blocks cover CodeMirror's selection layer. Keep the native

@@ -55,9 +55,10 @@ function linksIn(view) {
 }
 class LinkWidget extends WidgetType {
   constructor(label, result) { super(); this.label = label; this.result = result; }
-  eq(other) { return this.label === other.label && this.result.state === other.result.state && this.result.href === other.result.href; }
+  eq(other) { return this.label === other.label && this.result.state === other.result.state && this.result.href === other.result.href && this.result.action_href === other.result.action_href && this.result.create_path === other.result.create_path; }
   toDOM() {
-    const { state, href } = this.result;
+    const { state } = this.result;
+    const href = this.result.action_href || this.result.href;
     const dom = document.createElement(href ? 'a' : 'span');
     dom.className = `lp-rendered-link lp-link lp-link-${state}`;
     dom.textContent = this.label || '(empty link label)';
@@ -68,6 +69,11 @@ class LinkWidget extends WidgetType {
       // activation. Otherwise CodeMirror would reveal source before activation.
       dom.addEventListener('mousedown', event => event.preventDefault());
       dom.title = 'Follow link. Use arrow keys or Raw source to edit this line.';
+      if (this.result.action_href) {
+        const description = this.result.create_path ? `Create note: ${this.result.create_path}` : 'Choose note destination';
+        dom.title = description;
+        dom.setAttribute('aria-label', `${this.label || 'Empty link label'} — ${description}`);
+      }
     } else {
       dom.title = state === 'pending' ? 'Resolving link…' : `Link ${state}`;
       dom.setAttribute('aria-label', `${this.label || 'Empty link label'} — link ${state}`);
@@ -86,6 +92,25 @@ export function createLiveLinksExtension({ getPath = () => '' } = {}) {
       this.active = 0;
       this.destroyed = false;
       this.controller = new AbortController();
+      this.refresh = () => {
+        if (this.destroyed || document.hidden || this.refreshQueued) return;
+        this.refreshQueued = true;
+        queueMicrotask(() => {
+          this.refreshQueued = false;
+          if (this.destroyed) return;
+          this.controller.abort();
+          this.controller = new AbortController();
+          this.cache.clear();
+          this.queue = [];
+          this.decorations = this.build();
+          this.view.dispatch({});
+          this.pump();
+        });
+      };
+      window.addEventListener('focus', this.refresh);
+      window.addEventListener('pageshow', this.refresh);
+      document.addEventListener('visibilitychange', this.refresh);
+      document.addEventListener('backstory:links-refresh', this.refresh);
       this.decorations = this.build();
       queueMicrotask(() => this.pump());
     }
@@ -133,10 +158,11 @@ export function createLiveLinksExtension({ getPath = () => '' } = {}) {
         fetch('/resolve/?' + query, { credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: this.controller.signal })
           .then(response => { if (!response.ok) throw new Error(); return response.json(); })
           .then(result => {
+            if (this.cache.get(entry.key) !== entry) return;
             entry.result = ['resolved', 'external', 'missing', 'ambiguous', 'unavailable'].includes(result.state)
               ? result : { state: 'unavailable', href: null };
           })
-          .catch(() => { entry.result = { state: 'unavailable', href: null }; })
+          .catch(() => { if (this.cache.get(entry.key) === entry) entry.result = { state: 'unavailable', href: null }; })
           .finally(() => {
             this.active--;
             if (this.destroyed) return;
@@ -147,6 +173,13 @@ export function createLiveLinksExtension({ getPath = () => '' } = {}) {
           });
       }
     }
-    destroy() { this.destroyed = true; this.controller.abort(); }
+    destroy() {
+      this.destroyed = true;
+      this.controller.abort();
+      window.removeEventListener('focus', this.refresh);
+      window.removeEventListener('pageshow', this.refresh);
+      document.removeEventListener('visibilitychange', this.refresh);
+      document.removeEventListener('backstory:links-refresh', this.refresh);
+    }
   }, { decorations: plugin => plugin.decorations });
 }

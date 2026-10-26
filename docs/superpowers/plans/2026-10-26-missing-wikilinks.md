@@ -79,15 +79,23 @@ opens a separate tab; blocked popups leave an explicit new-tab link. On focus,
 pageshow or visible return, invalidate the bounded resolution cache. Ignore old
 responses whose cache entry is no longer current.
 
-- [ ] Write and run failing browser tests for keyboard and mobile activation,
+- [x] Write and run failing browser tests for keyboard and mobile activation,
   filename prefill, explicit create and open-original-link round trip, ambiguous
   choices, draft/undo retention, popup blocking, collision actions without
   overwrite, fragment handling, delayed indexing and stale-response refresh.
-- [ ] Implement live action styling, draft-preserving activation, bounded cache
+- [x] Implement live action styling, draft-preserving activation, bounded cache
   refresh, and creation-conflict Open actions that never adopt a revision.
-- [ ] Build assets with `npm run build`; expect exit zero. Run focused browser
+- [x] Build assets with `npm run build`; expect exit zero. Run focused browser
   tests and full Python/formatter suites; then browser regressions for shared
   editor and link behavior. Record output and any limitations.
-- [ ] Document the creation behavior and commit implementation plus tests.
-- [ ] Request one fresh whole-branch review, fix significant findings with
-  regression tests, verify, then push the feature branch and open the dev PR.
+- [x] Document the creation behavior and commit implementation plus tests.
+- [x] Request one fresh whole-branch review, fix significant findings with
+  regression tests, and verify. Publish the branch and dev PR after the final commit.
+
+## Verification record
+
+971 Python tests, 65 browser tests on fresh disposable storage, 48 formatter
+tests, and the asset build passed. Independent review found a literal-filename
+trim mismatch; the browser regression now passes. Creation also follows its
+heading fragment immediately after saving. Existing forbidden-destination
+display semantics are preserved while creation actions are withheld.

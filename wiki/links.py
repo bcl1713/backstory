@@ -127,9 +127,11 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
             from indexing.search import resolve_indexed_name
             from django.db import OperationalError
             try:
-                state, paths = resolve_indexed_name(path)
+                state, paths = resolve_indexed_name(path, distinguish_missing=True)
             except OperationalError:
                 return unavailable
+            if state == 'unconfirmed':
+                return LinkResult('missing', None, label)
             # A leading slash selects a path in the wiki root, never a global alias.
             if rooted and state != 'unavailable':
                 state, paths = 'missing', ()

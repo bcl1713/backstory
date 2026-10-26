@@ -192,6 +192,11 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                             observed = _current(path)
                         except StorageError:
                             return SaveResult("uncertain", submitted_source, None, diagnostics, diff, reason_code="write_uncertain", status=503)
+                        if current is None and error.errno == errno.EEXIST and observed:
+                            # A competing creator owns this name even when its
+                            # bytes happen to equal ours. Never acknowledge its
+                            # publication as this request's successful create.
+                            return _check_base(observed, base_revision, submitted_source)
                         if observed and observed.raw_bytes == output:
                             return _saved(source, observed.revision, diagnostics, diff, mode, uncertain=True, path=path)
                         conflict = _check_base(observed, base_revision, submitted_source)

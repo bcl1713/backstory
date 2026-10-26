@@ -153,8 +153,12 @@ def search_notes(query: str, cursor: str | None = None, limit: int = 30):
     return SearchPage(tuple(items), _cursor(query, generation, last) if more and last else None, freshness, examined)
 
 
-def resolve_indexed_name(name):
-    """Return a bounded eligible set, never assume partial discovery is unique."""
+def resolve_indexed_name(name, *, distinguish_missing=False):
+    """Return eligible matches; optionally distinguish unconfirmed absence.
+
+    Ordinary discovery keeps excluded candidates indistinguishable from absent
+    notes. Creation needs the additional evidence before offering a new path.
+    """
     state = index_status()
     if state.state != 'ready' or state.generation is None:
         return 'unavailable', ()
@@ -191,4 +195,8 @@ def resolve_indexed_name(name):
         return 'unavailable', ()
     if not IndexGeneration.objects.filter(pk=state.generation, state='active').exists():
         return 'unavailable', ()
+    if distinguish_missing and candidates and not paths:
+        # Ineligible or stale indexed destinations cannot establish absence.
+        # In particular, a now-forbidden alias must not invite a new file.
+        return 'unconfirmed', ()
     return ('missing' if not paths else 'resolved' if len(paths) == 1 else 'ambiguous'), tuple(paths)
