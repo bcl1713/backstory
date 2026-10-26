@@ -148,8 +148,9 @@ test('manual save keeps subsequent typing scheduled and reports the older save h
   const pending = new Promise(resolve => { captured = resolve; });
   let count = 0;
   await page.route('**/save/Auto.md', async route => {
+    const attempt = ++count;
     const response = await route.fetch();
-    if (++count === 1) { captured(); await gate; }
+    if (attempt === 1) { captured(); await gate; }
     await route.fulfill({ response });
   });
   await draft(page, base + '\nFirst edit.\n');
@@ -162,6 +163,7 @@ test('manual save keeps subsequent typing scheduled and reports the older save h
     await advance(page);
     await expect.poll(() => readFile(target, 'utf8')).toBe(newer);
     expect(count).toBe(2);
+    await expect(page.locator('[data-editor-status]')).toContainText('Saved');
   } finally { release(); }
 });
 
