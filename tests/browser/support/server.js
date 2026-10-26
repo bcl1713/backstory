@@ -3,7 +3,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
-export const runtime = '/tmp/backstory-release-one/browser-runtime';
+export const runtime = process.env.BACKSTORY_BROWSER_RUNTIME || '/tmp/backstory-release-one/browser-runtime';
+export const browserOrigin = `http://127.0.0.1:${process.env.BACKSTORY_BROWSER_PORT || '8765'}`;
 export const source = '---\r\ntitle: Inline slice\naliases: [Small demo]\r\n---\n\n# Inline preview\r\n\nA **quiet emphasis** and `literal code`.\n\n## Links\r\n\n[[Other#Details|Wiki alias]] and [relative link](Other.md#Details).\n\n- A list item\n\n| Name | Value |\r\n| --- | --- |\n| unchanged | 7 |\r\n\n```js\nconst literal = "**source**";\r\n```\n\n:::unfamiliar {keep=this}\nUnfamiliar source remains editable.\n:::\n\n<script>window.noteExecuted = true</script>\n![remote](https://example.invalid/tracker.png)\n';
 export const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(source)]);
 
@@ -23,7 +24,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const result = spawnSync(python, args, { env, stdio: 'inherit' });
     if (result.status !== 0) process.exit(result.status || 1);
   }
-  const start = () => spawn(python, ['manage.py', 'runserver', '127.0.0.1:8765', '--noreload'], { env, stdio: 'inherit' });
+  const start = () => spawn(python, ['manage.py', 'runserver', new URL(browserOrigin).host, '--noreload'], { env, stdio: 'inherit' });
   let server = start();
   writeFileSync(`${runtime}/server.pid`, String(process.pid));
   let restarting = false;

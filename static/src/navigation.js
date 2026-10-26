@@ -1,5 +1,7 @@
 import { mergeSources } from './source-merge.js';
 import { installNoteSync, readNoteSnapshot } from './note-sync.js';
+import { createIdleAutosave } from './idle-autosave.js';
+import { blockFormattingChanges } from './block-format.js';
 
 // These guards retain the in-memory draft; no browser persistence is used.
 export function installDraftGuards(isDirty) {
@@ -42,6 +44,8 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   let toolBusy = false;
   let reviewBusy = false;
   let syncVersion = 0;
+  let draftVersion = 0;
+  let attention = null;
   let conflictReview = false;
   let recovery = null;
   let proposal = null;
@@ -55,9 +59,31 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   const restoreButton = find('[data-restore-revision]');
   const restorationId = find('[data-markdown-editor]').dataset.restorationId;
   const filename = find('#note-filename');
+  let explicitFirstSave = Boolean(restorationId) || find('[data-markdown-editor]').dataset.recovered === 'true';
   const encode = value => value.split('/').map(encodeURIComponent).join('/');
   const dirty = () => editor.getSource() !== baseSource || (isNew && !path && Boolean(filename?.value.trim()));
-  const say = message => { status.textContent = message; };
+  const say = message => {
+    status.textContent = attention ? `Needs attention. ${attention}` : message;
+    status.dataset.state = attention ? 'attention' : busy ? 'saving' : dirty() ? 'dirty' : 'saved';
+  };
+  const idle = createIdleAutosave({
+    getState: () => ({ dirty: dirty(), composing: editor.isComposing(),
+      enabled: !explicitFirstSave && (!isNew || Boolean(path) || Boolean(filename?.value.trim().match(/^[^/\\]+\.md$/i))),
+      blocked: busy || toolBusy || reviewBusy || conflictReview || proposalSource !== null }),
+    save: () => perform('save', { automatic: true }),
+  });
+  const needsAttention = message => { attention = message; idle.pause(); say(message); };
+  let compositionVersion = null;
+  document.addEventListener('compositionstart', event => {
+    if (event.target.closest('.cm-content, #source')) { compositionVersion = draftVersion; idle.cancel(); }
+  });
+  document.addEventListener('compositionend', event => {
+    if (event.target.closest('.cm-content, #source') && compositionVersion !== null) {
+      if (draftVersion !== compositionVersion) idle.edited();
+      compositionVersion = null;
+    }
+  });
+  window.addEventListener('pagehide', () => idle.cancel());
   const syncButtons = () => {
     const held = busy || toolBusy || reviewBusy;
     saveButton.disabled = held;
@@ -97,7 +123,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   };
   const reauthenticate = () => {
     find('[data-reauth]').hidden = false;
-    say('Sign in again to continue. Draft retained; no request will be replayed.');
+    needsAttention('Sign in again to continue. Draft retained; no request will be replayed.');
   };
   const authenticated = response => {
     if (response.status === 401 || response.status === 403 || new URL(response.url).pathname === '/accounts/login/') {
@@ -137,6 +163,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     find('[data-sync-banner]').hidden = true;
   };
   const showComparison = (snapshot, message = 'This note changed outside this view. Your draft is retained. Compare the sources, copy or download your draft, or explicitly reload the latest source.') => {
+    needsAttention(message);
     conflict = snapshot;
     conflictReview = true;
     find('[data-conflict]').hidden = false;
@@ -156,11 +183,12 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
         : error.kind === 'authentication' ? 'Sign in again to check external changes. Draft retained.'
           : 'External changes could not be read. Draft retained; check the connection and try again.';
     banner(message);
-    say(message);
+    needsAttention(message);
     if (error.kind === 'authentication') reauthenticate();
     syncButtons();
   };
   const adoptSnapshot = snapshot => {
+    idle.cancel();
     baseSource = snapshot.source;
     baseRevision = snapshot.revision;
     bom = snapshot.bom;
@@ -197,7 +225,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     syncButtons();
     try {
       showComparison(await readNoteSnapshot(requestedPath, AbortSignal.timeout(15000)));
-      say('Revision conflict. Draft and original revision retained.');
+      needsAttention('Revision conflict. Draft and original revision retained. Compare the sources, then explicitly reload or merge.');
     } catch (error) { syncFailure(error); }
   };
   const captureRecovery = (result, submitted) => {
@@ -207,11 +235,16 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     syncButtons();
   };
 
-  async function perform(kind) {
-    if (busy || toolBusy || reviewBusy) return;
+  async function perform(kind, { automatic = false, block = null } = {}) {
+    if (busy || toolBusy || reviewBusy || editor.isComposing() || (automatic && conflictReview)) return;
+    const blockFormat = kind === 'block_format';
+    const formatting = kind === 'format' || blockFormat;
+    if (blockFormat && (attention || explicitFirstSave || proposalSource !== null || !editor.blockIsInactive(block))) return;
     const requestedPath = requestPath();
     if (!requestedPath) return;
     const submitted = editor.getSource();
+    const submittedVersion = draftVersion;
+    const wasPaused = Boolean(attention) || explicitFirstSave;
     const revision = baseRevision;
     const sourceRecovery = kind === 'source_recovery';
     if (sourceRecovery && (!recovery || recovery.source !== submitted || recovery.revision !== revision)) {
@@ -219,13 +252,14 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       say('Run Format or Save again for this draft before requesting source recovery.');
       return;
     }
+    if (!blockFormat) idle.cancel();
     busy = true;
     syncVersion++;
     syncButtons();
-    say(kind === 'format' ? 'Checking proposed formatting…' : 'Saving…');
+    say(formatting ? 'Checking proposed formatting…' : 'Saving…');
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRFToken': csrf, ...(revision === null ? { 'If-None-Match': '*' } : { 'If-Match': revision }) };
     try {
-      const endpoint = kind === 'restore' ? `/restore/${restorationId}/` : `/${kind === 'format' ? 'format' : 'save'}/${encode(requestedPath)}`;
+      const endpoint = kind === 'restore' ? `/restore/${restorationId}/` : `/${formatting ? 'format' : 'save'}/${encode(requestedPath)}`;
       const response = await fetch(endpoint, {
         method: 'POST', credentials: 'same-origin', cache: 'no-store', headers,
         body: JSON.stringify({ source: submitted, mode: sourceRecovery ? 'source_recovery' : 'formatted', ...(sourceRecovery ? { recovery_token: recovery.token } : {}) }),
@@ -242,19 +276,31 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
         clearProposal();
         captureRecovery(result, submitted);
         if (result.diff && editor.getSource() === submitted) displayProposal(result, submitted, true);
-        say('Formatting failed. Draft retained. Review diagnostics or explicitly save source without formatting.');
+        needsAttention('Formatting failed. Draft retained. Review diagnostics or explicitly save source without formatting.');
         return;
       }
       if (!response.ok) {
         const nextStep = result.reason_code === 'invalid_source_recovery'
           ? 'Run Format again for this draft before requesting source recovery.'
           : response.status === 503 ? 'Check Storage status or ask the administrator to check storage and recovery space, then retry explicitly.' : 'Resolve the reported problem, then retry explicitly.';
-        say(`Draft retained. ${result.reason_code || result.state || 'Request failed'} (${response.status}). ${nextStep}`);
+        needsAttention(`Draft retained. ${result.reason_code || result.state || 'Request failed'} (${response.status}). ${nextStep}`);
         return;
       }
-      if (kind === 'format') {
+      if (formatting) {
         if (typeof result.source !== 'string' || !['ok', 'skipped'].includes(result.outcome)) throw new Error('unconfirmed response');
         invalidateRecovery();
+        if (blockFormat) {
+          const unchanged = submittedVersion === draftVersion && editor.getSource() === submitted && baseRevision === revision;
+          const changes = unchanged && !editor.isComposing() && editor.blockIsInactive(block)
+            ? blockFormattingChanges(submitted, result.source, block) : null;
+          if (changes === null || !editor.blockIsInactive(block, changes)) {
+            say('Block formatting deferred to Save to preserve current source and Markdown context.');
+          } else if (changes.length) {
+            editor.applyExternalSource(result.source, undefined, 'input.format');
+            say('Block formatted. Draft remains unsaved until Save or idle autosave.');
+          } else say('Block formatting unchanged.');
+          return;
+        }
         if (editor.getSource() !== submitted) {
           say('Draft changed while formatting. Draft retained; run Format again to review it.');
           return;
@@ -264,10 +310,13 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
         return;
       }
       if (!['noop', 'saved', 'saved_index_delayed', 'saved_source', 'saved_source_index_delayed'].includes(result.state) || typeof result.source !== 'string' || typeof result.revision !== 'string') throw new Error('unconfirmed response');
-      const sameDraft = editor.getSource() === submitted;
+      const current = editor.getSource();
+      const sameDraft = draftVersion === submittedVersion && current === submitted;
+      const merged = sameDraft ? result.source : mergeSources(submitted, current, result.source);
       baseRevision = result.revision;
       baseSource = result.source;
-      if (sameDraft && result.source !== submitted) editor.setSource(result.source);
+      const cannotApply = merged === null || (editor.isComposing() && merged !== current);
+      if (!cannotApply && merged !== current) editor.applyExternalSource(merged, undefined, 'input.format');
       if (isNew) {
         path = requestedPath;
         isNew = false;
@@ -277,17 +326,30 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       invalidateRecovery();
       clearProposal();
       clearConflict();
+      if (cannotApply) {
+        needsAttention('An earlier draft was saved, but its formatting could not be reconciled with newer typing. Current draft retained. Compare the disk source, then Save explicitly.');
+        return;
+      }
+      if (!automatic) {
+        attention = null; explicitFirstSave = false;
+        if (wasPaused) { idle.resume(); if (dirty() && draftVersion !== submittedVersion) idle.edited(); }
+      }
       const outcome = result.state === 'noop'
         ? (sourceRecovery ? 'Unchanged source on disk; formatting skipped.' : 'Unchanged on disk.')
         : (sourceRecovery ? 'Saved without formatting.' : 'Saved.');
-      say(`${outcome}${result.state.endsWith('_index_delayed') ? ' Discovery update delayed.' : ''}${dirty() ? ' Newer edits remain unsaved.' : ''}`);
+      say(dirty() ? 'Earlier draft saved. Newer edits remain unsaved.'
+        : `${outcome}${result.state.endsWith('_index_delayed') ? ' Discovery update delayed.' : ''}`);
     } catch {
-      say('Draft retained. The request could not be confirmed. Check the disk version before retrying; nothing will be replayed automatically.');
+      needsAttention('Draft retained. The request could not be confirmed. Check the disk version before retrying; nothing will be replayed automatically.');
     } finally {
       busy = false;
       syncButtons();
+      status.dataset.state = attention ? 'attention' : dirty() ? 'dirty' : 'saved';
+      idle.flush();
     }
   }
+
+  editor.setBlockExitHandler(block => { void perform('block_format', { automatic: true, block }); });
 
   saveButton.addEventListener('click', () => perform('save'));
   formatButton.addEventListener('click', () => perform('format'));
@@ -301,7 +363,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     if (!proposal || editor.getSource() !== proposal.submitted) { clearProposal(); say('Draft changed. Run Format again.'); return; }
     const source = proposal.source;
     clearProposal();
-    editor.setSource(source);
+    editor.applyExternalSource(source, undefined, 'input.format');
     say(dirty() ? 'Formatting applied to draft. Unsaved changes.' : 'Formatting applied. Unchanged on disk.');
   });
   find('[data-dismiss-format]').addEventListener('click', () => { clearProposal(); say(dirty() ? 'Unsaved changes' : 'Unchanged'); });
@@ -318,6 +380,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     updateLinks();
   };
   if (filename) filename.addEventListener('input', () => {
+    idle.edited();
     invalidateRecovery();
     clearProposal();
     clearConflict();
@@ -342,10 +405,11 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       acceptConflictRevision(latest);
       if (reload) editor.applyExternalSource(latest.source, latest.newline);
       clearConflict();
-      say(reload ? 'Reloaded the latest disk version. Unchanged.' : 'Current revision accepted for manual merge. Draft retained; review and edit it, then explicitly Save.');
+      if (reload) { attention = null; idle.resume(); say('Reloaded the latest disk version. Unchanged.'); }
+      else needsAttention('Current revision accepted for manual merge. Draft retained; review and edit it, then explicitly Save.');
       if (!reload) editor.focus();
     } catch (error) { syncFailure(error); }
-    finally { reviewBusy = false; syncButtons(); }
+    finally { reviewBusy = false; syncButtons(); idle.flush(); }
   };
   find('[data-reload-current]').addEventListener('click', () => chooseConflict(true));
   find('[data-manual-merge]').addEventListener('click', () => chooseConflict(false));
@@ -369,11 +433,13 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
           diagnostics: lastDiagnostics, bom, newline: parse('#note-newline') || '\n'})});
       if (!authenticated(response)) return;
       const result = await response.json();
-      if (!response.ok || !result.url) { say('Draft retained. Protected storage failed; copy or download it.'); return; }
+      if (!response.ok || !result.url) { needsAttention('Draft retained. Protected storage failed; copy or download it.'); return; }
       const link = find('[data-stored-draft]'); link.href = result.url; link.hidden = false;
-      say('Protected draft stored. Saving to the wiki still requires an explicit action and revision check.');
-    } catch { say('Draft retained. Protected storage could not be confirmed; copy or download it.'); }
-    finally { busy = false; syncButtons(); }
+      const message = 'Protected draft stored. Wiki changes remain subject to Save or idle autosave and a revision check.';
+      if (attention) needsAttention(`${message} Choose Save explicitly to resume automatic saves.`);
+      else say(message);
+    } catch { needsAttention('Draft retained. Protected storage could not be confirmed; copy or download it.'); }
+    finally { busy = false; syncButtons(); idle.flush(); }
   });
   find('[data-copy-draft]').addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(editor.getSource()); say('Draft copied.'); }
@@ -410,9 +476,9 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       if (!csrf) throw new Error('sign-in unavailable');
       find('[name=csrfmiddlewaretoken]').value = csrf;
       find('[data-reauth]').hidden = true;
-      say('Signed in. Draft retained. Choose Save or Format explicitly to continue.');
+      needsAttention('Signed in. Draft retained. Choose Save or Format explicitly to continue.');
     } catch {
-      say('Sign in was not completed. Draft retained; check your credentials and try again.');
+      needsAttention('Sign in was not completed. Draft retained; check your credentials and try again.');
     } finally {
       password.value = '';
       busy = false;
@@ -442,7 +508,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     syncVersion++;
     syncButtons();
     say('Browser tool request finished. Checking external changes; draft retained.');
-    void synchronization.check();
+    void synchronization.check().finally(() => idle.flush());
   });
   document.addEventListener('click', event => {
     const move = event.target.closest('a[href]');
@@ -451,17 +517,19 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     event.stopImmediatePropagation();
     say('Save or store your draft before moving. Unsaved source and editor history are retained.');
   }, true);
-  installDraftGuards(dirty);
+  installDraftGuards(() => dirty() || busy);
   find('[data-editor-actions]').hidden = false;
   saveButton.hidden = false;
   formatButton.hidden = false;
   syncButtons();
-  return value => {
+  return (value, { user = true } = {}) => {
+    draftVersion++;
+    if (user) idle.edited();
     if (proposalSource !== null && value !== proposalSource) clearProposal();
     if (recovery && (recovery.source !== value || recovery.revision !== baseRevision)) invalidateRecovery();
     if (!find('[data-conflict]').hidden) find('#conflict-draft').value = value;
     syncButtons();
-    say(dirty() ? 'Unsaved changes' : 'Unchanged');
+    if (!attention && !busy) say(dirty() ? 'Unsaved changes' : 'Unchanged');
   };
 }
 

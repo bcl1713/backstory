@@ -49,7 +49,7 @@ test('signed-in tools read current source through fixed endpoints and never exec
   expect(list.entries.length).toBeLessThanOrEqual(2);
   const search = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.search_notes.execute({ query: 'missing-synthetic-search' })));
   expect(['no_matches', 'incomplete', 'unavailable']).toContain(search.state);
-  expect(requests.every(request => request.method() === 'GET' && new URL(request.url()).origin === 'http://127.0.0.1:8765')).toBe(true);
+  expect(requests.every(request => request.method() === 'GET' && new URL(request.url()).origin === new URL(page.url()).origin)).toBe(true);
   await writeFile(`${runtime}/wiki/Tool note.md`, '# Changed externally\n');
   const changed = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.read_note.execute({ path: 'Tool note.md' })));
   expect(changed.source).toBe('# Changed externally\n');
@@ -64,7 +64,7 @@ test('session expiration returns an authentication error without redirecting the
   await context.clearCookies();
   const result = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.read_note.execute({ path: 'Slice.md' })));
   expect(result).toMatchObject({ state: 'error', reason_code: 'authentication_required' });
-  expect(page.url()).toBe('http://127.0.0.1:8765/');
+  expect(new URL(page.url()).pathname).toBe('/');
 });
 
 test('unsupported browsers and asynchronously rejected registration preserve ordinary UI', async ({ page }) => {
