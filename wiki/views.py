@@ -305,3 +305,14 @@ def revision(request, revision_id):
             'newline': '\r\n' if '\r\n' in source else '\r' if '\r' in source else '\n', 'bom': bom}, 'recovered_draft': True, 'restoration_id': row.pk})
     except StorageError as error:
         return diagnostic(request, error)
+
+
+@login_required
+@require_GET
+def navigation(request):
+    from .navigation import note_navigation
+    try:
+        authorize_content(request, '', 'folder')
+        return JsonResponse(note_navigation(request.GET.get('date'), request.GET.get('timezone')))
+    except StorageError as error:
+        return JsonResponse({'reason_code': error.reason_code}, status=error.status)

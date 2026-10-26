@@ -51,3 +51,10 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
   .persistent-actions p { flex-basis: 100%; font-size: .8rem; }
   [data-site-navigation] a { min-height: 44px; box-sizing: border-box; }
 }
+[data-note-navigation] { font-size: .85rem; overflow-wrap: anywhere; }
+[data-note-navigation] h2 { font-size: 1rem; }
+[data-note-navigation] ul { padding-left: 1.2rem; }
+[data-note-navigation] a { display: inline-block; padding: .25rem 0; }
+[data-editor-readiness] { font-size: .85rem; }
+.lp-rendered-link:not(a) { text-decoration-style: dotted; }
+@media (scripting: none) { [data-editor-readiness] { display: none; } }

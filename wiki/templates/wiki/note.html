@@ -8,11 +8,13 @@
 <div class="editor-controls" data-editor-controls hidden role="group" aria-label="Editor presentation">
 <button type="button" data-editor-mode="live" aria-pressed="true">Live preview</button>
 <button type="button" data-editor-mode="source" aria-pressed="false">Raw source</button>
-<button type="button" data-plain-fallback>Plain text fallback</button>
+<button type="button" data-editor-mode="plain" data-plain-fallback aria-pressed="false" aria-describedby="complete-source-help">Plain text fallback</button>
 </div>
+<p id="complete-source-help" class="editor-help">For complete document source, choose Plain text fallback.</p>
+<p data-editor-readiness role="status" aria-live="polite">Loading enhanced editor… Complete source is available below.</p>
 <div class="persistent-actions"><button type="button" data-save hidden>{% if is_new %}Create note{% else %}Save{% endif %}</button><button type="button" data-format hidden>Format</button><p role="status" aria-live="polite" data-editor-status>{% if recovered_draft %}Recovered draft. Compare with the current disk version before explicitly saving.{% else %}Unchanged{% endif %}</p></div>
 <div data-markdown-editor data-style-nonce="{{ request.csp_style_nonce }}" data-is-new="{% if is_new %}true{% else %}false{% endif %}" data-restoration-id="{{ restoration_id|default:'' }}" data-recovered="{% if recovered_draft %}true{% else %}false{% endif %}" data-bom="{% if note.bom %}true{% else %}false{% endif %}"></div>
-<div data-source-fallback><label for="source">Markdown source (plain text fallback)</label><textarea id="source" name="source" rows="28" cols="80">{{ note.source }}</textarea><p class="editor-help">You can select and copy this source in your browser. Save controls appear when scripting is available.</p></div>
+<div data-source-fallback><label for="source">Markdown source (plain text fallback)</label><p id="source-help">Complete document source</p><textarea id="source" aria-describedby="source-help" name="source" rows="28" cols="80">{{ note.source }}</textarea><p class="editor-help">You can select and copy this source in your browser. Save controls appear when scripting is available.</p></div>
 <div class="editor-controls" data-editor-actions hidden role="group" aria-label="Save and recovery">
 {% if restoration_id %}<button type="button" data-restore-revision>Restore this revision</button>{% endif %}
 <button type="button" data-source-recovery hidden>Save source without formatting</button>
@@ -26,7 +28,7 @@
 {% for diagnostic in preview.diagnostics %}<p role="status">{{ diagnostic }}</p>{% endfor %}
 <p data-secondary-links {% if is_new %}hidden{% endif %}><a data-server-preview {% if not is_new %}href="{% url 'wiki:preview' note.path %}"{% endif %}>Open safe server preview</a> · <a data-source-download {% if not is_new %}href="{% url 'wiki:source' note.path %}"{% endif %} download>Download stored source</a></p>
 <form data-link-discovery {% if is_new %}hidden{% endif %} aria-label="Link discovery"><label for="link-target">Link target</label><input id="link-target" name="target" maxlength="4096" placeholder="Note path, ID or alias" required><label for="link-kind">Link syntax</label><select id="link-kind" name="kind"><option value="wiki">Wikilink</option><option value="markdown">Markdown relative link</option></select><button type="submit">Resolve link</button><p data-link-result role="status" aria-live="polite"></p></form>
-<noscript><p>Saving and draft download require scripting. Select and copy your edited source above before leaving this page. The stored-source download contains the last disk version.</p></noscript>
+<noscript><p>Plain text fallback ready. Complete document source is available above.</p><p>Saving and draft download require scripting. Select and copy your edited source above before leaving this page. The stored-source download contains the last disk version.</p></noscript>
 {% if recovered_draft %}{{ note.base_source|json_script:'note-base-source' }}{% else %}{{ note.source|json_script:'note-base-source' }}{% endif %}{{ note.diagnostics|json_script:'note-diagnostics' }}{{ note.source|json_script:'note-source' }}{{ note.newline|json_script:'note-newline' }}{{ note.revision|json_script:'note-revision' }}{{ note.path|json_script:'note-path' }}{{ folder|default:''|json_script:'note-folder' }}
 <script type="module" src="{% static 'editor.js' %}"></script>
 {% endblock %}
