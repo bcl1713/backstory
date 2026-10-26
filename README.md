@@ -26,6 +26,8 @@ contract; the [Cloudflare guide](docs/cloudflare.md) includes existing-connector
 reuse and an optional bundled connector. [Local development](docs/development.md)
 covers the synthetic workflow; [operations](docs/operations.md) covers recovery.
 [Release automation](docs/releases.md) explains versioning and GHCR publication.
+Merge features into `dev` for automatic prereleases and the `:dev` test image;
+promote `dev` to `main` for stable releases and the `:latest` production image.
 No private notes, default passwords or production configuration ship here.
 
 [Storage policy](docs/storage.md), [safe preview](docs/preview.md),

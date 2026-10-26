@@ -1,25 +1,28 @@
 name: release
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 # Keep a release together; never cancel an image upload mid-publication.
 concurrency:
-  group: main-release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 permissions:
   contents: read
 
 jobs:
   correctness:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
     uses: ./.github/workflows/ci.yml
 
   publish:
     needs: correctness
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      RELEASE_BRANCH: ${{ github.ref_name }}
+      RELEASE_CHANNEL: ${{ github.ref_name == 'dev' && 'dev' || 'stable' }}
     permissions:
       contents: write
       packages: write
@@ -30,12 +33,12 @@ jobs:
       - name: Select semantic version
         id: version
         run: |
-          git fetch origin main --tags
-          if [ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]; then
-            echo 'Main has advanced; use the release run for its current head.' >&2
+          git fetch origin "$RELEASE_BRANCH" --tags
+          if [ "$(git rev-parse "origin/$RELEASE_BRANCH")" != "$GITHUB_SHA" ]; then
+            echo "$RELEASE_BRANCH has advanced; use the release run for its current head." >&2
             exit 1
           fi
-          python3 scripts/release-version.py
+          python3 scripts/release-version.py --channel "$RELEASE_CHANNEL"
       - name: Check for an already published release
         id: existing
         env:
@@ -61,8 +64,17 @@ jobs:
         run: |
           image="ghcr.io/${REPOSITORY,,}"
           echo "name=$image" >> "$GITHUB_OUTPUT"
-          echo "minor=${VERSION%.*}" >> "$GITHUB_OUTPUT"
-          echo "major=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
+          {
+            echo 'aliases<<EOF'
+            if [ "$RELEASE_CHANNEL" = dev ]; then
+              echo "$image:dev"
+            else
+              echo "$image:${VERSION%.*}"
+              echo "$image:${VERSION%%.*}"
+              echo "$image:latest"
+            fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
       - uses: docker/setup-qemu-action@v3
         if: steps.existing.outputs.published != 'true'
       - uses: docker/setup-buildx-action@v3
@@ -90,11 +102,28 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}
             ${{ steps.image.outputs.name }}:${{ steps.version.outputs.tag }}
-            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.minor }}
-            ${{ steps.image.outputs.name }}:${{ steps.image.outputs.major }}
-            ${{ steps.image.outputs.name }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=gha,scope=release-${{ github.ref_name }}
+            type=gha,scope=ci-container
+          cache-to: type=gha,scope=release-${{ github.ref_name }},mode=max
+      - name: Publish channel aliases for current head
+        if: steps.existing.outputs.published != 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ALIASES: ${{ steps.image.outputs.aliases }}
+        run: |
+          # A newer commit may have arrived during the multi-platform build.
+          git fetch origin "$RELEASE_BRANCH"
+          if [ "$(git rev-parse "origin/$RELEASE_BRANCH")" != "$GITHUB_SHA" ]; then
+            echo "$RELEASE_BRANCH advanced during the build; refusing to move channel aliases." >&2
+            exit 1
+          fi
+          tags=()
+          while IFS= read -r alias; do
+            tags+=(--tag "$alias")
+          done <<< "$ALIASES"
+          docker buildx imagetools create "${tags[@]}" "$IMAGE@$DIGEST"
       - name: Prepare deployment assets and release notes
         if: steps.existing.outputs.published != 'true'
         env:
@@ -116,6 +145,8 @@ jobs:
           Digest: \`$IMAGE@$DIGEST\`
 
           Tested source: \`$SOURCE_SHA\`
+
+          Release channel: \`$RELEASE_CHANNEL\`. Publishing does not redeploy a server.
 
           Start with the [Portainer deployment guide](https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.tag }}/docs/portainer.md).
           Set your storage paths, UID/GID, public host, CSRF origin and actual trusted proxy peer; create named accounts interactively after startup.
@@ -145,5 +176,9 @@ jobs:
           esac
           gh release upload "$TAG" release-assets/compose.portainer.yaml release-assets/portainer.env.example \
             release-assets/portainer.md release-assets/SHA256SUMS --clobber
-          gh release edit "$TAG" --draft=false --latest
+          if [ "$RELEASE_CHANNEL" = dev ]; then
+            gh release edit "$TAG" --draft=false --prerelease=true --latest=false
+          else
+            gh release edit "$TAG" --draft=false --prerelease=false --latest=true
+          fi
           echo "Published [$TAG](https://github.com/${{ github.repository }}/releases/tag/$TAG)" >> "$GITHUB_STEP_SUMMARY"

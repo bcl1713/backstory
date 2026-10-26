@@ -203,7 +203,7 @@ for (const presentation of ['live', 'source']) {
     expect(response.request().headers()['if-none-match']).toBe('*');
     expect(response.request().headers()['if-match']).toBeUndefined();
     expect(await readFile(created)).toEqual(Buffer.from('# New\n'));
-    expect(page.url()).toContain(`/notes/Drafts/${filename}`);
+    await expect(page).toHaveURL(new RegExp(`/notes/Drafts/Created-${presentation}\\.md$`));
     await page.reload();
     expect(await readSource(page)).toBe('# New\n');
     await page.goto('/new/?folder=Drafts');

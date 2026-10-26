@@ -1,7 +1,8 @@
-"""Select a stable release from reachable vMAJOR.MINOR.PATCH tags and commits.
+"""Select stable or dev releases from reachable stable tags and commits.
 
 Run in a full Git checkout with fetched tags. Does not mutate Git or publish.
 """
+import argparse
 import os
 from pathlib import Path
 import re
@@ -12,7 +13,7 @@ def git(*args):
     return subprocess.check_output(['git', *args], text=True).strip()
 
 
-def release_plan():
+def stable_plan():
     if git('rev-parse', '--is-shallow-repository') == 'true':
         raise SystemExit('Release selection requires full Git history and tags.')
     stable = re.compile(r'v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
@@ -38,8 +39,20 @@ def release_plan():
     return {'version': version, 'tag': f'v{version}', 'previous': previous}
 
 
+def release_plan(channel='stable'):
+    result = stable_plan()
+    if channel == 'dev':
+        count = git('rev-list', '--count', 'HEAD')
+        sha = git('rev-parse', '--short=12', 'HEAD')
+        version = f"{result['version']}-dev.{count}.g{sha}"
+        result = {**result, 'version': version, 'tag': f'v{version}'}
+    return result
+
+
 if __name__ == '__main__':
-    result = release_plan()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--channel', choices=['stable', 'dev'], default='stable')
+    result = release_plan(parser.parse_args().channel)
     if (git('tag', '--list', result['tag']) and
             git('rev-parse', f"{result['tag']}^{{commit}}") != git('rev-parse', 'HEAD')):
         raise SystemExit(f"{result['tag']} already exists on a different commit; refusing publication.")
