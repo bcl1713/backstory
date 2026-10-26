@@ -71,7 +71,7 @@ test('an open editor retains unsaved source and cannot recreate the old path aft
   // Keep this regression's draft unsaved while the separate move review runs.
   const now = new Date('2026-10-26T15:00:00Z');
   await page.clock.install({ time: now });
-  await page.clock.pauseAt(now);
+  await page.clock.pauseAt(new Date(now.getTime() + 1000));
   await editor.evaluate(el => el.markdownEditor.setSource('# Draft from another tab\n'));
   const mover = await context.newPage();
   await mover.goto('/move/?' + new URLSearchParams({ source: `${root}/Active/Project.md` }));

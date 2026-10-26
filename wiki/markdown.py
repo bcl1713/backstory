@@ -18,7 +18,7 @@ _TAGS = {
     "thead", "tbody", "tr", "th", "td", "input",
 }
 _ATTRIBUTES = {
-    "a": {"href", "title"}, "img": {"src", "alt", "title", "loading"},
+    "a": {"href", "title", "class", "aria-label"}, "img": {"src", "alt", "title", "loading"},
     "span": {"class"}, "input": {"checked", "disabled"},
     "ol": {"start"}, **{f"h{level}": {"id"} for level in range(1, 7)},
 }
@@ -61,6 +61,10 @@ def _wiki_render(self, tokens, index, options, env):
     if result is None:
         return '<span class="link-unavailable">Unavailable link</span>'
     label = escape(result.label)
+    if result.action_href:
+        description = f"Create note: {result.create_path}" if result.create_path else "Choose note destination"
+        return (f'<a class="link-{result.state}" href="{escape(result.action_href, quote=True)}" '
+                f'aria-label="{escape(result.label + " — " + description, quote=True)}">{label}</a>')
     if result.href is None:
         return f'<span class="link-{result.state}">{label}</span>'
     return f'<a href="{escape(result.href, quote=True)}">{label}</a>'

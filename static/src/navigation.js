@@ -4,7 +4,7 @@ import { createIdleAutosave } from './idle-autosave.js';
 import { blockFormattingChanges } from './block-format.js';
 
 // These guards retain the in-memory draft; no browser persistence is used.
-export function installDraftGuards(isDirty) {
+export function installDraftGuards(isDirty, onLinkedNote = () => {}) {
   let leaving = false;
   const permit = event => {
     if (!isDirty()) return;
@@ -21,6 +21,16 @@ export function installDraftGuards(isDirty) {
     if (!link || link.hasAttribute('download') || link.target === '_blank' || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const url = new URL(link.href, location.href);
     if (url.origin === location.origin && url.pathname === location.pathname && url.search === location.search && url.hash) return;
+    if (isDirty() && url.origin === location.origin && url.pathname === '/new/link/') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      // Open synchronously during user activation; detach the opener before
+      // navigating. The source editor and its undo history stay in this tab.
+      const tab = window.open('', '_blank');
+      if (tab) { tab.opener = null; tab.location.replace(url.href); }
+      onLinkedNote(url.href, Boolean(tab));
+      return;
+    }
     permit(event);
   }, true);
   document.addEventListener('submit', event => {
@@ -37,6 +47,8 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   let path = parse('#note-path');
   mountLinkDiscovery(() => path);
   const folder = parse('#note-folder');
+  const linkFragment = parse('#link-fragment') || '';
+  const linkedCreation = find('[data-markdown-editor]').dataset.linkedCreation === 'true';
   let baseSource = parse('#note-base-source') ?? initialSource;
   let baseRevision = isNew ? null : parse('#note-revision');
   let csrf = find('[name=csrfmiddlewaretoken]').value;
@@ -59,7 +71,8 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   const restoreButton = find('[data-restore-revision]');
   const restorationId = find('[data-markdown-editor]').dataset.restorationId;
   const filename = find('#note-filename');
-  let explicitFirstSave = Boolean(restorationId) || find('[data-markdown-editor]').dataset.recovered === 'true';
+  let explicitFirstSave = linkedCreation || Boolean(restorationId) || find('[data-markdown-editor]').dataset.recovered === 'true';
+  const newFilename = () => linkedCreation ? (filename?.value || '') : (filename?.value.trim() || '');
   const encode = value => value.split('/').map(encodeURIComponent).join('/');
   const dirty = () => editor.getSource() !== baseSource || (isNew && !path && Boolean(filename?.value.trim()));
   const say = message => {
@@ -142,10 +155,11 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     find('[data-secondary-links]').hidden = false;
     find('[data-link-discovery]').hidden = false;
     saveButton.textContent = 'Save';
+    document.dispatchEvent(new Event('backstory:links-refresh'));
   };
   const requestPath = () => {
     if (!isNew || path) return path;
-    const name = filename.value.trim();
+    const name = newFilename();
     if (!name || name.includes('/') || name.includes('\\') || !name.toLowerCase().endsWith('.md')) {
       say('Enter a Markdown filename ending in .md in the current folder.');
       return null;
@@ -268,6 +282,16 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       const result = await response.json();
       if (response.status === 412) {
         clearProposal();
+        if (isNew && linkedCreation) {
+          // A creation collision must never adopt a revision for overwriting.
+          clearConflict();
+          needsAttention('This note already exists. Your creation draft is retained. ');
+          const open = document.createElement('a');
+          open.href = '/notes/' + encode(requestedPath) + linkFragment;
+          open.textContent = 'Open existing note';
+          status.append(open);
+          return;
+        }
         await showConflict(requestedPath);
         return;
       }
@@ -320,8 +344,9 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       if (isNew) {
         path = requestedPath;
         isNew = false;
-        history.replaceState(null, '', '/notes/' + encode(path));
+        history.replaceState(null, '', '/notes/' + encode(path) + linkFragment);
         updateLinks();
+        if (linkFragment) window.dispatchEvent(new HashChangeEvent('hashchange'));
       }
       invalidateRecovery();
       clearProposal();
@@ -493,7 +518,8 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   document.addEventListener('backstory:tool-save-start', event => {
     const guard = event.detail;
     guard.editorReady = true;
-    const editorPath = path || (filename?.value.trim() ? [folder, filename.value.trim()].filter(Boolean).join('/') : '');
+    const name = newFilename();
+    const editorPath = path || (name ? [folder, name].filter(Boolean).join('/') : '');
     if (guard.path !== editorPath) return;
     if (busy || toolBusy || reviewBusy || conflictReview || editor.isComposing()) { guard.reason_code = 'editor_busy'; return; }
     if (dirty()) { guard.reason_code = 'unsaved_editor_draft'; return; }
@@ -517,7 +543,16 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     event.stopImmediatePropagation();
     say('Save or store your draft before moving. Unsaved source and editor history are retained.');
   }, true);
-  installDraftGuards(() => dirty() || busy);
+  installDraftGuards(() => dirty() || busy, (href, opened) => {
+    say(opened ? 'Linked note opened in a new tab. Your source draft stays here. ' : 'A new tab could not be opened. Your source draft stays here. ');
+    const open = document.createElement('a');
+    open.href = href;
+    open.target = '_blank';
+    open.rel = 'noopener';
+    open.dataset.linkedNoteNewTab = '';
+    open.textContent = 'Open linked note in a new tab';
+    status.append(open);
+  });
   find('[data-editor-actions]').hidden = false;
   saveButton.hidden = false;
   formatButton.hidden = false;

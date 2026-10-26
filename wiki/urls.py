@@ -1,5 +1,5 @@
 from django.urls import include, path
-from . import views, relocation_views
+from . import views, relocation_views, creation
 from indexing import views as index_views
 
 app_name = "wiki"
@@ -15,6 +15,7 @@ urlpatterns = [
     path("history/<path:path>", views.history, name="history"),
     path("restore/<int:revision_id>/", views.restore, name="restore"),
     path("", views.shell, name="shell"),
+    path("new/link/", creation.linked_note, name="linked-new"),
     path("new/", views.new_note, name="new"),
     path("folders/", views.folders, name="folders"),
     path("folders/<path:path>", views.folders, name="folder"),

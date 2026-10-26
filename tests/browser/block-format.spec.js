@@ -18,7 +18,7 @@ async function open(page, source = base) {
   await page.getByLabel('Password', { exact: true }).fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   const now = new Date('2026-10-26T15:00:00Z');
-  await page.clock.install({ time: now }); await page.clock.pauseAt(now);
+  await page.clock.install({ time: now }); await page.clock.pauseAt(new Date(now.getTime() + 1000));
   await page.goto('/notes/Blocks.md');
   await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
 }

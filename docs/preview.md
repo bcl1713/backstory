@@ -16,13 +16,16 @@ returns `preview_unavailable`; the note page and plain-source route still expose
 the unchanged original text. Preview has no save or formatter side effects.
 
 `resolve_link(source_path, target, kind)` returns an immutable `LinkResult(state,
-href, label)`. States are `resolved`, `external`, `missing` or `unavailable`.
+href, label, action_href, create_path, choices)`. States are `resolved`,
+`external`, `missing`, `ambiguous` or `unavailable`. The last three fields have
+empty defaults; an action URL opens a read-only creation/selection entry point.
 Unavailable results contain no candidate path or href. Markdown destinations are
 source-relative URLs, decoded once. Wikilinks use literal paths, including literal
 percent signs, and allow `[[path|label]]` with optional `.md`. They prefer exact
 root-relative paths, then exact source-relative paths. Parent-relative links may
-stay within the root. Absolute and outside-root paths, symlinks and excluded
-components are unavailable. When exact paths are absent, indexed aliases, IDs and basenames resolve only from a complete, current, unambiguous index.
+stay within the root. A leading `/` on a wikilink explicitly selects the wiki
+root; it never addresses the host filesystem. Absolute Markdown paths,
+outside-root paths, symlinks and excluded components cannot offer creation. When exact paths are absent, indexed aliases, IDs and basenames resolve only from a complete, current, unambiguous index.
 Markdown can address filenames containing literal `#` using `%23`.
 
 Heading slugs lowercase Unicode text, remove punctuation other than underscores
@@ -61,10 +64,16 @@ by the same authenticated resolver as server preview. Move the caret onto a line
 with the arrow keys to reveal its Markdown; selections reveal every intersected
 line. Ordinary single-line labeled Markdown links behave the same way. Tab and
 Enter follow rendered links; mouse/touch activation does not first move the caret
-into their source. The normal unsaved-draft warning still applies.
+into their source. The normal unsaved-draft warning applies to ordinary navigation.
 
-Missing, ambiguous and unavailable links show non-navigable labels with a status
-in their accessible description. Code, escaped syntax, front matter and unsupported
+Missing eligible wikilinks keep their warning color and offer a prefilled
+**Create Note** flow; ambiguous names offer an explicit destination chooser.
+Creation checks require ready storage, a complete current index and an existing
+parent folder. Unavailable or forbidden targets and missing attachments offer
+no creation action. Rendering, hovering and GET requests never create notes.
+An unsaved source draft stays in its tab while linked-note creation opens a
+separate tab; a blocked popup leaves an explicit new-tab link. Resolution
+refreshes on visible return or focus. Code, escaped syntax, front matter and unsupported
 multiline links stay literal. Resolution is capped at 200 distinct destinations
 with at most four requests in flight. Mode switches and rendering never edit source.
 
