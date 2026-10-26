@@ -7,8 +7,9 @@ import { installHeadingNavigation } from './heading-navigation.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
 import { createLiveLinksExtension, wikiLinks } from './live-links.js';
 import { sourceChanges } from './source-merge.js';
+import { blockExitExtension, blockIsInactive } from './block-format.js';
 
-export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onFailure = () => {}, nonce = '', getPath = () => '' }) {
+export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onBlockExit = () => {}, onFailure = () => {}, nonce = '', getPath = () => '' }) {
   const presentation = new Compartment();
   const liveExtensions = () => [createLivePreviewExtension(), createLiveLinksExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
@@ -54,8 +55,11 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         EditorView.cspNonce.of(nonce),
         EditorView.exceptionSink.of(() => onFailure()),
         presentation.of(liveExtensions()),
+        blockExitExtension(onBlockExit),
         EditorView.updateListener.of(update => {
-          if (update.docChanged || update.startState.field(lineEndings) !== update.state.field(lineEndings)) onChange(getSource());
+          if (update.docChanged || update.startState.field(lineEndings) !== update.state.field(lineEndings)) {
+            onChange(getSource(), { user: update.transactions.some(tr => !tr.isUserEvent('input.external') && !tr.isUserEvent('input.format')) });
+          }
         }),
       ],
     }),
@@ -75,14 +79,14 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         annotations: [Transaction.userEvent.of('input'), isolateHistory.of('full')],
       });
     },
-    applyExternalSource(nextSource, preferredNewline) {
+    applyExternalSource(nextSource, preferredNewline, origin = 'input.external') {
       if (getSource() === nextSource && (!preferredNewline || preferredNewline === view.state.field(lineEndings).separator)) return;
       const text = nextSource.replace(/\r\n|\r/g, '\n');
       const changes = ChangeSet.of(sourceChanges(view.state.doc.toString(), text), view.state.doc.length);
       view.dispatch({
         changes,
         effects: [restoreEndings.of(endingsFrom(nextSource, preferredNewline || view.state.field(lineEndings).separator)), view.scrollSnapshot().map(changes)],
-        annotations: [Transaction.userEvent.of('input.external'), isolateHistory.of('full')],
+        annotations: [Transaction.userEvent.of(origin), isolateHistory.of('full')],
       });
     },
     setMode(mode) {
@@ -110,13 +114,17 @@ function attachNoteEditor() {
   let fallbackSource = source;
   let fallbackNewline = newline;
   let fallbackComposing = false;
+  let enhancedComposing = false;
+  parent.addEventListener('compositionstart', () => { enhancedComposing = true; });
+  parent.addEventListener('compositionend', () => { enhancedComposing = false; });
   fallback.addEventListener('compositionstart', () => { fallbackComposing = true; });
   fallback.addEventListener('compositionend', () => { fallbackComposing = false; });
   let onChange = () => {};
-  const changed = value => {
+  let onBlockExit = () => {};
+  const changed = (value, origin = { user: true }) => {
     fallbackSource = value;
     if (fallback.value !== value.replace(/\r\n|\r/g, '\n')) fallback.value = value;
-    onChange(value);
+    onChange(value, origin);
   };
   const setPresentation = (mode, failed = false, focus = true) => {
     const plain = mode === 'plain' || !api;
@@ -137,6 +145,7 @@ function attachNoteEditor() {
   const showFallback = () => setPresentation('plain');
   try {
     api = mountMarkdownEditor({ parent, source, newline, getPath: () => JSON.parse(document.querySelector('#note-path').textContent), nonce: parent.dataset.styleNonce || '', onChange: changed,
+      onBlockExit: block => onBlockExit(block),
       onFailure: () => queueMicrotask(() => setPresentation('plain', true)) });
     parent.markdownEditor = api;
     setPresentation('live', false, false);
@@ -152,17 +161,19 @@ function attachNoteEditor() {
   const editor = {
     getSource: () => api ? api.getSource() : fallbackSource,
     setSource: value => { if (api) api.setSource(value); else { fallback.value = value; changed(value); } },
-    applyExternalSource: (value, preferredNewline) => {
+    applyExternalSource: (value, preferredNewline, origin = 'input.external') => {
       const changes = ChangeSet.of(sourceChanges(fallback.value, value.replace(/\r\n|\r/g, '\n')), fallback.value.length);
       const start = changes.mapPos(fallback.selectionStart), end = changes.mapPos(fallback.selectionEnd);
       const direction = fallback.selectionDirection, top = fallback.scrollTop, left = fallback.scrollLeft;
       fallbackNewline = preferredNewline || value.match(/\r\n|\r|\n/)?.[0] || fallbackNewline;
-      if (api) api.applyExternalSource(value, preferredNewline);
-      else changed(value);
+      if (api) api.applyExternalSource(value, preferredNewline, origin);
+      else changed(value, { user: false });
       fallback.setSelectionRange(start, end, direction);
       fallback.scrollTop = top; fallback.scrollLeft = left;
     },
-    isComposing: () => fallbackComposing || api?.view.composing || false,
+    isComposing: () => enhancedComposing || fallbackComposing || api?.view.compositionStarted || false,
+    setBlockExitHandler: handler => { onBlockExit = handler; },
+    blockIsInactive: (block, changes) => Boolean(api && !parent.hidden && blockIsInactive(api.view.state, block, changes)),
     focus: () => api && !parent.hidden ? api.focus() : fallback.focus(),
     showFallback,
   };

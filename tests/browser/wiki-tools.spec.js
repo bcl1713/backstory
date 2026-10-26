@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { writeFile, readFile } from 'node:fs/promises';
 import { runtime } from './support/server.js';
+import { expireSession } from './support/session.js';
 
 async function login(page) {
   await page.goto('/accounts/login/');
@@ -49,7 +50,7 @@ test('signed-in tools read current source through fixed endpoints and never exec
   expect(list.entries.length).toBeLessThanOrEqual(2);
   const search = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.search_notes.execute({ query: 'missing-synthetic-search' })));
   expect(['no_matches', 'incomplete', 'unavailable']).toContain(search.state);
-  expect(requests.every(request => request.method() === 'GET' && new URL(request.url()).origin === 'http://127.0.0.1:8765')).toBe(true);
+  expect(requests.every(request => request.method() === 'GET' && new URL(request.url()).origin === new URL(page.url()).origin)).toBe(true);
   await writeFile(`${runtime}/wiki/Tool note.md`, '# Changed externally\n');
   const changed = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.read_note.execute({ path: 'Tool note.md' })));
   expect(changed.source).toBe('# Changed externally\n');
@@ -61,10 +62,10 @@ test('session expiration returns an authentication error without redirecting the
   await stubHost(page);
   await login(page);
   await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.read_note))).toBe(true);
-  await context.clearCookies();
+  await expireSession(context);
   const result = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.read_note.execute({ path: 'Slice.md' })));
   expect(result).toMatchObject({ state: 'error', reason_code: 'authentication_required' });
-  expect(page.url()).toBe('http://127.0.0.1:8765/');
+  expect(new URL(page.url()).pathname).toBe('/');
 });
 
 test('unsupported browsers and asynchronously rejected registration preserve ordinary UI', async ({ page }) => {
@@ -221,7 +222,7 @@ test('expired tool writes return authentication errors and leave disk unchanged'
   await stubHost(page);
   await login(page);
   const base = await callTool(page, 'read_note', { path: 'Tool expired.md' });
-  await context.clearCookies();
+  await expireSession(context);
   const result = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Draft\n' });
   expect(result.reason_code).toBe('authentication_required');
   expect(await readFile(`${runtime}/wiki/Tool expired.md`, 'utf8')).toBe('# Original\n');

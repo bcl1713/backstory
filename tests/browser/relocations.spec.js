@@ -68,12 +68,17 @@ test('an open editor retains unsaved source and cannot recreate the old path aft
   await page.goto(`/notes/${root}/Active/Project.md`);
   const editor = page.locator('[data-markdown-editor]');
   await expect.poll(() => editor.evaluate(el => Boolean(el.markdownEditor))).toBe(true);
+  // Keep this regression's draft unsaved while the separate move review runs.
+  const now = new Date('2026-10-26T15:00:00Z');
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(new Date(now.getTime() + 1000));
   await editor.evaluate(el => el.markdownEditor.setSource('# Draft from another tab\n'));
   const mover = await context.newPage();
   await mover.goto('/move/?' + new URLSearchParams({ source: `${root}/Active/Project.md` }));
   await mover.getByLabel('Destination path').fill(`${root}/Archives/Project.md`);
   await mover.getByRole('button', { name: 'Preview move', exact: true }).click();
   await mover.getByRole('button', { name: 'Confirm move and link updates' }).click();
+  await expect(mover.getByRole('status').filter({ hasText: 'completed' })).toBeVisible();
   await page.bringToFront();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect(page.locator('[data-sync-message]')).toContainText('deleted or moved');

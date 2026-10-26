@@ -68,6 +68,11 @@ one at a time: they share the runtime directory and port. Keep Playwright's
 worker count at one. CI installs Chromium with `--only-shell` to reduce download
 time and retains failure traces/screenshots as artifacts.
 
+Concurrent checkouts can isolate browser tests with both
+`BACKSTORY_BROWSER_RUNTIME=/tmp/backstory-my-task` and
+`BACKSTORY_BROWSER_PORT=8868`. Use a distinct disposable root and loopback port
+for each run; tests within a run still share one worker and synthetic wiki.
+
 Open ordinary PRs against `dev`; successful dev merges publish a prerelease and
 `:dev` image. Promote through a `dev` → `main` merge PR for stable publication.
 See [release automation](releases.md) for branch protection, versioning and

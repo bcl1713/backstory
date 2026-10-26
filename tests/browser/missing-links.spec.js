@@ -199,3 +199,24 @@ test('linked creation preserves literal whitespace in the offered filename', asy
   await expect(page.getByRole('link', { name: 'Literal label', exact: true })).toHaveAttribute('href', '/notes/%20Leading%20space.md');
   expect(await readFile(`${runtime}/wiki/CreateSource.md`, 'utf8')).toBe(original);
 });
+
+test('a linked draft waits for explicit first Create before enabling idle autosave', async ({ page }) => {
+  await open(page);
+  await missing(page).click();
+  await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
+  const now = new Date('2026-10-26T15:00:00Z');
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(new Date(now.getTime() + 1000));
+  const saves = [];
+  page.on('request', request => { if (request.url().includes('/save/CreateLinks/New.md')) saves.push(request); });
+  await editor(page).evaluate(el => el.markdownEditor.setSource('# Linked draft\n'));
+  await page.clock.runFor(10000);
+  expect(saves).toHaveLength(0);
+  await expect(readFile(`${runtime}/wiki/CreateLinks/New.md`)).rejects.toThrow();
+  await expect(page).toHaveURL(/\/new\/link\//);
+  await page.locator('[data-save]').click();
+  await expect(page).toHaveURL(/\/notes\/CreateLinks\/New.md#preview-details$/);
+  await editor(page).evaluate(el => el.markdownEditor.setSource('# Linked edit\n'));
+  await page.clock.runFor(5000);
+  await expect.poll(() => readFile(`${runtime}/wiki/CreateLinks/New.md`, 'utf8')).toBe('# Linked edit\n');
+});

@@ -31,11 +31,42 @@ textarea. The selected button and readiness label identify the visible
 presentation. Edits made while the enhanced editor loads are retained. All
 presentations share the same draft, and switching never saves or formats it.
 
+User edits save automatically after five seconds without another change.
+**Save** and **Ctrl/⌘ S** remain available. The status shows **Saving**, **Saved**
+only when the current draft is persisted, or **Needs attention** with recovery
+instructions. Edits made during a request stay in the draft; saves run one at a
+time. Returned formatting maps the caret and scroll position and is undoable.
+Conflicting formatting retains newer text and asks for explicit review.
+
+The 80ch column wraps visually while typing. Leaving an edited paragraph, whole
+list or table can format that block through the existing full-document
+Prettier/markdownlint configuration, including configured prose wrapping.
+Enter within an ongoing paragraph, list or table does not format a physical
+line. Formatting does not move focus and has its own undo step.
+
+Block formatting uses a conservative fallback: if the full-document result
+changes other blocks, uncertain syntax or newline conventions, it is deferred
+until Save. Front matter, fenced code, blockquotes, incomplete parses and plain
+text fallback use full formatting on Save. Stale replies and results touching
+the active selection are also deferred. Every save, including autosave, still
+runs the complete formatting and validation pipeline.
+
+Formatter, network/storage and sign-in errors pause automatic writes and retain
+the draft. Further typing does not retry a failed or conflicting request.
+Review the diagnostics or current disk version, sign in if needed, then choose
+Save explicitly. **Save source without formatting** remains an explicit recovery
+choice. Copy/download and protected drafts remain available. New notes need a
+valid filename; linked-note creation drafts, protected recovered drafts and
+historical views require an explicit first save/restoration. Composition pauses
+automatic changes.
+
 Open notes check authoritative source every five seconds while visible, when the
 tab regains focus, and after a browser tool finishes writing the same note. A
 clean editor reloads automatically. Changes in separate passages merge into an
-unsaved draft; only **Save** publishes your local edits. Source checks pause
-during editor operations, formatting review and text composition.
+unsaved draft. A reload or merge cancels pending autosave; local differences stay
+unsaved until another user edit starts a new idle period or you choose **Save**.
+Source checks pause during editor operations, formatting review and text
+composition.
 
 Overlapping changes keep your draft and loaded base intact. A persistent
 **External note changes** banner offers comparison, copy/download and another
@@ -75,6 +106,9 @@ If another writer creates the target first, the creation draft stays intact and
 **Open existing note** offers access to that note. Creation never adopts its
 revision for overwriting. Successful creation opens the saved note; a delayed
 discovery/index update is reported separately from save success.
+
+Pending or failed saves retain the unsaved-work protection. Closing the browser
+before a save completes does not guarantee persistence; retain a copy when needed.
 
 Today shows the browser-local date and named timezone. It opens an existing
 date-named note through the safe resolver; it never creates one. Recently
