@@ -36,6 +36,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   let baseRevision = isNew ? null : parse('#note-revision');
   let csrf = find('[name=csrfmiddlewaretoken]').value;
   let busy = false;
+  let toolBusy = false;
   let recovery = null;
   let proposal = null;
   let proposalSource = null;
@@ -52,12 +53,12 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   const dirty = () => editor.getSource() !== baseSource || (isNew && !path && Boolean(filename?.value.trim()));
   const say = message => { status.textContent = message; };
   const syncButtons = () => {
-    saveButton.disabled = busy;
-    formatButton.disabled = busy;
+    saveButton.disabled = busy || toolBusy;
+    formatButton.disabled = busy || toolBusy;
     recoveryButton.hidden = !recovery;
-    if (restoreButton) restoreButton.disabled = busy || editor.getSource() !== initialSource;
-    recoveryButton.disabled = busy;
-    if (filename) filename.disabled = busy || !isNew || Boolean(path);
+    if (restoreButton) restoreButton.disabled = busy || toolBusy || editor.getSource() !== initialSource;
+    recoveryButton.disabled = busy || toolBusy;
+    if (filename) filename.disabled = busy || toolBusy || !isNew || Boolean(path);
   };
   const clearProposal = () => { proposal = null; proposalSource = null; find('[data-format-proposal]').hidden = true; };
   const displayProposal = (result, submitted, rejected = false) => {
@@ -152,7 +153,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   };
 
   async function perform(kind) {
-    if (busy) return;
+    if (busy || toolBusy) return;
     const requestedPath = requestPath();
     if (!requestedPath) return;
     const submitted = editor.getSource();
@@ -291,7 +292,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     editor.focus();
   });
   find('[data-store-draft]').addEventListener('click', async () => {
-    if (busy) return;
+    if (busy || toolBusy) return;
     const requestedPath = requestPath();
     if (!requestedPath) return;
     busy = true; syncButtons();
@@ -322,7 +323,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   });
   find('[data-reauth-form]').addEventListener('submit', async event => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || toolBusy) return;
     busy = true;
     syncButtons();
     const button = event.target.querySelector('button');
@@ -340,6 +341,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       const signedIn = new DOMParser().parseFromString(await response.text(), 'text/html');
       csrf = signedIn.querySelector('[name=csrfmiddlewaretoken]')?.value;
       if (!csrf) throw new Error('sign-in unavailable');
+      find('[name=csrfmiddlewaretoken]').value = csrf;
       find('[data-reauth]').hidden = true;
       say('Signed in. Draft retained. Choose Save or Format explicitly to continue.');
     } catch {
@@ -353,6 +355,25 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   });
   const retainedDiagnostics = parse('#note-diagnostics');
   if (Array.isArray(retainedDiagnostics)) diagnostics(retainedDiagnostics);
+  // Tools never adopt a new base or overwrite the editor, including edits made
+  // during a request. A later human Save uses the existing conflict/merge UI.
+  document.addEventListener('backstory:tool-save-start', event => {
+    const guard = event.detail;
+    guard.editorReady = true;
+    const editorPath = path || (filename?.value.trim() ? [folder, filename.value.trim()].filter(Boolean).join('/') : '');
+    if (guard.path !== editorPath) return;
+    if (busy || toolBusy) { guard.reason_code = 'editor_busy'; return; }
+    if (dirty()) { guard.reason_code = 'unsaved_editor_draft'; return; }
+    toolBusy = true;
+    syncButtons();
+    say('Browser tool save in progress. Editor source and original revision retained.');
+  });
+  document.addEventListener('backstory:tool-save-finish', event => {
+    if (event.detail.path !== path || !toolBusy) return;
+    toolBusy = false;
+    syncButtons();
+    say('Browser tool request finished. Disk may have changed. Editor source and original revision retained; compare before saving.');
+  });
   document.addEventListener('click', event => {
     const move = event.target.closest('a[href]');
     if (!move || new URL(move.href, location.href).pathname !== '/move/' || !dirty()) return;
