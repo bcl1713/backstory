@@ -15,7 +15,7 @@ async function login(page) {
   await page.getByRole('button', { name: 'Sign in' }).click();
 }
 
-test('explicit link discovery is inert until requested and preserves the editor document', async ({ page }) => {
+test('explicit link discovery complements inline resolution and preserves the editor document', async ({ page }) => {
   await login(page);
   const requests = [];
   page.on('request', request => { if (/\/(resolve|index|search)\//.test(request.url())) requests.push(request.url()); });
@@ -24,11 +24,13 @@ test('explicit link discovery is inert until requested and preserves the editor 
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   await page.locator('.cm-content').click();
-  expect(requests).toEqual([]);
+  await expect(page.locator('[data-markdown-editor]').getByRole('link', { name: 'Wiki alias', exact: true })).toHaveAttribute('href', '/notes/Other.md#preview-details');
+  expect(requests.filter(url => /\/(index|search)\//.test(url))).toEqual([]);
+  const before = requests.length;
   await page.getByLabel('Link target', { exact: true }).fill('Other#Details|Local target');
   await page.getByRole('button', { name: 'Resolve link', exact: true }).click();
   await expect(page.locator('[data-link-result] a')).toHaveAttribute('href', '/notes/Other.md#preview-details');
-  expect(requests).toHaveLength(1);
+  expect(requests).toHaveLength(before + 1);
   expect(await page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource())).toBe(source);
   await expect(page.locator('[data-editor-status]')).toHaveText('Unchanged');
 });

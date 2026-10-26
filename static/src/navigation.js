@@ -97,6 +97,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     return true;
   };
   const updateLinks = () => {
+    find('#note-path').textContent = JSON.stringify(path);
     find('[data-note-title]').textContent = path;
     document.title = `${path} · Backstory`;
     find('[data-server-preview]').href = '/preview/' + encode(path);

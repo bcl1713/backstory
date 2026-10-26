@@ -55,18 +55,10 @@ function buildDecorations(view) {
     if (node.name === 'InlineCode') mark(node.from, node.to, 'lp-code');
     if (node.name === 'ListMark') mark(node.from, node.to, 'lp-list-marker');
     if (node.name === 'Image' || node.name === 'HTMLTag') return false;
-    if (node.name === 'Link') {
-      // The label stays inert text. Navigation remains the secondary safe preview.
-      if (!node.node.getChild('URL') || state.doc.lineAt(node.from).number !== state.doc.lineAt(node.to).number) return false;
-      mark(node.from, node.to, 'lp-link');
-    }
+    // A separate decoration plugin owns labeled links and line activity.
+    if (node.name === 'Link' || node.name === 'WikiLink') return false;
     if (['EmphasisMark', 'CodeMark', 'HeaderMark'].includes(node.name)) hide(node);
-    // Autolinks, bare URLs and email have no separate label: retain all source.
-    // Only a supported, single-line labeled Link may conceal its destination.
-    if (['LinkMark', 'URL'].includes(node.name)) {
-      const link = node.node.parent;
-      if (link?.name === 'Link' && link.getChild('URL') && state.doc.lineAt(link.from).number === state.doc.lineAt(link.to).number) hide(node);
-    }
+
   } });
   return Decoration.set(ranges, true);
 }

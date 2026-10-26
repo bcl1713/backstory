@@ -95,14 +95,15 @@ test('keyboard edits and undo redo survive mode changes without putting decorati
   await expect(page.getByRole('status').filter({ hasText: 'Unsaved changes' })).toBeVisible();
 });
 
-test('HTML and external images are inert; ordinary touch places cursor and plain source remains usable', async ({ page }) => {
+test('HTML and external images are inert; source lines and plain fallback remain editable', async ({ page }) => {
   const external = [];
   page.on('request', request => { if (request.url().includes('example.invalid')) external.push(request.url()); });
   await open(page);
   expect(await page.evaluate(() => window.noteExecuted)).toBeUndefined();
-  expect(await editor(page).locator('img[src],script,a[href]').count()).toBe(0);
+  expect(await editor(page).locator('img[src],script').count()).toBe(0);
   expect(external).toEqual([]);
-  await page.locator('.lp-link').first().tap();
+  await select(page, source.indexOf('relative link'));
+  await page.locator('.cm-content').focus();
   expect(page.url()).toContain('/notes/Slice.md');
   await expect(page.locator('.cm-editor.cm-focused')).toBeVisible();
   await page.getByRole('button', { name: 'Plain text fallback' }).click();
@@ -181,6 +182,7 @@ test('inactive autolinks, bare URLs, email and unsupported references stay visib
   await select(page, 0);
   await expect(content).toContainText('<https://example.invalid/auto>');
   expect(await readSource(page)).toBe(links);
-  expect(await editor(page).locator('a[href],img[src]').count()).toBe(0);
+  await expect(editor(page).getByRole('link', { name: 'label', exact: true })).toHaveAttribute('href', '/notes/Other.md');
+  expect(await editor(page).locator('img[src]').count()).toBe(0);
   expect(requests).toEqual([]);
 });

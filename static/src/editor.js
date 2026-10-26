@@ -5,9 +5,11 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
+import { createLiveLinksExtension, wikiLinks } from './live-links.js';
 
-export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onFailure = () => {}, nonce = '' }) {
+export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onFailure = () => {}, nonce = '', getPath = () => '' }) {
   const presentation = new Compartment();
+  const liveExtensions = () => [createLivePreviewExtension(), createLiveLinksExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
   const uniformEndings = new Map(['\n', '\r\n', '\r'].map(value => [value, { separator: value }]));
   const endingsFrom = (text, preferred) => {
@@ -44,12 +46,12 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         invertedEffects.of(transaction => transaction.docChanged || transaction.effects.some(effect => effect.is(restoreEndings))
           ? [restoreEndings.of(transaction.startState.field(lineEndings))] : []),
         history(), keymap.of([...defaultKeymap, ...historyKeymap]), drawSelection(),
-        markdown({ base: markdownLanguage, extensions: [frontMatter], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
+        markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({ 'aria-label': 'Markdown editor', spellcheck: 'false' }),
         EditorView.cspNonce.of(nonce),
         EditorView.exceptionSink.of(() => onFailure()),
-        presentation.of(createLivePreviewExtension()),
+        presentation.of(liveExtensions()),
         EditorView.updateListener.of(update => {
           if (update.docChanged || update.startState.field(lineEndings) !== update.state.field(lineEndings)) onChange(getSource());
         }),
@@ -73,7 +75,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
     },
     setMode(mode) {
       if (!['live', 'source'].includes(mode)) throw new TypeError('Unknown editor mode');
-      view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? createLivePreviewExtension() : []), annotations: Transaction.addToHistory.of(false) });
+      view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? liveExtensions() : []), annotations: Transaction.addToHistory.of(false) });
     },
     focus() { view.focus(); },
     destroy() { removeHeadingNavigation(); view.destroy(); },
@@ -104,7 +106,7 @@ function attachNoteEditor() {
     fallback.focus();
   };
   try {
-    api = mountMarkdownEditor({ parent, source, newline, nonce: parent.dataset.styleNonce || '', onChange: changed, onFailure: () => queueMicrotask(showFallback) });
+    api = mountMarkdownEditor({ parent, source, newline, getPath: () => JSON.parse(document.querySelector('#note-path').textContent), nonce: parent.dataset.styleNonce || '', onChange: changed, onFailure: () => queueMicrotask(showFallback) });
     parent.markdownEditor = api;
     fallbackRegion.hidden = true;
     controls.hidden = false;
