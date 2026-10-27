@@ -7,10 +7,13 @@ import { installHeadingNavigation } from './heading-navigation.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
 import { createLiveLinksExtension, wikiLinks } from './live-links.js';
 import { createVimBindings } from './vim-bindings.js';
+import { createLinkCompletionExtension } from './link-completion.js';
+import { stickyEditorScroll } from './editor-viewport.js';
+import { closeCompletion, startCompletion } from '@codemirror/autocomplete';
 import { sourceChanges } from './source-merge.js';
 import { blockExitExtension, blockIsInactive } from './block-format.js';
 
-export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onBlockExit = () => {}, onFailure = () => {}, onVimModeChange = () => {}, nonce = '', getPath = () => '' }) {
+export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onBlockExit = () => {}, onFailure = () => {}, onVimModeChange = () => {}, onCompletionStatus = () => {}, nonce = '', getPath = () => '' }) {
   const presentation = new Compartment();
   const bindings = createVimBindings(onVimModeChange);
   const liveExtensions = () => [createLivePreviewExtension(), createLiveLinksExtension({ getPath })];
@@ -50,18 +53,11 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         invertedEffects.of(transaction => transaction.docChanged || transaction.effects.some(effect => effect.is(restoreEndings))
           ? [restoreEndings.of(transaction.startState.field(lineEndings))] : []),
         bindings.extension,
+        createLinkCompletionExtension({ onStatus: onCompletionStatus }),
         history(), keymap.of([...defaultKeymap, ...historyKeymap]), drawSelection(),
         markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
         EditorView.lineWrapping,
-        // Page scrolling must account for sticky controls and sync warnings.
-        // Their heights change with wrapping, zoom and recovery state.
-        EditorView.scrollMargins.of(() => {
-          let top = 0;
-          for (const overlay of parent.ownerDocument.querySelectorAll('.persistent-actions, [data-sync-banner]')) {
-            if (!overlay.hidden) top = Math.max(top, overlay.getBoundingClientRect().bottom);
-          }
-          return { top };
-        }),
+        stickyEditorScroll,
         EditorView.theme({}, { dark: true }),
         EditorView.contentAttributes.of({ 'aria-label': 'Markdown editor', spellcheck: 'false' }),
         EditorView.cspNonce.of(nonce),
@@ -103,9 +99,12 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
     },
     setMode(mode) {
       if (!['live', 'source'].includes(mode)) throw new TypeError('Unknown editor mode');
+      closeCompletion(view);
       view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? liveExtensions() : []), annotations: Transaction.addToHistory.of(false) });
     },
     setVimEnabled(enabled) { bindings.setEnabled(view, enabled); },
+    completeLink() { view.focus(); return startCompletion(view); },
+    closeCompletion() { closeCompletion(view); },
     focus() { view.focus(); },
     destroy() { bindings.destroy(); removeHeadingNavigation(); view.destroy(); },
   };
@@ -125,6 +124,9 @@ function attachNoteEditor() {
   const readiness = document.querySelector('[data-editor-readiness]');
   const vimToggle = document.querySelector('[data-vim-toggle]');
   const vimStatus = document.querySelector('[data-vim-mode]');
+  const completeButton = document.querySelector('[data-complete-link]');
+  const completionStatus = document.querySelector('[data-link-completion-status]');
+  const showCompletionStatus = message => { completionStatus.textContent = message; completionStatus.hidden = !message; };
   let vimEnabled = false;
   let vimMode = 'off';
   const showVimMode = () => {
@@ -132,6 +134,7 @@ function attachNoteEditor() {
     const label = suspended ? 'Suspended (plain text)' : vimMode[0].toUpperCase() + vimMode.slice(1);
     vimToggle.setAttribute('aria-pressed', String(vimEnabled));
     vimStatus.textContent = `Vim · ${label}`;
+    completeButton.disabled = parent.hidden || (vimEnabled && vimMode !== 'insert');
   };
   let api;
   let fallbackSource = source;
@@ -151,12 +154,15 @@ function attachNoteEditor() {
   };
   const setPresentation = (mode, failed = false, focus = true) => {
     const plain = mode === 'plain' || !api;
+    if (api) api.closeCompletion();
+    showCompletionStatus('');
     if (plain && api) fallback.value = api.getSource();
     if (!plain) api.setMode(mode);
     parent.hidden = plain;
     fallbackRegion.hidden = !plain;
     parent.dataset.presentation = plain ? 'plain' : mode;
     if (api) api.setVimEnabled(vimEnabled && !plain);
+    completeButton.disabled = plain;
     showVimMode();
     controls.querySelectorAll('[data-editor-mode]').forEach(button => {
       button.setAttribute('aria-pressed', String(button.dataset.editorMode === parent.dataset.presentation));
@@ -172,11 +178,13 @@ function attachNoteEditor() {
     api = mountMarkdownEditor({ parent, source, newline, getPath: () => JSON.parse(document.querySelector('#note-path').textContent), nonce: parent.dataset.styleNonce || '', onChange: changed,
       onBlockExit: block => onBlockExit(block),
       onVimModeChange: mode => { vimMode = mode; showVimMode(); },
+      onCompletionStatus: showCompletionStatus,
       onFailure: () => queueMicrotask(() => setPresentation('plain', true)) });
     parent.markdownEditor = api;
     setPresentation('live', false, false);
     vimToggle.hidden = false;
     vimStatus.hidden = false;
+    completeButton.hidden = false;
   } catch {
     parent.replaceChildren();
     setPresentation('plain', true, false);
@@ -184,11 +192,15 @@ function attachNoteEditor() {
   vimToggle.addEventListener('click', () => {
     if (!api) return;
     vimEnabled = !vimEnabled;
+    api.closeCompletion();
+    showCompletionStatus('');
     api.setVimEnabled(vimEnabled && !parent.hidden);
     showVimMode();
     if (!parent.hidden) api.focus();
   });
   controls.querySelectorAll('[data-editor-mode]').forEach(button => button.addEventListener('click', () => setPresentation(button.dataset.editorMode)));
+  completeButton.addEventListener('click', () => { if (api && !parent.hidden) api.completeLink(); });
+  completeButton.addEventListener('mousedown', event => event.preventDefault());
   fallback.addEventListener('input', () => {
     if (api) api.view.dispatch({ changes: { from: 0, to: api.view.state.doc.length, insert: fallback.value }, annotations: Transaction.userEvent.of('input') });
     else changed(fallback.value.replaceAll('\n', fallbackNewline));
