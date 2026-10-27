@@ -12,3 +12,6 @@ await build({
 
 await mkdir('static/fonts', { recursive: true });
 await copyFile('assets/fonts/OFL.txt', 'static/fonts/OFL.txt');
+await mkdir('static/licenses', { recursive: true });
+// The adapter and core share this MIT license and copyright notice.
+await copyFile('node_modules/@replit/codemirror-vim/LICENSE', 'static/licenses/codemirror-vim.txt');

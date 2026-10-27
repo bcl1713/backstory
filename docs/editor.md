@@ -31,6 +31,42 @@ textarea. The selected button and readiness label identify the visible
 presentation. Edits made while the enhanced editor loads are retained. All
 presentations share the same draft, and switching never saves or formats it.
 
+**Vim bindings** in the persistent toolbar enables optional modal editing for
+this page. It starts **off** after each page load. The adjacent status reports
+Normal, Insert, Visual or Visual line; the same button disables bindings at any
+time, including on mobile. Live preview and Raw source keep the current mode,
+selection and undo history. Plain text fallback suspends bindings and stays an
+ordinary textarea; returning to the enhanced editor resumes in Normal mode.
+
+Supported starting mappings:
+
+| Key | Action |
+| --- | --- |
+| `h` / `j` / `k` / `l`, `w` / `b`, `gg` / `G` | Move in Normal mode |
+| `i` / `a` | Enter Insert mode before / after the cursor |
+| `Escape` | Return to Normal from Insert or Visual |
+| `v` / `V` | Start character / line Visual selection |
+| `d` in Visual | Delete selected source |
+| `u` / `Ctrl+R` in Normal | Undo / redo using the shared editor history |
+| `Tab` / `Shift+Tab` | Leave the editor for ordinary page controls |
+
+Escape first dismisses an open formatting proposal, then an open Menu; another
+Escape in the editor returns to Normal. **Ctrl/⌘ S** keeps Backstory's guarded
+Save behavior, and **Ctrl/⌘ Shift .** still toggles navigation in every mode.
+Location, find, new tab/window, close tab and print shortcuts stay with the
+browser. **Ctrl+R** is Vim redo while this editor has focus; use the browser's
+reload control to refresh. Other browser/OS shortcuts may take precedence or
+conflict with upstream Vim mappings. No global letter shortcuts are installed.
+Use Menu and Tab/Enter for the existing file tree, Search, Today and recent notes.
+
+The integration uses [`@replit/codemirror-vim` 6.4.0](https://github.com/replit/codemirror-vim)
+under the MIT license, shipped at `/static/licenses/codemirror-vim.txt`. This is
+an initial Vim editing slice, with no promise of Neovim parity or custom mappings.
+Vim `:w` is not connected to Backstory saves; use Backstory's Save button or
+shortcut. Completion for note paths, titles, aliases,
+wikilinks, tags and front matter remains a separate increment; no language
+server or AI completion service is included.
+
 User edits save automatically after five seconds without another change.
 **Save** and **Ctrl/⌘ S** remain available. The status shows **Saving**, **Saved**
 only when the current draft is persisted, or **Needs attention** with recovery

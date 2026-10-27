@@ -400,8 +400,10 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   recoveryButton.addEventListener('click', () => perform('source_recovery'));
   restoreButton?.addEventListener('click', () => perform('restore'));
   document.addEventListener('keydown', event => {
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); perform('save'); }
-  });
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault(); event.stopPropagation(); perform('save');
+    }
+  }, true);
   find('[data-apply-format]').addEventListener('click', () => {
     if (busy || toolBusy || reviewBusy) return;
     if (!proposal || editor.getSource() !== proposal.submitted) { clearProposal(); say('Draft changed. Run Format again.'); return; }
@@ -413,9 +415,10 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   find('[data-dismiss-format]').addEventListener('click', () => { clearProposal(); say(dirty() ? 'Unsaved changes' : 'Unchanged'); });
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !find('[data-format-proposal]').hidden) {
+      event.preventDefault(); event.stopPropagation();
       clearProposal(); say(dirty() ? 'Unsaved changes' : 'Unchanged'); formatButton.focus();
     }
-  });
+  }, true);
   const acceptConflictRevision = snapshot => {
     path = snapshot.path;
     adoptSnapshot(snapshot);

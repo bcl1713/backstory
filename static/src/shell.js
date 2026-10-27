@@ -23,6 +23,7 @@ if (zenToggle) {
   };
   zenToggle.addEventListener('click', () => setChrome(zenToggle.getAttribute('aria-expanded') !== 'true'));
   document.addEventListener('keydown', event => {
+    if (event.defaultPrevented) return;
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === 'Period') {
       event.preventDefault();
       event.stopPropagation();
@@ -32,6 +33,7 @@ if (zenToggle) {
       const proposal = document.querySelector('[data-format-proposal]');
       if (proposal && !proposal.hidden) return;
       event.preventDefault();
+      event.stopPropagation();
       setChrome(false);
     }
   }, true);
