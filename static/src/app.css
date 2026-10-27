@@ -7,6 +7,11 @@
   font-display: swap;
 }
 [hidden] { display: none !important; }
+.cm-tooltip-autocomplete { background: var(--surface) !important; color: var(--foreground); border-color: var(--border) !important; max-width: min(40rem, calc(100vw - 2rem)); }
+.cm-tooltip-autocomplete > ul { max-width: 100%; }
+.cm-tooltip-autocomplete > ul > li { overflow: hidden; text-overflow: ellipsis; }
+.cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--selection) !important; color: var(--selection-text) !important; }
+[data-link-completion-status] { margin: .25rem 1.5rem; }
 .editor-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .75rem 0; }
 .editor-controls button { margin: 0; font-size: .875rem; }
 .editor-controls button[aria-pressed='true'] { border-color: var(--link); background: var(--selection); color: var(--selection-text); }

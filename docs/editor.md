@@ -63,9 +63,33 @@ The integration uses [`@replit/codemirror-vim` 6.4.0](https://github.com/replit/
 under the MIT license, shipped at `/static/licenses/codemirror-vim.txt`. This is
 an initial Vim editing slice, with no promise of Neovim parity or custom mappings.
 Vim `:w` is not connected to Backstory saves; use Backstory's Save button or
-shortcut. Completion for note paths, titles, aliases,
-wikilinks, tags and front matter remains a separate increment; no language
-server or AI completion service is included.
+shortcut. This integration does not promise full Neovim command parity.
+
+Type **`[[`** in note text to complete an existing-note wikilink. Suggestions
+match paths, filenames, titles and aliases, with the path shown beside each
+choice so duplicate names remain distinguishable. Use **↑/↓ and Enter**, or tap
+a suggestion. A chosen alias produces, for example,
+`[[/Completion/Atlas.md|Terra]]`; otherwise the note title supplies the readable
+label. Existing heading fragments, custom labels and closing brackets are
+preserved. Acceptance is one undoable edit, and uses the existing autosave and
+conflict handling. Dismissing suggestions leaves the typed source intact.
+
+Completion works in Live preview and Raw source, with standard editing or Vim
+Insert mode. **Escape** dismisses suggestions before a second Escape returns to
+Vim Normal. **Tab** leaves the editor without accepting. **Ctrl/⌘ Space** requests
+suggestions explicitly when the browser/OS permits it; the toolbar's **Link**
+button (accessible name **Complete link**) provides the same action. In Vim,
+enter Insert mode first. Plain text fallback remains ordinary editable source.
+
+Suggestions come from the last indexed names, with current path policy and file
+metadata rechecked. Up to 20 existing notes are offered; type more to narrow a
+large result set. Index lag, partial indexing and unavailable suggestions are
+reported separately from save status. Completion never creates a target note.
+Code, front matter, tables, HTML, images, escaped syntax and a link's existing
+label/heading portion do not activate suggestions. Filenames containing wikilink
+delimiters (`#`, `|`, brackets or backslashes) are omitted; use an appropriate
+ordinary Markdown link for those files. No heading/tag/front-matter-value,
+ordinary Markdown link, language-server or AI completion is included.
 
 User edits save automatically after five seconds without another change.
 **Save** and **Ctrl/⌘ S** remain available. The status shows **Saving**, **Saved**

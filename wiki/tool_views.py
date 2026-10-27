@@ -118,6 +118,21 @@ def _paging(request, default):
 
 
 @_tool
+def complete(request):
+    from indexing.completions import complete_notes
+    authorize_content(request, '', 'folder')
+    require_ready()
+    page = complete_notes(request.GET.get('query', ''))
+    freshness = asdict(page.freshness)
+    unavailable = freshness['state'] == 'unavailable'
+    return _json({
+        'state': 'unavailable' if unavailable else 'suggestions',
+        'items': [asdict(item) for item in page.items],
+        'freshness': freshness, 'truncated': page.truncated, 'authoritative': False,
+    }, 503 if unavailable else 200)
+
+
+@_tool
 def search(request):
     # Even discovery is gated by the same authentication/policy/readiness boundary.
     authorize_content(request, '', 'folder')

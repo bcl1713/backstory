@@ -28,6 +28,17 @@ root; it never addresses the host filesystem. Absolute Markdown paths,
 outside-root paths, symlinks and excluded components cannot offer creation. When exact paths are absent, indexed aliases, IDs and basenames resolve only from a complete, current, unambiguous index.
 Markdown can address filenames containing literal `#` using `%23`.
 
+Enhanced-editor wikilink completion queries indexed paths, titles and aliases
+through authenticated `GET /tools/complete/?query=...`. It checks current path
+policy, regular-file status and indexed stat freshness, examines at most 300
+candidates, and returns up to 20 suggestions under the shared SQLite work budget.
+It does not read note bodies or scan folders. Queries are bounded to 256 Unicode
+characters; display titles/labels to 512. Partial/limited results are explicit.
+Canonical inserted targets begin with `/` and remain literal wiki paths;
+completion does not URL-encode percent signs. Generated labels must fit the
+existing wikilink grammar and resolver. Existing labels/fragments stay unchanged.
+Unrepresentable filenames are omitted and no completion request creates a note.
+
 Heading slugs lowercase Unicode text, remove punctuation other than underscores
 and hyphens, trim whitespace, and replace whitespace runs with hyphens. An empty
 slug becomes `section`. IDs start with `preview-` to avoid application-control
