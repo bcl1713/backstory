@@ -68,6 +68,12 @@ unsaved until another user edit starts a new idle period or you choose **Save**.
 Source checks pause during editor operations, formatting review and text
 composition.
 
+After a failed source check, a successful authoritative read clears the read
+warning, including when the disk revision is unchanged. Recovery leaves any
+local differences unsaved until another user edit or explicit Save. Formatting,
+sign-in, conflicting or uncertain write failures keep their own pause and still
+require explicit resolution.
+
 Overlapping changes keep your draft and loaded base intact. A persistent
 **External note changes** banner offers comparison, copy/download and another
 check. **Reload current source** reads again and asks before discarding unsaved

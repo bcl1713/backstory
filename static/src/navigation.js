@@ -58,6 +58,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   let syncVersion = 0;
   let draftVersion = 0;
   let attention = null;
+  let syncAttention = null;
   let conflictReview = false;
   let recovery = null;
   let proposal = null;
@@ -76,8 +77,9 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   const encode = value => value.split('/').map(encodeURIComponent).join('/');
   const dirty = () => editor.getSource() !== baseSource || (isNew && !path && Boolean(filename?.value.trim()));
   const say = message => {
-    status.textContent = attention ? `Needs attention. ${attention}` : message;
-    status.dataset.state = attention ? 'attention' : busy ? 'saving' : dirty() ? 'dirty' : 'saved';
+    const issue = attention || syncAttention;
+    status.textContent = issue ? `Needs attention. ${issue}` : message;
+    status.dataset.state = issue ? 'attention' : busy ? 'saving' : dirty() ? 'dirty' : 'saved';
   };
   const idle = createIdleAutosave({
     getState: () => ({ dirty: dirty(), composing: editor.isComposing(),
@@ -86,6 +88,13 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     save: () => perform('save', { automatic: true }),
   });
   const needsAttention = message => { attention = message; idle.pause(); say(message); };
+  const clearSyncFailure = () => {
+    if (!syncAttention) return;
+    syncAttention = null;
+    // resume() cancels old work. Only a later user edit can arm autosave;
+    // resolving a read must never replay an uncertain write or publish a merge.
+    if (!attention && !conflictReview) idle.resume();
+  };
   let compositionVersion = null;
   document.addEventListener('compositionstart', event => {
     if (event.target.closest('.cm-content, #source')) { compositionVersion = draftVersion; idle.cancel(); }
@@ -197,7 +206,10 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
         : error.kind === 'authentication' ? 'Sign in again to check external changes. Draft retained.'
           : 'External changes could not be read. Draft retained; check the connection and try again.';
     banner(message);
-    needsAttention(message);
+    syncAttention = message;
+    idle.pause();
+    say(message);
+    if (error.diagnostic) document.dispatchEvent(new CustomEvent('backstory:sync-read-failure', { detail: error.diagnostic }));
     if (error.kind === 'authentication') reauthenticate();
     syncButtons();
   };
@@ -212,18 +224,25 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     clearProposal();
   };
   const receiveSnapshot = snapshot => {
-    if (conflictReview) { showComparison(snapshot); return; }
-    if (snapshot.revision === baseRevision) { find('[data-sync-banner]').hidden = true; return; }
+    if (conflictReview) { clearSyncFailure(); showComparison(snapshot); return; }
+    if (snapshot.revision === baseRevision) {
+      clearSyncFailure();
+      find('[data-sync-banner]').hidden = true;
+      say(dirty() ? 'Unsaved changes' : 'Unchanged');
+      return;
+    }
     const local = editor.getSource();
     const merged = mergeSources(baseSource, local, snapshot.source);
     if (merged === null) {
       showComparison(snapshot);
+      clearSyncFailure();
       say('External revision conflict. Draft and original revision retained.');
       return;
     }
     adoptSnapshot(snapshot);
     editor.applyExternalSource(merged, snapshot.newline);
     clearConflict();
+    clearSyncFailure();
     syncButtons();
     say(dirty() ? 'External changes merged. Local edits remain unsaved.' : 'Reloaded external changes. Unchanged.');
   };
@@ -253,12 +272,12 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     if (busy || toolBusy || reviewBusy || editor.isComposing() || (automatic && conflictReview)) return;
     const blockFormat = kind === 'block_format';
     const formatting = kind === 'format' || blockFormat;
-    if (blockFormat && (attention || explicitFirstSave || proposalSource !== null || !editor.blockIsInactive(block))) return;
+    if (blockFormat && (attention || syncAttention || explicitFirstSave || proposalSource !== null || !editor.blockIsInactive(block))) return;
     const requestedPath = requestPath();
     if (!requestedPath) return;
     const submitted = editor.getSource();
     const submittedVersion = draftVersion;
-    const wasPaused = Boolean(attention) || explicitFirstSave;
+    const wasPaused = Boolean(attention || syncAttention) || explicitFirstSave;
     const revision = baseRevision;
     const sourceRecovery = kind === 'source_recovery';
     if (sourceRecovery && (!recovery || recovery.source !== submitted || recovery.revision !== revision)) {
@@ -356,7 +375,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
         return;
       }
       if (!automatic) {
-        attention = null; explicitFirstSave = false;
+        attention = null; syncAttention = null; explicitFirstSave = false;
         if (wasPaused) { idle.resume(); if (dirty() && draftVersion !== submittedVersion) idle.edited(); }
       }
       const outcome = result.state === 'noop'
@@ -369,7 +388,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     } finally {
       busy = false;
       syncButtons();
-      status.dataset.state = attention ? 'attention' : dirty() ? 'dirty' : 'saved';
+      status.dataset.state = attention || syncAttention ? 'attention' : dirty() ? 'dirty' : 'saved';
       idle.flush();
     }
   }
@@ -430,7 +449,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
       acceptConflictRevision(latest);
       if (reload) editor.applyExternalSource(latest.source, latest.newline);
       clearConflict();
-      if (reload) { attention = null; idle.resume(); say('Reloaded the latest disk version. Unchanged.'); }
+      if (reload) { attention = null; syncAttention = null; idle.resume(); say('Reloaded the latest disk version. Unchanged.'); }
       else needsAttention('Current revision accepted for manual merge. Draft retained; review and edit it, then explicitly Save.');
       if (!reload) editor.focus();
     } catch (error) { syncFailure(error); }
@@ -564,7 +583,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     if (recovery && (recovery.source !== value || recovery.revision !== baseRevision)) invalidateRecovery();
     if (!find('[data-conflict]').hidden) find('#conflict-draft').value = value;
     syncButtons();
-    if (!attention && !busy) say(dirty() ? 'Unsaved changes' : 'Unchanged');
+    if (!attention && !syncAttention && !busy) say(dirty() ? 'Unsaved changes' : 'Unchanged');
   };
 }
 

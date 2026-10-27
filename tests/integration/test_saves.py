@@ -38,6 +38,18 @@ def test_two_editors_get_412(reader, wiki):
     assert (wiki / "note.md").read_bytes() == b"# First\n"
 
 
+@pytest.mark.parametrize("condition", [
+    'W/"' + 'a' * 64 + '"', '*', '"short"', '"' + 'a' * 64 + '", "' + 'b' * 64 + '"',
+])
+def test_save_requires_one_strong_application_revision(reader, wiki, condition):
+    target = wiki / "note.md"
+    target.write_bytes(b"# Original\n")
+    response = save(reader, "# Rejected\n", condition)
+    assert response.status_code == 400
+    assert response.json()["reason_code"] == "invalid_precondition"
+    assert target.read_bytes() == b"# Original\n"
+
+
 def test_create_never_overwrites(reader, wiki):
     first = save(reader, "# New\n", create=True)
     assert first.status_code == 200
