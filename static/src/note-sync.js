@@ -1,20 +1,47 @@
 // Reads are snapshots, never write acknowledgements. Reject failed/malformed
 // responses before any consumer can mistake them for an empty document.
 export async function readNoteSnapshot(path, signal) {
-  const response = await fetch('/tools/read/?' + new URLSearchParams({ path }), {
-    credentials: 'same-origin', cache: 'no-store', redirect: 'error',
-    headers: { Accept: 'application/json' }, signal,
-  });
-  const fail = kind => { throw Object.assign(new Error(kind), { kind }); };
-  if (response.status === 401 || response.status === 403) fail('authentication');
-  if (response.status === 404) fail('missing');
-  if (response.status === 503) fail('storage');
-  if (!response.ok || response.redirected || !response.headers.get('content-type')?.startsWith('application/json')) fail('read');
-  const result = await response.json();
-  if (result.state !== 'ok' || result.authoritative !== true || result.path !== path ||
-      typeof result.source !== 'string' || !/^"[0-9a-f]{64}"$/.test(result.revision) ||
-      response.headers.get('ETag') !== result.revision || typeof result.bom !== 'boolean' ||
-      !['\n', '\r\n', '\r'].includes(result.newline)) fail('read');
+  // Diagnostic fields are deliberately limited: no path, source, response
+  // body, credentials or exception text, even for malformed server responses.
+  const diagnostic = { status: null, contentType: null, etag: null };
+  const fail = (kind, reason) => {
+    throw Object.assign(new Error(`Snapshot read failed: ${reason}`), {
+      kind, reason, diagnostic: { ...diagnostic, reason },
+    });
+  };
+  let response;
+  try {
+    response = await fetch('/tools/read/?' + new URLSearchParams({ path }), {
+      credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+      headers: { Accept: 'application/json' }, signal,
+    });
+  } catch { fail('read', 'transport'); }
+  diagnostic.status = response.status;
+  const contentType = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
+  diagnostic.contentType = ['application/json', 'text/html', 'text/plain'].includes(contentType) ? contentType : contentType ? 'other' : null;
+  const etag = response.headers.get('ETag');
+  diagnostic.etag = etag === null ? null : /^(W\/)?"[0-9a-f]{64}"$/.test(etag) ? etag : 'other';
+  if (response.status === 401 || response.status === 403) fail('authentication', 'http_status');
+  if (response.status === 404) fail('missing', 'http_status');
+  if (response.status === 503) fail('storage', 'http_status');
+  if (!response.ok) fail('read', 'http_status');
+  if (response.redirected) fail('read', 'redirect');
+  if (contentType !== 'application/json') fail('read', 'content_type');
+  let result;
+  try { result = await response.json(); }
+  catch (error) { fail('read', error instanceof SyntaxError ? 'json' : 'transport'); }
+  if (!result || typeof result !== 'object' || Array.isArray(result)) fail('read', 'contract');
+  const valid = {
+    state: result.state === 'ok', authoritative: result.authoritative === true,
+    path: result.path === path, source: typeof result.source === 'string',
+    revision: typeof result.revision === 'string' && /^"[0-9a-f]{64}"$/.test(result.revision),
+    bom: typeof result.bom === 'boolean', newline: ['\n', '\r\n', '\r'].includes(result.newline),
+  };
+  diagnostic.contract = valid;
+  for (const [field, accepted] of Object.entries(valid)) if (!accepted) fail('read', field);
+  // The JSON revision describes note bytes; the HTTP ETag describes this JSON
+  // representation and may be weakened/replaced/removed by a proxy. Only the
+  // strict application revision becomes a guarded write precondition.
   return result;
 }
 
