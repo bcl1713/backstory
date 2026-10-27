@@ -6,11 +6,13 @@ import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
 import { createLiveLinksExtension, wikiLinks } from './live-links.js';
+import { createVimBindings } from './vim-bindings.js';
 import { sourceChanges } from './source-merge.js';
 import { blockExitExtension, blockIsInactive } from './block-format.js';
 
-export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onBlockExit = () => {}, onFailure = () => {}, nonce = '', getPath = () => '' }) {
+export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onBlockExit = () => {}, onFailure = () => {}, onVimModeChange = () => {}, nonce = '', getPath = () => '' }) {
   const presentation = new Compartment();
+  const bindings = createVimBindings(onVimModeChange);
   const liveExtensions = () => [createLivePreviewExtension(), createLiveLinksExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
   const uniformEndings = new Map(['\n', '\r\n', '\r'].map(value => [value, { separator: value }]));
@@ -47,6 +49,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         lineEndings,
         invertedEffects.of(transaction => transaction.docChanged || transaction.effects.some(effect => effect.is(restoreEndings))
           ? [restoreEndings.of(transaction.startState.field(lineEndings))] : []),
+        bindings.extension,
         history(), keymap.of([...defaultKeymap, ...historyKeymap]), drawSelection(),
         markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
         EditorView.lineWrapping,
@@ -93,8 +96,9 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
       if (!['live', 'source'].includes(mode)) throw new TypeError('Unknown editor mode');
       view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? liveExtensions() : []), annotations: Transaction.addToHistory.of(false) });
     },
+    setVimEnabled(enabled) { bindings.setEnabled(view, enabled); },
     focus() { view.focus(); },
-    destroy() { removeHeadingNavigation(); view.destroy(); },
+    destroy() { bindings.destroy(); removeHeadingNavigation(); view.destroy(); },
   };
 }
 
@@ -110,6 +114,16 @@ function attachNoteEditor() {
   // Preserve those edits; untouched text keeps its original mixed line endings.
   const source = fallback.value === fallback.defaultValue ? initialSource : fallback.value.replaceAll('\n', newline);
   const readiness = document.querySelector('[data-editor-readiness]');
+  const vimToggle = document.querySelector('[data-vim-toggle]');
+  const vimStatus = document.querySelector('[data-vim-mode]');
+  let vimEnabled = false;
+  let vimMode = 'off';
+  const showVimMode = () => {
+    const suspended = vimEnabled && parent.hidden;
+    const label = suspended ? 'Suspended (plain text)' : vimMode[0].toUpperCase() + vimMode.slice(1);
+    vimToggle.setAttribute('aria-pressed', String(vimEnabled));
+    vimStatus.textContent = `Vim · ${label}`;
+  };
   let api;
   let fallbackSource = source;
   let fallbackNewline = newline;
@@ -133,6 +147,8 @@ function attachNoteEditor() {
     parent.hidden = plain;
     fallbackRegion.hidden = !plain;
     parent.dataset.presentation = plain ? 'plain' : mode;
+    if (api) api.setVimEnabled(vimEnabled && !plain);
+    showVimMode();
     controls.querySelectorAll('[data-editor-mode]').forEach(button => {
       button.setAttribute('aria-pressed', String(button.dataset.editorMode === parent.dataset.presentation));
       button.disabled = !api && button.dataset.editorMode !== 'plain';
@@ -146,13 +162,23 @@ function attachNoteEditor() {
   try {
     api = mountMarkdownEditor({ parent, source, newline, getPath: () => JSON.parse(document.querySelector('#note-path').textContent), nonce: parent.dataset.styleNonce || '', onChange: changed,
       onBlockExit: block => onBlockExit(block),
+      onVimModeChange: mode => { vimMode = mode; showVimMode(); },
       onFailure: () => queueMicrotask(() => setPresentation('plain', true)) });
     parent.markdownEditor = api;
     setPresentation('live', false, false);
+    vimToggle.hidden = false;
+    vimStatus.hidden = false;
   } catch {
     parent.replaceChildren();
     setPresentation('plain', true, false);
   }
+  vimToggle.addEventListener('click', () => {
+    if (!api) return;
+    vimEnabled = !vimEnabled;
+    api.setVimEnabled(vimEnabled && !parent.hidden);
+    showVimMode();
+    if (!parent.hidden) api.focus();
+  });
   controls.querySelectorAll('[data-editor-mode]').forEach(button => button.addEventListener('click', () => setPresentation(button.dataset.editorMode)));
   fallback.addEventListener('input', () => {
     if (api) api.view.dispatch({ changes: { from: 0, to: api.view.state.doc.length, insert: fallback.value }, annotations: Transaction.userEvent.of('input') });
