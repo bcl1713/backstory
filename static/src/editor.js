@@ -53,6 +53,15 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         history(), keymap.of([...defaultKeymap, ...historyKeymap]), drawSelection(),
         markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
         EditorView.lineWrapping,
+        // Page scrolling must account for sticky controls and sync warnings.
+        // Their heights change with wrapping, zoom and recovery state.
+        EditorView.scrollMargins.of(() => {
+          let top = 0;
+          for (const overlay of parent.ownerDocument.querySelectorAll('.persistent-actions, [data-sync-banner]')) {
+            if (!overlay.hidden) top = Math.max(top, overlay.getBoundingClientRect().bottom);
+          }
+          return { top };
+        }),
         EditorView.theme({}, { dark: true }),
         EditorView.contentAttributes.of({ 'aria-label': 'Markdown editor', spellcheck: 'false' }),
         EditorView.cspNonce.of(nonce),
