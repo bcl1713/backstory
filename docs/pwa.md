@@ -44,15 +44,16 @@ Executed integration/unit tests check manifest fields, actual PNG dimensions,
 metadata on sign-in and authenticated pages, and offline advisory transitions.
 Authored browser tests additionally check public asset retrieval, no registered
 service worker, and disconnect/reconnect without a false save or lost in-memory
-edit; these browser checks still need execution in a supported environment.
+edit. Run the browser CI job (all four shards) before accepting a change.
 Existing editor suites provide regression tests for authentication failures,
 conflict handling, protected drafts, navigation guards and failed writes.
 
-Verification in the implementation workspace: Python 3.14.8 integration tests
-and Node 22 unit tests pass. Browser tests are provided but could not execute:
-the pinned Playwright Chromium 156 download was invalid, and system Chromium
-155.0.8059.79 could not launch under the workspace socket restrictions. No
-browser-runtime result is claimed from those failed launch attempts.
+The implementation workspace verified Python 3.14.8 integration tests and Node
+22 unit tests. Local browser execution was unavailable because of browser-download
+and socket restrictions; the repository's GitHub Actions browser job supplies
+Chromium Headless Shell 156.0.8078.4 on Linux. Consult the PR checks for the
+current browser-suite result. Desktop/headless verification is not an Android
+installation test.
 
 **Real Android installation has not been verified in this cloud workspace.** No
 Android OS/Chrome device version is claimed as tested. Before calling the Android
