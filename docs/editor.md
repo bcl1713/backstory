@@ -4,7 +4,8 @@ Notes open in Zen: a centered writing column with a Tokyo Night Night background
 and self-hosted JetBrains Mono. **Menu** reveals the file tree, Today, recently
 modified notes, presentation controls and draft tools. Use **Ctrl/⌘ Shift .** to
 toggle the same controls; **Escape** returns to the editor. A formatting proposal
-uses Escape first to dismiss the proposal. The Menu, Save, Format, readiness and
+uses Escape first to dismiss the proposal. Format, Vim bindings and recovery/restore controls are under **Menu**. Only Menu
+and Save remain as persistent toolbar buttons; readiness and
 save status remain available while navigation is hidden. Save failures,
 formatting diagnostics, proposals, sign-in recovery and conflicts stay visible.
 
@@ -31,8 +32,10 @@ textarea. The selected button and readiness label identify the visible
 presentation. Edits made while the enhanced editor loads are retained. All
 presentations share the same draft, and switching never saves or formats it.
 
-**Vim bindings** in the persistent toolbar enables optional modal editing for
-this page. It starts **off** after each page load. The adjacent status reports
+**Vim bindings** under **Menu** enables optional modal editing for
+this page. **Ctrl/⌘ Shift F2** toggles them while the enhanced editor is focused.
+The Menu control remains available on touch devices or when the browser/OS captures
+the shortcut. It starts **off** after each page load. The persistent status reports
 Normal, Insert, Visual or Visual line; the same button disables bindings at any
 time, including on mobile. Live preview and Raw source keep the current mode,
 selection and undo history. Plain text fallback suspends bindings and stays an
@@ -77,9 +80,8 @@ conflict handling. Dismissing suggestions leaves the typed source intact.
 Completion works in Live preview and Raw source, with standard editing or Vim
 Insert mode. **Escape** dismisses suggestions before a second Escape returns to
 Vim Normal. **Tab** leaves the editor without accepting. **Ctrl/⌘ Space** requests
-suggestions explicitly when the browser/OS permits it; the toolbar's **Link**
-button (accessible name **Complete link**) provides the same action. In Vim,
-enter Insert mode first. Plain text fallback remains ordinary editable source.
+suggestions explicitly when the browser/OS permits it. In Vim, enter Insert mode
+first. Plain text fallback remains ordinary editable source.
 
 Suggestions come from the last indexed names, with current path policy and file
 metadata rechecked. Up to 20 existing notes are offered; type more to narrow a

@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, stat, rm } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -233,6 +234,7 @@ test('recovered protected drafts and historical views require an explicit first 
   const saved = await readFile(target, 'utf8');
   await page.goto('/history/Auto.md');
   await page.getByRole('link', { name: 'Open original for comparison and explicit restoration' }).first().click();
+  await revealChrome(page);
   await expect(page.locator('[data-restore-revision]')).toBeVisible();
   await draft(page, '# Never automatically restore history\n');
   await advance(page, 20000);

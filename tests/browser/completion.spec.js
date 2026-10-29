@@ -40,7 +40,11 @@ async function open(page, presentation = 'Live preview', vim = false, path = 'Co
     await page.getByRole('button', { name: presentation, exact: true }).click();
     await page.keyboard.press('Control+Shift+Period');
   }
-  if (vim) await page.getByRole('button', { name: 'Vim bindings', exact: true }).click();
+  if (vim) {
+    await revealChrome(page);
+    await page.getByRole('button', { name: 'Vim bindings', exact: true }).click();
+    await page.keyboard.press('Control+Shift+Period');
+  }
   await content(page).focus();
   if (vim) await page.keyboard.type('Gi');
   else await page.keyboard.press('Control+End');
@@ -82,7 +86,7 @@ test('completion preserves an existing fragment, custom label, closing brackets 
     el.markdownEditor.setSource('# Completion\n\nBefore [[Atl#Details|My label]] after.\n');
     el.markdownEditor.view.dispatch({ selection: { anchor: '# Completion\n\nBefore [[Atl'.length } });
   });
-  await page.getByRole('button', { name: 'Complete link', exact: true }).click();
+  await content(page).press('Control+Space');
   await page.clock.runFor(300);
   await readyPopup(page);
   await page.keyboard.press('Enter');
@@ -99,7 +103,7 @@ test('Escape dismisses suggestions before leaving Vim Insert, and Tab leaves wit
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Normal');
   await page.keyboard.type('a');
-  await page.getByRole('button', { name: 'Complete link', exact: true }).click();
+  await content(page).press('Control+Space');
   await page.clock.runFor(300);
   await readyPopup(page);
   await page.keyboard.press('Tab');
@@ -116,7 +120,7 @@ test('code, front matter, escaped links and labels do not request completion', a
       el.markdownEditor.setSource(text);
       el.markdownEditor.view.dispatch({ selection: { anchor: text.indexOf('Ter') + 3 } });
     }, text);
-    await page.getByRole('button', { name: 'Complete link', exact: true }).click();
+    await content(page).press('Control+Space');
     await page.clock.runFor(500);
     await expect(popup(page)).toBeHidden();
     expect(await read(page)).toBe(text);
@@ -141,7 +145,7 @@ test('failed and obsolete completion replies never change the draft', async ({ p
     const response = await route.fetch();
     captured(); await gate; await route.fulfill({ response });
   });
-  await page.getByRole('button', { name: 'Complete link', exact: true }).click();
+  await content(page).press('Control+Space');
   await page.clock.runFor(300);
   await pending;
   await page.keyboard.type('|custom]]');
@@ -208,7 +212,7 @@ test('fallback closes suggestions and preserves the draft without modal trapping
   await page.getByRole('button', { name: 'Plain text fallback', exact: true }).click();
   await expect(popup(page)).toBeHidden();
   await expect(page.getByLabel('Markdown source (plain text fallback)')).toHaveValue(initial + '[[Ter');
-  await expect(page.getByRole('button', { name: 'Complete link', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Complete link', exact: true })).toHaveCount(0);
 });
 
 test('Vim Normal and Visual never offer completion, including alternate Insert escape', async ({ page }) => {
@@ -217,7 +221,10 @@ test('Vim Normal and Visual never offer completion, including alternate Insert e
   await page.keyboard.press('Control+[');
   await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Normal');
   await expect(popup(page)).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Complete link', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Complete link', exact: true })).toHaveCount(0);
+  await content(page).press('Control+Space');
+  await page.clock.runFor(500);
+  await expect(popup(page)).toBeHidden();
   await page.keyboard.type('v');
   await page.keyboard.press('Control+Space');
   await page.clock.runFor(500);
@@ -232,7 +239,7 @@ test('malformed replies and expired sessions leave the draft editable', async ({
   await expect(page.locator('[data-link-completion-status]')).toContainText('unavailable');
   await page.unroute('**/tools/complete/**');
   await page.route('**/tools/complete/**', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{"state":"error"}' }));
-  await page.getByRole('button', { name: 'Complete link', exact: true }).click();
+  await content(page).press('Control+Space');
   await page.clock.runFor(500);
   await expect(page.locator('[data-link-completion-status]')).toContainText('Sign in again');
   await page.keyboard.type('ra]]');
@@ -245,7 +252,7 @@ test('an unclosed link never consumes a separate following wikilink', async ({ p
     el.markdownEditor.setSource('# Completion\n\nBefore [[Ter after [[Other]].\n');
     el.markdownEditor.view.dispatch({ selection: { anchor: '# Completion\n\nBefore [[Ter'.length } });
   });
-  await page.getByRole('button', { name: 'Complete link', exact: true }).click();
+  await content(page).press('Control+Space');
   await page.clock.runFor(400); await readyPopup(page);
   await page.keyboard.press('Enter');
   expect(await read(page)).toBe('# Completion\n\nBefore [[/Completion/Atlas.md|Terra]] after [[Other]].\n');
@@ -266,3 +273,19 @@ test('Escape after ordinary Vim typing is never consumed by a pending non-link q
   await page.keyboard.type('u');
   expect(await read(page)).toBe(initial);
 });
+
+for (const shortcut of ['Control+Space', 'Meta+Space']) {
+  test(`${shortcut} requests existing-note completion without a toolbar Link button`, async ({ page }) => {
+    await open(page);
+    await expect(page.getByRole('button', { name: 'Complete link', exact: true })).toHaveCount(0);
+    await host(page).evaluate(el => {
+      el.markdownEditor.setSource('# Completion\n\n[[Ter');
+      el.markdownEditor.view.dispatch({ selection: { anchor: '# Completion\n\n[[Ter'.length } });
+    });
+    await content(page).press(shortcut);
+    await page.clock.runFor(400);
+    await readyPopup(page);
+    await page.keyboard.press('Enter');
+    expect(await read(page)).toBe(initial + '[[/Completion/Atlas.md|Terra]]');
+  });
+}

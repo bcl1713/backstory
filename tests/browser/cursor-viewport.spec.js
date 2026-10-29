@@ -1,3 +1,4 @@
+import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -19,7 +20,11 @@ async function open(page, vim, presentation = 'Live preview') {
     await page.getByRole('button', { name: 'Raw source', exact: true }).click();
     await page.keyboard.press('Control+Shift+Period');
   }
-  if (vim) await page.getByRole('button', { name: 'Vim bindings', exact: true }).click();
+  if (vim) {
+    await revealChrome(page);
+    await page.getByRole('button', { name: 'Vim bindings', exact: true }).click();
+    await page.keyboard.press('Control+Shift+Period');
+  }
   await content(page).focus();
 }
 
