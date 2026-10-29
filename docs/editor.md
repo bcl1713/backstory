@@ -210,3 +210,20 @@ The default palette comes from
 [JetBrains Mono v2.304](https://github.com/JetBrains/JetBrainsMono/tree/v2.304)
 is included under the [SIL Open Font License](../assets/fonts/OFL.txt); builds
 copy the font and its license into local static assets. No font service is used.
+
+### Keyboard-first startup and navigation
+
+Desktop layouts with a fine pointer start with the editor focused in Vim Normal
+mode. Phones start with Vim off and do not open the keyboard automatically.
+A manual Vim toggle is remembered only in this browser, overriding the default;
+blocked browser storage does not prevent changing the mode for the current page.
+Startup never takes focus from a control already being used, and heading links
+retain their caret/scroll destination.
+
+In Vim Normal mode, press `g` then `f` to follow the wiki or Markdown link under
+the text caret, or `g` then `h` to return to the home page. These are sequences,
+not simultaneous chords. Navigation retains ordinary unsaved-draft protection
+and missing-note handling; it does not save or create a note automatically.
+Code, images, and plain text are not link targets. Menu navigation remains
+available. The decorative active-editor left stripe is removed; caret and other
+control focus indicators remain.

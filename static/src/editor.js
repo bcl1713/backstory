@@ -1,3 +1,5 @@
+import { createLinkFollower, activateLink } from './follow-link.js';
+import { initialVimEnabled, rememberVimEnabled, shouldFocusEditor } from './editor-preferences.js';
 import { isVimToggleShortcut } from './editor-shortcuts.js';
 import { ChangeSet, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, keymap, drawSelection } from '@codemirror/view';
@@ -6,7 +8,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
-import { createLiveLinksExtension, wikiLinks } from './live-links.js';
+import { createLiveLinksExtension, wikiLinks, linkAtCaret } from './live-links.js';
 import { createVimBindings } from './vim-bindings.js';
 import { createLinkCompletionExtension } from './link-completion.js';
 import { stickyEditorScroll } from './editor-viewport.js';
@@ -16,7 +18,26 @@ import { blockExitExtension, blockIsInactive } from './block-format.js';
 
 export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onBlockExit = () => {}, onFailure = () => {}, onVimModeChange = () => {}, onCompletionStatus = () => {}, nonce = '', getPath = () => '' }) {
   const presentation = new Compartment();
-  const bindings = createVimBindings(onVimModeChange);
+  let normalMode = false;
+  let destroyed = false;
+  const followLink = createLinkFollower({
+    resolve: async query => {
+      const response = await fetch('/resolve/?' + new URLSearchParams(query), { credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+      if (!response.ok) throw new Error('Link unavailable');
+      return response.json();
+    },
+    navigate: activateLink,
+    isCurrent: snapshot => !destroyed && normalMode && view.state.doc === snapshot.doc && view.state.selection.eq(snapshot.selection) && getPath() === snapshot.path,
+    onStatus: onCompletionStatus,
+  });
+  const bindings = createVimBindings(mode => {
+    normalMode = mode === 'normal';
+    if (!normalMode) followLink.cancel();
+    onVimModeChange(mode);
+  }, {
+    follow: () => followLink(linkAtCaret(view), getPath(), { doc: view.state.doc, selection: view.state.selection, path: getPath() }),
+    home: () => { followLink.cancel(); activateLink('/'); },
+  });
   const liveExtensions = () => [createLivePreviewExtension(), createLiveLinksExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
   const uniformEndings = new Map(['\n', '\r\n', '\r'].map(value => [value, { separator: value }]));
@@ -66,6 +87,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         presentation.of(liveExtensions()),
         blockExitExtension(onBlockExit),
         EditorView.updateListener.of(update => {
+          if (update.docChanged || !update.startState.selection.eq(update.state.selection)) followLink.cancel();
           if (update.docChanged || update.startState.field(lineEndings) !== update.state.field(lineEndings)) {
             onChange(getSource(), { user: update.transactions.some(tr => !tr.isUserEvent('input.external') && !tr.isUserEvent('input.format')) });
           }
@@ -106,7 +128,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
     setVimEnabled(enabled) { bindings.setEnabled(view, enabled); },
     closeCompletion() { closeCompletion(view); },
     focus() { view.focus(); },
-    destroy() { bindings.destroy(); removeHeadingNavigation(); view.destroy(); },
+    destroy() { destroyed = true; followLink.cancel(); bindings.destroy(); removeHeadingNavigation(); view.destroy(); },
   };
 }
 
@@ -126,7 +148,10 @@ function attachNoteEditor() {
   const vimStatus = document.querySelector('[data-vim-mode]');
   const completionStatus = document.querySelector('[data-link-completion-status]');
   const showCompletionStatus = message => { completionStatus.textContent = message; completionStatus.hidden = !message; };
-  let vimEnabled = false;
+  const desktop = matchMedia('(min-width: 601px) and (hover: hover) and (pointer: fine)').matches;
+  let storage;
+  try { storage = window.localStorage; } catch { /* Optional browser preference. */ }
+  let vimEnabled = initialVimEnabled(storage, desktop);
   let vimMode = 'off';
   const showVimMode = () => {
     const suspended = vimEnabled && parent.hidden;
@@ -188,6 +213,7 @@ function attachNoteEditor() {
   const toggleVim = () => {
     if (!api) return;
     vimEnabled = !vimEnabled;
+    rememberVimEnabled(storage, vimEnabled);
     api.closeCompletion();
     showCompletionStatus('');
     api.setVimEnabled(vimEnabled && !parent.hidden);
@@ -228,5 +254,8 @@ function attachNoteEditor() {
   };
   onChange = mountNoteActions({ editor, initialSource, isNew: parent.dataset.isNew === 'true', bom: parent.dataset.bom === 'true' });
   if (source !== initialSource) onChange(source);
+  if (api && !parent.hidden && shouldFocusEditor(desktop, document.activeElement, document.body, document.documentElement)) {
+    api.view.contentDOM.focus({ preventScroll: true });
+  }
 }
 attachNoteEditor();
