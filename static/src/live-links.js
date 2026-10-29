@@ -53,6 +53,12 @@ function linksIn(view) {
   } });
   return links;
 }
+export function linkAtCaret(view) {
+  const selection = view.state.selection.main;
+  if (!selection.empty) return null;
+  return linksIn(view).find(link => selection.head >= link.from && selection.head < link.to) || null;
+}
+
 class LinkWidget extends WidgetType {
   constructor(label, result) { super(); this.label = label; this.result = result; }
   eq(other) { return this.label === other.label && this.result.state === other.result.state && this.result.href === other.result.href && this.result.action_href === other.result.action_href && this.result.create_path === other.result.create_path; }

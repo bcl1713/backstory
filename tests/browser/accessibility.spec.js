@@ -47,7 +47,8 @@ test('keyboard navigation reaches folders, search, editor modes, proposal dismis
   await tabTo(page, page.getByRole('textbox', { name: 'Markdown editor', exact: true }));
   await expect(page.locator('.cm-editor')).toHaveClass(/cm-focused/);
   const focusStyle = await page.locator('.cm-content').evaluate(el => getComputedStyle(el).boxShadow);
-  expect(focusStyle).not.toBe('none');
+  expect(focusStyle).toBe('none');
+  await expect(page.locator('.cm-cursor').first()).toBeVisible();
   await page.keyboard.press('ArrowRight');
   await activate(page, page.getByRole('button', { name: 'Format', exact: true }));
   await expect(page.locator('[data-format-proposal]')).toBeVisible();

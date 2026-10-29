@@ -112,7 +112,6 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 }
 .note-page .cm-editor .cm-scroller { overflow-x: hidden; }
 .note-page .cm-editor.cm-focused { outline: none; }
-.note-page .cm-editor.cm-focused .cm-content { box-shadow: inset 2px 0 var(--focus); }
 .note-page #source { border-color: transparent; border-radius: 0; }
 .note-page #source:focus-visible { border-color: var(--focus); }
 .note-page .skip-link { position: absolute; left: -10000px; }
