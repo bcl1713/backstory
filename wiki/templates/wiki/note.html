@@ -10,10 +10,10 @@
 <button type="button" data-editor-mode="source" aria-pressed="false">Raw source</button>
 <button type="button" data-editor-mode="plain" data-plain-fallback aria-pressed="false" aria-describedby="complete-source-help">Plain text fallback</button>
 </div>
-<div class="editor-controls" role="group" aria-label="Advanced editing"><button type="button" data-format hidden>Format</button><button type="button" data-vim-toggle hidden aria-keyshortcuts="Control+Shift+F2 Meta+Shift+F2" title="Vim bindings (Ctrl/⌘ Shift F2 in editor)" aria-pressed="false" aria-describedby="vim-help">Vim bindings</button></div>
+<div class="editor-controls" role="group" aria-label="Advanced editing"><button type="button" data-format hidden>Format</button><button type="button" data-vim-toggle hidden aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space" title="Vim bindings (Ctrl/⌘ Shift Space in editor)" aria-pressed="false" aria-describedby="vim-help">Vim bindings</button></div>
 <p id="complete-source-help" class="editor-help">For complete document source, choose Plain text fallback.</p>
 <p id="link-completion-help" class="editor-help">Type [[ for existing-note suggestions. Use arrows and Enter to choose, Escape to dismiss. Tab leaves the editor. Ctrl/⌘ Space requests suggestions at the caret. In Vim, use Insert mode.</p>
-<p id="vim-help" class="editor-help">Vim bindings are optional. Ctrl/⌘ Shift F2 toggles them while the enhanced editor is focused. Enable for Normal, Insert and Visual modes; press i to type and Escape for Normal. Tab leaves the editor. Disable Vim bindings at any time. Plain text fallback suspends them.</p>
+<p id="vim-help" class="editor-help">Vim bindings are optional. Ctrl/⌘ Shift Space toggles them while the enhanced editor is focused. Enable for Normal, Insert and Visual modes; press i to type and Escape for Normal. Tab leaves the editor. Disable Vim bindings at any time. Plain text fallback suspends them.</p>
 </section>
 <div class="editor-controls zen-chrome" data-editor-actions hidden role="group" aria-label="Save and recovery">
 <button type="button" data-source-recovery hidden>Save source without formatting</button>{% if restoration_id %}<button type="button" data-restore-revision>Restore this revision</button>{% endif %}
