@@ -13,26 +13,26 @@ async function login(page) {
   await page.getByLabel('Password', { exact: true }).fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.waitForURL('/');
-  await expect(page.locator('#note-path')).toHaveText('"index.md"');
+  await expect.poll(() => page.locator('#note-path').textContent()).toBe('"index.md"');
   await expect(page.locator('.cm-content')).toBeVisible();
 }
 
 test('home preserves note identity across refresh, tree, Back and deep links', async ({ page }) => {
   await login(page);
   await page.reload();
-  await expect(page.locator('#note-path')).toHaveText('"index.md"');
+  await expect.poll(() => page.locator('#note-path').textContent()).toBe('"index.md"');
   await revealChrome(page);
   await page.getByRole('link', { name: 'Wiki root', exact: true }).click();
   await expect(page).toHaveURL('/?folder=');
   await expect(page.locator('nav[aria-label="Folder"]')).toBeVisible();
   await page.goBack();
-  await expect(page.locator('#note-path')).toHaveText('"index.md"');
+  await expect.poll(() => page.locator('#note-path').textContent()).toBe('"index.md"');
   await page.goto('/notes/Other.md#Details');
-  await expect(page.locator('#note-path')).toHaveText('"Other.md"');
+  await expect.poll(() => page.locator('#note-path').textContent()).toBe('"Other.md"');
   await revealChrome(page);
   await page.getByRole('link', { name: 'Backstory', exact: true }).click();
   await expect(page).toHaveURL('/');
-  await expect(page.locator('#note-path')).toHaveText('"index.md"');
+  await expect.poll(() => page.locator('#note-path').textContent()).toBe('"index.md"');
   const preview = await page.request.get('/preview/index.md');
   expect(await preview.text()).toContain('/notes/Other.md#Details');
   expect(await readFile(index, 'utf8')).toBe(content);
