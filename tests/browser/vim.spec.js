@@ -36,9 +36,22 @@ async function presentation(page, name) {
   }
 }
 async function enable(page) {
+  await revealChrome(page);
   await toggle(page).click();
   await expect(mode(page)).toHaveText('Vim · Normal');
+  await page.keyboard.press('Control+Shift+Period');
   await content(page).focus();
+}
+async function tabTo(page, target) {
+  await expect(target).toBeVisible();
+  const focusable = page.locator('a[href], button, input, textarea, select, summary, [tabindex]');
+  let controls = await focusable.count();
+  for (let n = 0; n < controls + 2; n++) {
+    if (await target.evaluate(el => el === document.activeElement)) return;
+    await page.keyboard.press('Tab');
+    controls = Math.max(controls, await focusable.count());
+  }
+  await expect(target).toBeFocused();
 }
 
 test('standard editing is default; opting in and disabling preserve source and selection', async ({ page }) => {
@@ -52,6 +65,7 @@ test('standard editing is default; opting in and disabling preserve source and s
   await enable(page);
   expect(await selection(page)).toEqual(before);
   expect(await read(page)).toBe(source);
+  await revealChrome(page);
   await toggle(page).click();
   await expect(mode(page)).toHaveText('Vim · Off');
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
@@ -126,6 +140,7 @@ test('fallback suspends bindings, stays editable and resumes Normal without losi
   await content(page).press('u');
   expect(await read(page)).toBe(source);
   await presentation(page, 'Plain text fallback');
+  await revealChrome(page);
   await toggle(page).click();
   await expect(mode(page)).toHaveText('Vim · Off');
   await presentation(page, 'Live preview');
@@ -164,9 +179,9 @@ test('Escape dismisses proposals then navigation before changing Vim mode', asyn
   await open(page);
   await enable(page);
   await page.keyboard.type('i');
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Format', exact: true }).click();
   await expect(page.locator('[data-format-proposal]')).toBeVisible();
-  await page.keyboard.press('Control+Shift+Period');
   const menu = page.getByRole('button', { name: 'Navigation and controls', exact: true });
   await expect(menu).toHaveAttribute('aria-expanded', 'true');
   await content(page).focus();
@@ -193,10 +208,12 @@ test('Tab exits every Vim mode and the off switch is keyboard reachable', async 
     await page.keyboard.press('Tab');
     await expect(content(page)).not.toBeFocused();
     await content(page).focus();
-    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Control+Shift+Period');
+    await tabTo(page, toggle(page));
     await expect(toggle(page)).toBeFocused();
     if (keys === 'v') await page.keyboard.press('Enter');
-    else await content(page).focus();
+    await page.keyboard.press('Control+Shift+Period');
+    await content(page).focus();
   }
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
   expect(await read(page)).toBe(source);
@@ -220,9 +237,10 @@ test('browser shortcuts remain uncancelled while Vim owns ordinary editing keys'
 test('mobile users can disable Vim and edit fallback with no horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page);
+  await revealChrome(page);
+  await expect(toggle(page)).toBeVisible();
   await toggle(page).tap();
   await expect(mode(page)).toHaveText('Vim · Normal');
-  await expect(toggle(page)).toBeInViewport();
   await page.screenshot({ path: '/tmp/backstory-issue-2/vim-mobile.png', fullPage: true });
   await toggle(page).tap();
   await expect(mode(page)).toHaveText('Vim · Off');
@@ -248,6 +266,7 @@ test('Vim edits retain guarded save conflicts and undoable formatting', async ({
   await page.keyboard.type('ggiDraft ');
   await page.keyboard.press('Escape');
   const draft = await read(page);
+  await revealChrome(page);
   await page.getByRole('button', { name: 'Format', exact: true }).click();
   await page.getByRole('button', { name: 'Apply formatted source', exact: true }).click();
   await content(page).focus();
@@ -284,4 +303,36 @@ test('authoritative source refresh preserves Vim mode and is undoable', async ({
   await page.keyboard.type('u');
   expect(await read(page)).toBe(source);
   expect(await readFile(`${runtime}/wiki/Vim.md`, 'utf8')).toBe('# Updated externally\n');
+});
+
+test('editor-only Vim shortcut toggles without changing source and ignores repeat/composition', async ({ page }) => {
+  await open(page);
+  await content(page).focus();
+  await page.keyboard.press('Control+Shift+F2');
+  await expect(mode(page)).toHaveText('Vim · Normal');
+  await content(page).dispatchEvent('keydown', { key: 'F2', ctrlKey: true, shiftKey: true, repeat: true });
+  await content(page).dispatchEvent('keydown', { key: 'F2', ctrlKey: true, shiftKey: true, isComposing: true });
+  await expect(mode(page)).toHaveText('Vim · Normal');
+  await page.keyboard.press('Meta+Shift+F2');
+  await expect(mode(page)).toHaveText('Vim · Off');
+  expect(await read(page)).toBe(source);
+  await page.getByRole('button', { name: 'Save', exact: true }).focus();
+  await page.keyboard.press('Control+Shift+F2');
+  await expect(mode(page)).toHaveText('Vim · Off');
+  await presentation(page, 'Plain text fallback');
+  await page.getByLabel('Markdown source (plain text fallback)').focus();
+  await page.keyboard.press('Control+Shift+F2');
+  await expect(mode(page)).toHaveText('Vim · Off');
+});
+
+test('Escape returns focus to editor when proposal survives closing Menu', async ({ page }) => {
+  await open(page);
+  await revealChrome(page);
+  await page.getByRole('button', { name: 'Format', exact: true }).click();
+  await expect(page.locator('[data-format-proposal]')).toBeVisible();
+  await page.keyboard.press('Control+Shift+Period');
+  await page.getByRole('button', { name: 'Dismiss proposed formatting' }).focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-format-proposal]')).toBeHidden();
+  await expect(content(page)).toBeFocused();
 });

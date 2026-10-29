@@ -319,7 +319,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
         clearProposal();
         captureRecovery(result, submitted);
         if (result.diff && editor.getSource() === submitted) displayProposal(result, submitted, true);
-        needsAttention('Formatting failed. Draft retained. Review diagnostics or explicitly save source without formatting.');
+        needsAttention('Formatting failed. Draft retained. Review diagnostics or open Menu to explicitly save source without formatting.');
         return;
       }
       if (!response.ok) {
@@ -416,7 +416,9 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && !find('[data-format-proposal]').hidden) {
       event.preventDefault(); event.stopPropagation();
-      clearProposal(); say(dirty() ? 'Unsaved changes' : 'Unchanged'); formatButton.focus();
+      clearProposal(); say(dirty() ? 'Unsaved changes' : 'Unchanged');
+      if (formatButton.getClientRects().length) formatButton.focus();
+      else editor.focus();
     }
   }, true);
   const acceptConflictRevision = snapshot => {

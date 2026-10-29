@@ -1,3 +1,4 @@
+import { isVimToggleShortcut } from './editor-shortcuts.js';
 import { ChangeSet, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, keymap, drawSelection } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects } from '@codemirror/commands';
@@ -9,7 +10,7 @@ import { createLiveLinksExtension, wikiLinks } from './live-links.js';
 import { createVimBindings } from './vim-bindings.js';
 import { createLinkCompletionExtension } from './link-completion.js';
 import { stickyEditorScroll } from './editor-viewport.js';
-import { closeCompletion, startCompletion } from '@codemirror/autocomplete';
+import { closeCompletion } from '@codemirror/autocomplete';
 import { sourceChanges } from './source-merge.js';
 import { blockExitExtension, blockIsInactive } from './block-format.js';
 
@@ -103,7 +104,6 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
       view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? liveExtensions() : []), annotations: Transaction.addToHistory.of(false) });
     },
     setVimEnabled(enabled) { bindings.setEnabled(view, enabled); },
-    completeLink() { view.focus(); return startCompletion(view); },
     closeCompletion() { closeCompletion(view); },
     focus() { view.focus(); },
     destroy() { bindings.destroy(); removeHeadingNavigation(); view.destroy(); },
@@ -124,7 +124,6 @@ function attachNoteEditor() {
   const readiness = document.querySelector('[data-editor-readiness]');
   const vimToggle = document.querySelector('[data-vim-toggle]');
   const vimStatus = document.querySelector('[data-vim-mode]');
-  const completeButton = document.querySelector('[data-complete-link]');
   const completionStatus = document.querySelector('[data-link-completion-status]');
   const showCompletionStatus = message => { completionStatus.textContent = message; completionStatus.hidden = !message; };
   let vimEnabled = false;
@@ -134,7 +133,6 @@ function attachNoteEditor() {
     const label = suspended ? 'Suspended (plain text)' : vimMode[0].toUpperCase() + vimMode.slice(1);
     vimToggle.setAttribute('aria-pressed', String(vimEnabled));
     vimStatus.textContent = `Vim · ${label}`;
-    completeButton.disabled = parent.hidden || (vimEnabled && vimMode !== 'insert');
   };
   let api;
   let fallbackSource = source;
@@ -162,7 +160,6 @@ function attachNoteEditor() {
     fallbackRegion.hidden = !plain;
     parent.dataset.presentation = plain ? 'plain' : mode;
     if (api) api.setVimEnabled(vimEnabled && !plain);
-    completeButton.disabled = plain;
     showVimMode();
     controls.querySelectorAll('[data-editor-mode]').forEach(button => {
       button.setAttribute('aria-pressed', String(button.dataset.editorMode === parent.dataset.presentation));
@@ -184,12 +181,11 @@ function attachNoteEditor() {
     setPresentation('live', false, false);
     vimToggle.hidden = false;
     vimStatus.hidden = false;
-    completeButton.hidden = false;
   } catch {
     parent.replaceChildren();
     setPresentation('plain', true, false);
   }
-  vimToggle.addEventListener('click', () => {
+  const toggleVim = () => {
     if (!api) return;
     vimEnabled = !vimEnabled;
     api.closeCompletion();
@@ -197,10 +193,16 @@ function attachNoteEditor() {
     api.setVimEnabled(vimEnabled && !parent.hidden);
     showVimMode();
     if (!parent.hidden) api.focus();
-  });
+  };
+  vimToggle.addEventListener('click', toggleVim);
+  // Capture before CodeMirror/Vim keymaps, only in the enhanced editor.
+  parent.addEventListener('keydown', event => {
+    if (!api || parent.hidden || enhancedComposing || !api.view.hasFocus || !isVimToggleShortcut(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    toggleVim();
+  }, true);
   controls.querySelectorAll('[data-editor-mode]').forEach(button => button.addEventListener('click', () => setPresentation(button.dataset.editorMode)));
-  completeButton.addEventListener('click', () => { if (api && !parent.hidden) api.completeLink(); });
-  completeButton.addEventListener('mousedown', event => event.preventDefault());
   fallback.addEventListener('input', () => {
     if (api) api.view.dispatch({ changes: { from: 0, to: api.view.state.doc.length, insert: fallback.value }, annotations: Transaction.userEvent.of('input') });
     else changed(fallback.value.replaceAll('\n', fallbackNewline));
