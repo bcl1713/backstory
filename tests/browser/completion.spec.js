@@ -289,3 +289,25 @@ for (const shortcut of ['Control+Space', 'Meta+Space']) {
     expect(await read(page)).toBe(initial + '[[/Completion/Atlas.md|Terra]]');
   });
 }
+
+for (const modifier of ['Control', 'Meta']) {
+  test(`${modifier} Shift Space toggles Vim separately from link completion`, async ({ page }) => {
+    await open(page);
+    await host(page).evaluate(el => {
+      el.markdownEditor.setSource('# Completion\n\n[[Ter');
+      el.markdownEditor.view.dispatch({ selection: { anchor: '# Completion\n\n[[Ter'.length } });
+    });
+    await content(page).press(`${modifier}+Shift+Space`);
+    await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Normal');
+    await expect(popup(page)).toBeHidden();
+    await content(page).press(`${modifier}+Shift+Space`);
+    await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Off');
+    expect(await read(page)).toBe('# Completion\n\n[[Ter');
+    await content(page).press(`${modifier}+Space`);
+    await page.clock.runFor(400);
+    await readyPopup(page);
+    await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Off');
+    await page.keyboard.press('Enter');
+    expect(await read(page)).toBe(initial + '[[/Completion/Atlas.md|Terra]]');
+  });
+}

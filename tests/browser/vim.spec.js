@@ -310,20 +310,20 @@ test('authoritative source refresh preserves Vim mode and is undoable', async ({
 test('editor-only Vim shortcut toggles without changing source and ignores repeat/composition', async ({ page }) => {
   await open(page);
   await content(page).focus();
-  await page.keyboard.press('Control+Shift+F2');
+  await page.keyboard.press('Control+Shift+Space');
   await expect(mode(page)).toHaveText('Vim · Normal');
-  await content(page).dispatchEvent('keydown', { key: 'F2', ctrlKey: true, shiftKey: true, repeat: true });
-  await content(page).dispatchEvent('keydown', { key: 'F2', ctrlKey: true, shiftKey: true, isComposing: true });
+  await content(page).dispatchEvent('keydown', { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true, repeat: true });
+  await content(page).dispatchEvent('keydown', { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true, isComposing: true });
   await expect(mode(page)).toHaveText('Vim · Normal');
-  await page.keyboard.press('Meta+Shift+F2');
+  await page.keyboard.press('Meta+Shift+Space');
   await expect(mode(page)).toHaveText('Vim · Off');
   expect(await read(page)).toBe(source);
   await page.getByRole('button', { name: 'Save', exact: true }).focus();
-  await page.keyboard.press('Control+Shift+F2');
+  await page.keyboard.press('Control+Shift+Space');
   await expect(mode(page)).toHaveText('Vim · Off');
   await presentation(page, 'Plain text fallback');
   await page.getByLabel('Markdown source (plain text fallback)').focus();
-  await page.keyboard.press('Control+Shift+F2');
+  await page.keyboard.press('Control+Shift+Space');
   await expect(mode(page)).toHaveText('Vim · Off');
 });
 
