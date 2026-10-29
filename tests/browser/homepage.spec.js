@@ -34,7 +34,7 @@ test('home preserves note identity across refresh, tree, Back and deep links', a
   await expect(page).toHaveURL('/');
   await expect.poll(() => page.locator('#note-path').textContent()).toBe('"index.md"');
   const preview = await page.request.get('/preview/index.md');
-  expect(await preview.text()).toContain('/notes/Other.md#Details');
+  expect(await preview.text()).toContain('/notes/Other.md#preview-details');
   expect(await readFile(index, 'utf8')).toBe(content);
 });
 
