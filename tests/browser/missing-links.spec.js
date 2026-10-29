@@ -51,7 +51,10 @@ test('keyboard creates through the existing editor and original link opens the n
   await expect(async () => readFile(`${runtime}/wiki/CreateLinks/New.md`)).rejects.toThrow();
   await create(page);
   await expect(page).toHaveURL(/\/notes\/CreateLinks\/New.md#preview-details$/);
-  await expect.poll(() => editor(page).evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(7);
+  await expect.poll(() => editor(page).evaluate(el => {
+    const api = el.markdownEditor;
+    return api.view.state.selection.main.head === api.getSource().indexOf('## Details');
+  })).toBe(true);
   await expect(page.locator('[data-editor-status]')).toContainText('Saved.');
   expect(await readFile(`${runtime}/wiki/CreateSource.md`, 'utf8')).toBe(source);
   await page.goto('/notes/CreateSource.md');

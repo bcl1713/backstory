@@ -23,6 +23,17 @@ def save(reader, source, base=None, *, path="note.md", mode="formatted", token=N
     return reader.post("/save/" + path, data=json.dumps({"source": source, "mode": mode, "recovery_token": token}), content_type="application/json", **headers)
 
 
+def assert_created_note(source, body, identifier):
+    from wiki.metadata import yaml_data, parse_front_matter
+    from datetime import date
+    matter = parse_front_matter(source)
+    values = yaml_data(source.split('---', 2)[1])
+    assert set(values) == {'created', 'modified', 'id'}
+    assert values['id'] == identifier
+    assert date.fromisoformat(values['created']).isoformat() == values['modified']
+    assert matter.body == '\n' + body
+
+
 def backend():
     return importlib.import_module("wiki.saves")
 
@@ -54,7 +65,7 @@ def test_create_never_overwrites(reader, wiki):
     first = save(reader, "# New\n", create=True)
     assert first.status_code == 200
     assert save(reader, "# Other\n", create=True).status_code == 412
-    assert (wiki / "note.md").read_bytes() == b"# New\n"
+    assert_created_note((wiki / "note.md").read_text(), "# New\n", "new")
     assert save(reader, "# Nested\n", path="absent/note.md", create=True).status_code == 404
     assert not (wiki / "absent").exists()
 
@@ -275,7 +286,7 @@ def test_index_failure_is_successful_disk_save(reader, wiki, monkeypatch):
     response = save(reader, "# New\n", create=True)
     assert response.status_code == 200
     assert response.json()["state"] == "saved_index_delayed"
-    assert (wiki / "note.md").read_bytes() == b"# New\n"
+    assert_created_note((wiki / "note.md").read_text(), "# New\n", "new")
 
 
 def test_precondition_is_checked_before_formatting(reader, wiki, monkeypatch):
@@ -329,7 +340,7 @@ def test_cleanup_error_cannot_turn_published_create_into_failed_save(reader, wik
     monkeypatch.setattr(os, "unlink", fail_temp_cleanup)
     response = save(reader, "# New\n", create=True)
     assert response.status_code == 200
-    assert (wiki / "note.md").read_bytes() == b"# New\n"
+    assert_created_note((wiki / "note.md").read_text(), "# New\n", "new")
 
 
 def test_application_lock_is_shared_by_independent_processes(wiki, settings):

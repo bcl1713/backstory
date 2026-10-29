@@ -77,3 +77,29 @@ at most 50 alias references, and a bounded node projection. YAML parsing compose
 nodes without constructors or timestamp inference. Typed scalar tags, nested
 values, unknown keys, and parsed Markdown/image/wikilink destinations are
 compared before acceptance. The projection is never serialized into note source.
+
+## Save-time note metadata
+
+Normal Backstory saves (manual, autosave and WebMCP) maintain note metadata in
+one server-side step before formatting. Calendar dates use **America/Chicago**
+(Omaha, including daylight saving), regardless of browser or server location.
+
+- Existing `modified` fields become a date-only `YYYY-MM-DD` value. Existing
+  notes without that field or without front matter are not retrofitted.
+- The first save of a new file adds missing `created` and `modified` fields.
+  A missing `id` is generated in kebab case from the explicit title, or the
+  first Markdown heading used as the note's display title. No filename-derived
+  ID is invented when there is no title. Supplied IDs and creation dates stay.
+- When the display title genuinely changes, the previous title is appended to
+  `aliases` (or existing `alias`) without duplicating an existing value. IDs
+  stay stable. Moving a file alone does not rename its title or change aliases.
+- Unrelated YAML values, body text and comments are not rewritten by this step;
+  the configured formatter still applies its normal formatting policy.
+- Unusual automatic-field shapes or anchor references are rejected safely with
+  a diagnostic rather than modifying another field. Correct the field, or use
+  the existing explicit source-recovery workflow when appropriate.
+
+Format-only previews do not stamp dates. Explicit source recovery and revision
+restoration preserve their original exact-source behavior. Conflict/failed saves
+publish no metadata. The returned source and revision describe the actual saved
+bytes, including metadata; repeat same-day saves can remain no-ops.
