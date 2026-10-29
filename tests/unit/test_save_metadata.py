@@ -44,8 +44,8 @@ def test_existing_nonmetadata_body_is_untouched_on_title_looking_change():
 
 
 def test_chicago_calendar_date_not_utc():
-    assert wiki_date(datetime(2026, 10, 30, 1, tzinfo=timezone.utc)) == '2026-10-29'
-    assert wiki_date(datetime(2026, 12, 1, 5, tzinfo=timezone.utc)) == '2026-11-30'
+    assert wiki_date(datetime(2026, 10, 30, 1, tzinfo=timezone.utc), zone="America/Chicago") == '2026-10-29'
+    assert wiki_date(datetime(2026, 12, 1, 5, tzinfo=timezone.utc), zone="America/Chicago") == '2026-11-30'
 
 
 def test_block_aliases_keep_comments_and_other_fields():

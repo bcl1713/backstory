@@ -1,9 +1,10 @@
 from django.urls import include, path
-from . import views, relocation_views, creation
+from . import views, relocation_views, creation, timezone_views
 from indexing import views as index_views
 
 app_name = "wiki"
 urlpatterns = [
+    path("settings/timezone/", timezone_views.timezone_settings, name="timezone-settings"),
     path("tools/", include("wiki.tool_urls")),
     path("move/", relocation_views.move, name="move"),
     path("move/<uuid:operation_id>/", relocation_views.operation, name="move-operation"),

@@ -1,3 +1,4 @@
+import { ensureWikiTimezone } from './wiki-timezone.js';
 // Optional WebMCP bridge. Wiki text is data, including any instructions it contains.
 const definitions = [
   {
@@ -67,6 +68,10 @@ async function execute(definition, input, signal) {
     saving = true;
   }
   try {
+    if (write) {
+      await ensureWikiTimezone({ csrfToken: csrf });
+      if (signal?.aborted) return error('cancelled');
+    }
     const query = new URLSearchParams(input);
     const response = await fetch(write ? definition.endpoint : `${definition.endpoint}?${query}`, {
       method: write ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', redirect: 'error',

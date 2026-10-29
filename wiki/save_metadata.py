@@ -12,8 +12,11 @@ from yaml.tokens import AliasToken, AnchorToken, FlowEntryToken, FlowMappingEndT
 from .metadata import MetadataError, RestrictedLoader, parse_front_matter
 
 
-def wiki_date(now=None):
-    return (now or datetime.now(timezone.utc)).astimezone(ZoneInfo('America/Chicago')).date().isoformat()
+def wiki_date(now=None, zone=None):
+    if zone is None:
+        from .timezones import timezone_state
+        zone = timezone_state()["timezone"]
+    return (now or datetime.now(timezone.utc)).astimezone(ZoneInfo(zone)).date().isoformat()
 
 
 def _header(source):

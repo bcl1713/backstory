@@ -81,8 +81,10 @@ compared before acceptance. The projection is never serialized into note source.
 ## Save-time note metadata
 
 Normal Backstory saves (manual, autosave and WebMCP) maintain note metadata in
-one server-side step before formatting. Calendar dates use **America/Chicago**
-(Omaha, including daylight saving), regardless of browser or server location.
+one server-side step before formatting. Calendar dates use the persisted **wiki timezone**, regardless of the browser's
+current travel timezone. An explicit `BACKSTORY_WIKI_TIMEZONE` deployment setting
+(overriding the saved zone) can keep an Omaha wiki on `America/Chicago`.
+See [Wiki timezone setup](setup.md#wiki-timezone).
 
 - Existing `modified` fields become a date-only `YYYY-MM-DD` value. Existing
   notes without that field or without front matter are not retrofitted.

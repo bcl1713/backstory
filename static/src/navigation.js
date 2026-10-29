@@ -1,3 +1,4 @@
+import { ensureWikiTimezone } from './wiki-timezone.js';
 import { mergeSources } from './source-merge.js';
 import { installNoteSync, readNoteSnapshot } from './note-sync.js';
 import { createIdleAutosave } from './idle-autosave.js';
@@ -293,6 +294,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     const headers = { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRFToken': csrf, ...(revision === null ? { 'If-None-Match': '*' } : { 'If-Match': revision }) };
     try {
       const endpoint = kind === 'restore' ? `/restore/${restorationId}/` : `/${formatting ? 'format' : 'save'}/${encode(requestedPath)}`;
+      if (!formatting && !sourceRecovery && kind !== 'restore') await ensureWikiTimezone({ csrfToken: csrf });
       const response = await fetch(endpoint, {
         method: 'POST', credentials: 'same-origin', cache: 'no-store', headers,
         body: JSON.stringify({ source: submitted, mode: sourceRecovery ? 'source_recovery' : 'formatted', ...(sourceRecovery ? { recovery_token: recovery.token } : {}) }),

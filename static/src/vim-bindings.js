@@ -1,5 +1,11 @@
 import { Compartment, Transaction } from '@codemirror/state';
-import { vim, getCM } from '@replit/codemirror-vim';
+import { vim, getCM, Vim } from '@replit/codemirror-vim';
+
+const callbacks = new WeakMap();
+Vim.defineAction('backstoryFollowLink', cm => callbacks.get(cm)?.follow());
+Vim.defineAction('backstoryGoHome', cm => callbacks.get(cm)?.home());
+Vim.mapCommand('gf', 'action', 'backstoryFollowLink', {}, { context: 'normal' });
+Vim.mapCommand('gh', 'action', 'backstoryGoHome', {}, { context: 'normal' });
 
 const browserKeys = new Set(['l', 'f', 't', 'w', 'n', 'p']);
 function keepBrowserShortcut(event) {
@@ -10,7 +16,7 @@ function keepBrowserShortcut(event) {
 }
 
 // Bindings have their own lifetime, independent of preview decorations/history.
-export function createVimBindings(onModeChange) {
+export function createVimBindings(onModeChange, actions = {}) {
   const compartment = new Compartment();
   let adapter = null;
   let removeGuards = () => {};
@@ -22,6 +28,7 @@ export function createVimBindings(onModeChange) {
     setEnabled(view, enabled) {
       if (Boolean(adapter) === enabled) return;
       adapter?.off('vim-mode-change', changed);
+      if (adapter) callbacks.delete(adapter);
       removeGuards();
       view.dispatch({
         effects: compartment.reconfigure(enabled ? vim() : []),
@@ -30,11 +37,12 @@ export function createVimBindings(onModeChange) {
       adapter = enabled ? getCM(view) : null;
       adapter?.on('vim-mode-change', changed);
       if (adapter) {
+        callbacks.set(adapter, { follow: actions.follow || (() => {}), home: actions.home || (() => {}) });
         view.dom.addEventListener('keydown', keepBrowserShortcut, true);
         removeGuards = () => view.dom.removeEventListener('keydown', keepBrowserShortcut, true);
       }
       onModeChange(adapter ? 'normal' : 'off');
     },
-    destroy() { adapter?.off('vim-mode-change', changed); removeGuards(); },
+    destroy() { adapter?.off('vim-mode-change', changed); if (adapter) callbacks.delete(adapter); removeGuards(); },
   };
 }

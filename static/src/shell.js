@@ -1,7 +1,12 @@
 import { mountFileTree } from './file-tree.js';
 import { mountThemes } from './themes.js';
+import { ensureWikiTimezone } from './wiki-timezone.js';
 
 mountThemes();
+// Keep the explicit settings form's displayed compare-and-set value stable.
+if (!document.querySelector('[data-wiki-timezone-settings]')) {
+  void ensureWikiTimezone({ csrfToken: document.querySelector('[name=csrfmiddlewaretoken]')?.value });
+}
 
 const zenToggle = document.querySelector('[data-zen-toggle]');
 if (zenToggle) {

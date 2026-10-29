@@ -9,7 +9,7 @@ save_note, under existing revision and write locks. Exact recovery bypasses it.
 **Spec:** docs/superpowers/specs/2026-10-29-save-metadata-design.md
 
 ## Global Constraints
-America/Chicago dates, YYYY-MM-DD; no changes to Jarvis or task history schema.
+Configured wiki timezone dates, YYYY-MM-DD; no changes to Jarvis or task history schema.
 ## Review Focus
 - YAML aliases/anchors must not accidentally rewrite another field.
 - Existing custom metadata and comments must survive.

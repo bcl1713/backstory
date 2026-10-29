@@ -33,10 +33,11 @@ presentation. Edits made while the enhanced editor loads are retained. All
 presentations share the same draft, and switching never saves or formats it.
 
 **Vim bindings** under **Menu** enables optional modal editing for
-this page. **Ctrl/⌘ Shift Space** toggles them while the enhanced editor is focused.
+the current editor. **Ctrl/⌘ Shift Space** toggles them while the enhanced editor is focused.
 The Menu control remains available on touch devices or when the browser/OS captures
 the shortcut (for example, ChromeOS uses Ctrl+Shift+Space to switch input languages).
-Ctrl/⌘ Space without Shift still requests link completion. It starts **off** after each page load. The persistent status reports
+Ctrl/⌘ Space without Shift still requests link completion. Desktop startup defaults
+to **Normal**, phones to **Off**; an explicit choice is remembered in this browser. The persistent status reports
 Normal, Insert, Visual or Visual line; the same button disables bindings at any
 time, including on mobile. Live preview and Raw source keep the current mode,
 selection and undo history. Plain text fallback suspends bindings and stays an
@@ -52,6 +53,7 @@ Supported starting mappings:
 | `v` / `V` | Start character / line Visual selection |
 | `d` in Visual | Delete selected source |
 | `u` / `Ctrl+R` in Normal | Undo / redo using the shared editor history |
+| `gf` / `gh` in Normal | Follow the link at the caret / go home |
 | `Tab` / `Shift+Tab` | Leave the editor for ordinary page controls |
 
 Escape first dismisses an open formatting proposal, then an open Menu; another
@@ -65,7 +67,7 @@ Use Menu and Tab/Enter for the existing file tree, Search, Today and recent note
 
 The integration uses [`@replit/codemirror-vim` 6.4.0](https://github.com/replit/codemirror-vim)
 under the MIT license, shipped at `/static/licenses/codemirror-vim.txt`. This is
-an initial Vim editing slice, with no promise of Neovim parity or custom mappings.
+a bounded Vim integration, with no promise of full Neovim parity or user-defined mappings.
 Vim `:w` is not connected to Backstory saves; use Backstory's Save button or
 shortcut. This integration does not promise full Neovim command parity.
 
@@ -210,3 +212,20 @@ The default palette comes from
 [JetBrains Mono v2.304](https://github.com/JetBrains/JetBrainsMono/tree/v2.304)
 is included under the [SIL Open Font License](../assets/fonts/OFL.txt); builds
 copy the font and its license into local static assets. No font service is used.
+
+### Keyboard-first startup and navigation
+
+Desktop layouts with a fine pointer start with the editor focused in Vim Normal
+mode. Phones start with Vim off and do not open the keyboard automatically.
+A manual Vim toggle is remembered only in this browser, overriding the default;
+blocked browser storage does not prevent changing the mode for the current page.
+Startup never takes focus from a control already being used, and heading links
+retain their caret/scroll destination.
+
+In Vim Normal mode, press `g` then `f` to follow the wiki or Markdown link under
+the text caret, or `g` then `h` to return to the home page. These are sequences,
+not simultaneous chords. Navigation retains ordinary unsaved-draft protection
+and missing-note handling; it does not save or create a note automatically.
+Code, images, and plain text are not link targets. Menu navigation remains
+available. The decorative active-editor left stripe is removed; caret and other
+control focus indicators remain.

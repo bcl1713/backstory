@@ -1,6 +1,7 @@
 # Save metadata
 
-Approved October 29: wiki dates always use Omaha (`America/Chicago`), date only.
+Approved October 29: wiki dates are date-only in a persistent configurable wiki timezone.
+Brian pins his wiki to Omaha (`America/Chicago`); this is not a product-wide default.
 Central server-side save preparation covers manual saves, autosave, and WebMCP.
 Existing top-level `modified` is updated; older notes without that field are not
 retrofitted. First saves of new notes add missing `created` and `modified`; a
@@ -17,3 +18,10 @@ source/hash including metadata changes. Same-day repeated saves become no-ops.
 
 Client-side stamping was rejected because tools and browser saves could differ;
 rewriting the formatter was rejected because metadata is a save concern.
+
+## Authorized timezone refinement
+
+Persist wiki timezone from first authorized owner browser when unset; allow owner
+override, environment precedence, UTC headless fallback. Never follow travel.
+Brian deployment must explicitly set America/Chicago. Ordinary editor accounts
+remain read-only for global settings. See docs/setup.md.
