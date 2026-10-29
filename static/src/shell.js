@@ -61,7 +61,7 @@ if (pathElement) {
   const folderHref = path => '/?' + new URLSearchParams({ folder: path });
   const link = (text, href) => { const a = document.createElement('a'); a.textContent = text; a.href = href; return a; };
   const breadcrumb = document.querySelector('[data-breadcrumb]');
-  breadcrumb.append(link('Wiki', '/'));
+  breadcrumb.append(link('Wiki', folderHref('')));
   const parts = (path || folder).split('/').filter(Boolean);
   parts.forEach((part, index) => {
     breadcrumb.append(document.createTextNode(' / '));

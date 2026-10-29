@@ -32,6 +32,17 @@ def shell(request):
     if readiness.state == "ready":
         try:
             folder = authorize_content(request, request.GET.get("folder", ""), "folder", query_parameter="folder")
+            if "folder" not in request.GET and "cursor" not in request.GET:
+                # Only absence falls back: denied, invalid and unavailable notes
+                # retain the same diagnostics as explicit note navigation.
+                authorize_content(request, "index.md")
+                try:
+                    snapshot = read_note("index.md")
+                except StorageError as error:
+                    if error.reason_code != "not_found":
+                        raise
+                else:
+                    return note_response(request, snapshot)
             page = list_folder(folder, request.GET.get("cursor"))
             context["folder"] = folder
             context["entries"] = [
@@ -79,15 +90,19 @@ def new_note(request):
         return diagnostic(request, error)
 
 
+def note_response(request, snapshot):
+    response = render(request, "wiki/note.html", {"note": snapshot})
+    response["ETag"] = snapshot.revision
+    return response
+
+
 @login_required
 @require_GET
 def note(request, path):
     try:
         authorize_content(request, path)
         snapshot = read_note(path)
-        response = render(request, "wiki/note.html", {"note": snapshot})
-        response["ETag"] = snapshot.revision
-        return response
+        return note_response(request, snapshot)
     except StorageError as error:
         return diagnostic(request, error)
 
