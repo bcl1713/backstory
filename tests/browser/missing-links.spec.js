@@ -1,3 +1,4 @@
+import { expectCreatedMetadata } from './support/metadata.js';
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -196,7 +197,7 @@ test('linked creation preserves literal whitespace in the offered filename', asy
   await editor(page).evaluate(el => el.markdownEditor.setSource('# Literal filename\n'));
   await page.getByRole('button', { name: 'Create note', exact: true }).click();
   await expect(page).toHaveURL(/\/notes\/%20Leading%20space.md$/);
-  expect(await readFile(`${runtime}/wiki/ Leading space.md`, 'utf8')).toBe('# Literal filename\n');
+  expectCreatedMetadata(await readFile(`${runtime}/wiki/ Leading space.md`, 'utf8'), '# Literal filename\n', 'literal-filename');
   await expect(readFile(`${runtime}/wiki/Leading space.md`)).rejects.toThrow();
   await page.goto('/notes/CreateSource.md');
   await expect(page.getByRole('link', { name: 'Literal label', exact: true })).toHaveAttribute('href', '/notes/%20Leading%20space.md');
