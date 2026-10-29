@@ -23,7 +23,10 @@ test('autosave accepts authoritative metadata without another dirty save', async
       const source = el.markdownEditor.getSource().replace('title: Old title', 'title: New title');
       el.markdownEditor.setSource(source);
     });
+    const response = page.waitForResponse(r => r.url().includes('/save/Metadata.md'), { timeout: 20000 });
     await page.clock.runFor(5000);
+    const savedResponse = await response;
+    expect(savedResponse.status(), JSON.stringify(await savedResponse.json())).toBe(200);
     await expect(page.locator('[data-editor-status]')).toContainText('Saved');
     const saved = await readFile(target, 'utf8');
     expect(saved).toContain('id: stable');
