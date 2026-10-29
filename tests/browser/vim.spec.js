@@ -58,6 +58,7 @@ test('standard editing is default; opting in and disabling preserve source and s
   const writes = [];
   page.on('request', req => { if (req.method() === 'POST' && /\/(save|format)\//.test(req.url())) writes.push(req.url()); });
   await open(page);
+  await revealChrome(page);
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
   await expect(mode(page)).toHaveText('Vim · Off');
   await host(page).evaluate(el => el.markdownEditor.view.dispatch({ selection: { anchor: 14, head: 19 } }));
@@ -215,6 +216,7 @@ test('Tab exits every Vim mode and the off switch is keyboard reachable', async 
     await page.keyboard.press('Control+Shift+Period');
     await content(page).focus();
   }
+  await revealChrome(page);
   await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
   expect(await read(page)).toBe(source);
 });
