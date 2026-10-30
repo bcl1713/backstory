@@ -8,6 +8,7 @@ import uuid
 
 from django.conf import settings
 from django.db import connection, transaction, OperationalError
+from django.db.models import F
 
 from wiki.contracts import StorageError
 from wiki.metadata import project_note
@@ -69,6 +70,8 @@ def _commit_projection(snapshot, info, generations, token):
     if read_note(snapshot.path).revision != snapshot.revision or file_stat(snapshot.path) != info:
         raise StorageError('index_revision_changed', 503)
     with transaction.atomic():
+        # Reserve SQLite write intent before update_or_create reads a snapshot.
+        ScanState.objects.filter(pk=1).update(errors=F('errors'))
         for generation in generations:
             note, _ = IndexedNote.objects.update_or_create(generation=generation, path=snapshot.path, defaults={
                 'revision': snapshot.revision, 'stat': info, 'title': projection.title,
@@ -158,6 +161,8 @@ def _finish(state, generation, now):
     require_ready()
     # Prioritized writes are replayed into both generations before publication.
     with transaction.atomic():
+        # Keep the pending-work check and publication in one serialized write.
+        ScanState.objects.filter(pk=1).update(errors=F('errors'))
         if IndexJob.objects.exists() or ScanState.objects.filter(pk=1, reconcile_needed=True).exists():
             return False
         stale = IndexedNote.objects.filter(generation=generation).exclude(seen=state.checkpoint['token'])
