@@ -211,6 +211,17 @@ LOGGING = {
     'loggers': {name: {'handlers': ['safe'], 'filters': ['redact'], 'propagate': False, 'level': 'WARNING'} for name in ['django', 'django.request', 'django.security', 'django.security.DisallowedHost', 'django.security.csrf', 'axes', 'gunicorn.error', 'gunicorn.access']},
 }
 
+# A separate allowlisted schema retains index diagnostics without relaxing the
+# blanket request/security redaction above. Raw messages are still discarded.
+LOGGING['filters']['index_diagnostic'] = {'()': 'indexing.diagnostics.RedactIndexDiagnostic'}
+LOGGING['handlers']['index_diagnostic'] = {
+    'class': 'logging.StreamHandler', 'filters': ['index_diagnostic'],
+}
+LOGGING['loggers']['backstory.index'] = {
+    'handlers': ['index_diagnostic'], 'filters': ['index_diagnostic'],
+    'propagate': False, 'level': 'WARNING',
+}
+
 BACKSTORY_REVISION_RETENTION_DAYS = 30
 
 # Explicit operator override wins over the saved wiki setting.

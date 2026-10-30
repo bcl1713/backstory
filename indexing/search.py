@@ -18,6 +18,7 @@ from wiki.storage import require_ready
 from wiki.links import _regular
 from .models import IndexGeneration, IndexedName
 from .worker import index_status
+from .diagnostics import record_failure
 
 SQLITE_VM_STEPS = 200000
 SQLITE_SECONDS = .1
@@ -30,6 +31,7 @@ class Freshness:
     last_completed: float
     next_scheduled: float
     limited: bool = False
+    reason_code: str = ""
 
 
 @dataclass(frozen=True)
@@ -49,20 +51,27 @@ class SearchPage:
     examined: int = 0
 
 
+@dataclass
+class QueryBudget:
+    triggered: bool = False
+
+
 @contextmanager
 def sqlite_budget():
     connection.ensure_connection()
     database = connection.connection
     deadline = time.monotonic() + SQLITE_SECONDS
     steps = 0
+    budget = QueryBudget()
     granularity = min(1000, max(1, SQLITE_VM_STEPS))
     def interrupt():
         nonlocal steps
         steps += granularity
-        return int(steps >= SQLITE_VM_STEPS or time.monotonic() >= deadline)
+        budget.triggered = steps >= SQLITE_VM_STEPS or time.monotonic() >= deadline
+        return int(budget.triggered)
     database.set_progress_handler(interrupt, granularity)
     try:
-        yield
+        yield budget
     finally:
         database.set_progress_handler(None, 0)
 
@@ -109,12 +118,14 @@ def search_notes(query: str, cursor: str | None = None, limit: int = 30):
             parameters += [query.strip().casefold()]
     parameters += [CANDIDATE_LIMIT]
     sql = 'SELECT n.path,substr(n.title,1,512),substr(n.body,1,240),n.revision,n.stat FROM indexing_indexednote n WHERE n.generation_id=%s AND n.path>%s' + match + ' ORDER BY n.path LIMIT %s'
+    budget = QueryBudget()
     try:
-        with sqlite_budget(), connection.cursor() as db:
+        with sqlite_budget() as budget, connection.cursor() as db:
             db.execute(sql, parameters)
             candidates = db.fetchall()
-    except OperationalError:
-        return SearchPage((), None, replace(freshness, limited=True))
+    except OperationalError as error:
+        reason = record_failure("search", error, budget_triggered=budget.triggered)
+        return SearchPage((), None, replace(freshness, limited=True, reason_code=reason))
     items = []
     examined = 0
     last = after
@@ -162,11 +173,13 @@ def resolve_indexed_name(name, *, distinguish_missing=False):
     state = index_status()
     if state.state != 'ready' or state.generation is None:
         return 'unavailable', ()
+    budget = QueryBudget()
     try:
-        with sqlite_budget():
+        with sqlite_budget() as budget:
             candidates = list(IndexedName.objects.filter(name=name.casefold(), resolvable=True, note__generation_id=state.generation)
                               .values_list('note__path', 'note__stat').distinct().order_by('note__path')[:CANDIDATE_LIMIT + 1])
-    except OperationalError:
+    except OperationalError as error:
+        record_failure('resolve', error, budget_triggered=budget.triggered)
         return 'unavailable', ()
     if len(candidates) > CANDIDATE_LIMIT:
         return 'unavailable', ()

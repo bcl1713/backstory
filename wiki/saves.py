@@ -101,7 +101,9 @@ def enqueue_note(path, revision):
 def _saved(source, revision, diagnostics, diff, mode, *, uncertain=False, path):
     try:
         queued = enqueue_note(path, revision)
-    except Exception:
+    except Exception as error:
+        from indexing.diagnostics import record_failure
+        record_failure("enqueue", error)
         queued = False
     state = "saved_source" if mode == "source_recovery" else "saved"
     if not queued:
