@@ -1,14 +1,14 @@
 # Browser tools
 
-Backstory exposes `search_notes`, `read_note`, `list_notes`, and guarded
-`save_note` on signed-in wiki pages. Registration is optional and feature-detects
+Backstory exposes `search_notes`, `read_note`, `read_notes`, `list_notes`,
+`wiki_status`, `create_folder`, and guarded `save_note` on signed-in wiki pages. Registration is optional and feature-detects
 `document.modelContext.registerTool`. Unsupported browsers and registration
 failures leave normal browsing, editing, search and saves available. A host
 rejecting one tool does not prevent registration of the others.
 
 The adapter follows Chrome's [imperative API documentation](https://developer.chrome.com/docs/ai/webmcp/imperative-api)
 (reviewed 2026-10-26; page updated 2026-10-16). Read tools use
-`readOnlyHint: true`; the save tool uses
+`readOnlyHint: true`; mutation tools use
 `readOnlyHint: false` and `consequentialHint: true`. All tools use
 `untrustedContentHint: true`, without cross-origin exposure. Annotations inform
 the host; server authentication, CSRF, path policy and revision checks enforce
@@ -22,9 +22,9 @@ returned note source as HTML.
 
 All endpoints use existing server-side session and device authorization. No
 additional token, cookie extraction, external server, CORS permission or browser
-extension is required. Read endpoints accept GET only; the save endpoint accepts
-POST only. Responses
-are private `no-store` JSON. Saves also require the existing masked CSRF token
+extension is required. Single-read/list/search/status endpoints accept GET only. Multi-read, save and
+folder-creation endpoints accept POST only. Responses
+are private `no-store` JSON. All POST requests also require the existing masked CSRF token
 from the signed-in page. An expired, disabled or revoked session
 receives HTTP 401 with `authentication_required`. Sign in again through the UI.
 
@@ -33,6 +33,9 @@ receives HTTP 401 with `authentication_required`. Sign in again through the UI.
 | `search_notes` | `/tools/search/` | `query` (required), `limit` (default 30, 1–100), `cursor` |
 | `read_note` | `/tools/read/` | `path` (required root-relative Markdown path) |
 | `save_note` | `/tools/save/` | `path`, replacement `source`, strong `revision` from `read_note` (all required) |
+| `read_notes` | `/tools/read-many/` | `paths` (1–8 unique Markdown paths) |
+| `wiki_status` | `/tools/status/` | none |
+| `create_folder` | `/tools/create-folder/` | `path` (required root-relative folder path) |
 | `list_notes` | `/tools/list/` | `folder` (default root), `limit` (default 100, 1–100), `cursor` |
 
 Each read tool fetches only its fixed same-origin endpoint with same-origin
@@ -179,3 +182,58 @@ filesystem writer. Do not interpret an acknowledgement as a permanent guarantee.
 Browser adapter tests use a controlled host stub. Real assistant-host discovery
 and execution must be verified on the deployed build before claiming that host
 supports this capability.
+
+## Status observations
+
+`wiki_status` takes no arguments and reads `/tools/status/`. Storage, write
+recovery, search index and wiki timezone are observed independently. A failed
+component reports `component_unavailable`, while other observations remain
+available and the overall response is `partial`. Observation timestamps describe
+when each component was read, not a transactionally consistent global snapshot.
+Index output includes its ready/stale/partial/backoff/unavailable state, pending
+jobs, completion time, safe failure code and backoff deadline. Recovery exposes
+only whether writes are paused, not another account's notes or recovery plans.
+
+The contract version and bounded-tool capabilities are separate from deployment
+identity. Application version/build are explicitly `unknown` until trustworthy
+runtime metadata is available; repository HEAD is not deployment evidence.
+Storage readiness is an observation, not a guarantee that a future write will
+succeed. This tool does not initialize timezone, schedule/rebuild an index, create
+probe files, expose environment variables, or grant additional access.
+
+## Multiple authoritative reads
+
+`read_notes` posts `{ "paths": ["one.md", "folder/two.md"] }` to
+`/tools/read-many/` with the session's CSRF token. Its annotation remains read-only:
+POST carries a bounded explicit request, not a mutation. Supply 1–8 unique exact
+root-relative Markdown paths; duplicate paths and malformed top-level arguments
+are rejected before reading. This is not recursive export or a multi-file atomic
+snapshot. Each successful item includes its complete source, strong raw-byte
+revision, BOM/newline metadata, observation time and canonical link.
+
+Per-item outcomes are `ok`, `missing`, `denied`, `oversized`, or `unreadable`.
+The aggregate source budget is 4 MiB, with the existing per-note byte limit.
+A two-second elapsed-time budget is checked **between** reads; it cannot interrupt
+a filesystem operation already in progress. When either aggregate budget is
+reached, remaining items are `unprocessed` with `byte_budget` or `time_budget`,
+never missing and never silently truncated. A response is `complete` only when
+all items succeed; otherwise it is `partial`, preserving successful items.
+Cancellation, session expiry and transport loss are request errors, not evidence
+that any unreturned note is missing. Re-read deliberate subsets as needed; this
+tool neither retries nor queues reads, and it never depends on index freshness.
+
+## Await every save
+
+Await each `save_note` result before invoking the next, even for a different
+path. The document-scoped guard also serializes folder creation. An overlapping
+call returns `save_in_progress`, `request_started: false`, and `queued: false`:
+it made no save request, backup or mutation and will not run later automatically.
+Wait for the active operation, read the intended note again to obtain its current
+revision, then deliberately submit a new guarded request if still appropriate.
+This browser-document guard is not a cross-tab, cross-agent or filesystem lock;
+server revision checks and cooperative filesystem locking still apply.
+
+Do not confuse a not-started rejection with `uncertain` after a request may have
+reached the server. Cancellation, transport loss and malformed acknowledgements
+can occur after publication. Read before deciding what to do; never blindly
+retry a write or interpret a client error as proof that nothing changed.
