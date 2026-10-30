@@ -21,6 +21,7 @@ from urllib.parse import quote, urlsplit
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import F
 from django.urls import reverse
 from django.utils import timezone
 
@@ -386,7 +387,11 @@ def _start(operation):
     if fresh != operation.plan:
         raise StorageError('move_preview_stale', 409)
     plan = operation.plan
-    with transaction.atomic(), application_lock('revision-quota'):
+    with application_lock('revision-quota'), transaction.atomic():
+        # Session/index writers do not share the filesystem locks. Reserve the
+        # SQLite writer before quota/history reads, avoiding a stale read
+        # snapshot upgrade if another connection commits between SELECT/INSERT.
+        MoveOperation.objects.filter(pk=operation.pk).update(state=F('state'))
         # Budget both the required backups and longer associations for existing
         # history/drafts. Backups include their actual hash precondition charge.
         charge = sum(_record_charge(max([item['path'], item['destination']], key=lambda path: len(path.encode())),
@@ -445,6 +450,9 @@ def _relocate(operation):
     # History path updates and completion are one DB transaction. No duplication
     # on retry, and available draft bytes/ownership are unchanged.
     with transaction.atomic():
+        # This final history transaction also reads before writing. Filesystem
+        # publication is already complete; do not retry/replay it on contention.
+        MoveOperation.objects.filter(pk=operation.pk).update(state=F('state'))
         _history_collision(plan['mapping'])
         for model in [SavedRevision, RecoveryDraft, FormatRecovery]:
             for old, new in plan['mapping'].items():

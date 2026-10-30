@@ -111,3 +111,26 @@ failure is reported separately from filesystem success; use **Refresh index**
 or **Rebuild index** after resolving the index problem. A lost response is not
 permission to start a second move: reopen the operation URL and inspect its
 recorded state first.
+
+### Concurrent database writers
+
+Relocation's backup/quota transaction and final history-association transaction
+reserve SQLite write intent before reading dependent rows. Session renewal and
+background index connections do not share wiki filesystem locks; a deferred
+read-to-write upgrade could otherwise fail immediately with `SQLITE_BUSY_SNAPSHOT`
+after another writer commits. Both reservations are short database-only sections:
+reviewed source revalidation remains before backup preparation, and actual rename,
+byte publication and filesystem sync remain outside the database transactions.
+
+This does not eliminate every possible busy/database failure. Existing bounded
+SQLite waits, explicit uncertain outcomes and journal-based recovery remain; the
+application does not blindly retry a filesystem move. If the start transaction
+cannot acquire its writer, the persisted preview and source bytes remain unchanged.
+Inspect the operation before an explicit retry. Final-transaction failure still
+uses the existing durable recovery journal rather than repeating backups or
+unconditionally replaying file writes.
+
+Disposable two-connection regressions cover a real competing session-table update
+at each transaction's first history read, successful byte/journal convergence and
+idempotent subsequent calls. They establish the race and the narrow fix, not the
+unretained exception behind any specific historical CI or production request.
