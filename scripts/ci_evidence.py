@@ -67,7 +67,10 @@ def validate_bundle(*, repo, release, branch, parents, tree, tested_parents,
             run['head_repository']['full_name'] == repo and
             run['head_repository']['fork'] is False, 'different run repository')
     require(run['head_sha'] == parents[1], 'run head differs')
-    require([p['number'] for p in run['pull_requests']] == [pr['number']], 'ambiguous run PR')
+    # GitHub clears this advisory array after merge. Authoritative PR association
+    # and exact base/head/tested parents above remain mandatory. A conflicting
+    # nonempty array is still rejected, never silently ignored.
+    require([p['number'] for p in run['pull_requests']] in ([], [pr['number']]), 'ambiguous run PR')
     age = (now - timestamp(run['created_at'])).total_seconds()
     require(0 <= age <= MAX_AGE_SECONDS, 'evidence is stale or future-dated')
     require(timestamp(run['created_at']) <= timestamp(run['updated_at']) <= now,
