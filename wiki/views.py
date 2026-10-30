@@ -334,3 +334,22 @@ def navigation(request):
         return JsonResponse(note_navigation(request.GET.get('date'), request.GET.get('timezone')))
     except StorageError as error:
         return JsonResponse({'reason_code': error.reason_code}, status=error.status)
+
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def new_folder(request):
+    from .folders import create_folder
+    try:
+        if request.method == 'POST':
+            path = authorize_content(request, request.POST.get('path'), 'folder')
+            result = create_folder(path, request.user)
+            return render(request, 'wiki/new_folder.html', {'result': result, 'path': path},
+                          status=201 if result['state'] == 'created' else 409 if result['state'] == 'uncertain' else 200)
+        folder = authorize_content(request, request.GET.get('folder', ''), 'folder', query_parameter='folder')
+        require_ready()
+        with open_directory(folder):
+            pass
+        return render(request, 'wiki/new_folder.html', {'path': folder + '/' if folder else ''})
+    except StorageError as error:
+        return diagnostic(request, error)

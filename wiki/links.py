@@ -161,6 +161,10 @@ class LinkEdge:
     position: tuple[int, int]
 
 
+class LinkStructureLimit(ValueError):
+    """Stable typed signal; callers must not expose arbitrary parser messages."""
+
+
 def extract_links(source: str) -> list[LinkEdge]:
     """Syntax tokens only; code is deliberately absent from the edge stream.
 
@@ -179,7 +183,7 @@ def extract_links(source: str) -> list[LinkEdge]:
         for token in items:
             count += 1
             if count > 100000:
-                raise ValueError('link_structure_limit')
+                raise LinkStructureLimit('link_structure_limit')
             current = token.map[0] + 1 if token.map else line
             target = None
             if token.type == 'wiki_link':

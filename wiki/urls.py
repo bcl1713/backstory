@@ -4,6 +4,7 @@ from indexing import views as index_views
 
 app_name = "wiki"
 urlpatterns = [
+    path("new-folder/", views.new_folder, name="new-folder"),
     path("settings/timezone/", timezone_views.timezone_settings, name="timezone-settings"),
     path("tools/", include("wiki.tool_urls")),
     path("move/", relocation_views.move, name="move"),
