@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import { mkdir, copyFile } from 'node:fs/promises';
 await build({
-  entryPoints: ['static/src/app.css', 'static/src/editor.js', 'static/src/shell.js', 'static/src/connectivity.js', 'static/src/wiki-tools.js'],
+  entryPoints: ['static/src/app.css', 'static/src/editor.js', 'static/src/editor-startup.js', 'static/src/shell.js', 'static/src/connectivity.js', 'static/src/wiki-tools.js'],
   outdir: 'static',
   bundle: true,
   loader: { '.woff2': 'file' },
