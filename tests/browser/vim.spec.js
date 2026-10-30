@@ -328,9 +328,17 @@ test('editor-only Vim shortcut toggles without changing source and ignores repea
 });
 
 test('Escape returns focus to editor when proposal survives closing Menu', async ({ page }) => {
-  await open(page);
+  // The preceding fallback test may still have a server-side autosave in flight.
+  // Give this draft-only focus test its own fixture, not the shared Vim.md.
+  const path = 'Vim-escape-proposal.md';
+  await writeFile(`${runtime}/wiki/${path}`, source);
+  await open(page, path);
   await revealChrome(page);
-  await page.getByRole('button', { name: 'Format', exact: true }).click();
+  const [formatted] = await Promise.all([
+    page.waitForResponse(response => response.url().endsWith(`/format/${path}`) && response.request().method() === 'POST'),
+    page.getByRole('button', { name: 'Format', exact: true }).click(),
+  ]);
+  expect(formatted.status()).toBe(200);
   await expect(page.locator('[data-format-proposal]')).toBeVisible();
   await page.keyboard.press('Control+Shift+Period');
   await page.getByRole('button', { name: 'Dismiss proposed formatting' }).focus();
