@@ -1,0 +1,39 @@
+name: Firefox keyboard regression
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: firefox-keyboard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  firefox-keyboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: npm run build
+      - name: Use upstream Ubuntu archive for browser dependencies
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+          fi
+      - run: npx playwright install --with-deps firefox
+      - run: npm run test:browser -- --config=playwright.firefox.config.js
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: firefox-keyboard-failure
+          path: /tmp/backstory-release-one/reports/browser-artifacts
+          retention-days: 7
