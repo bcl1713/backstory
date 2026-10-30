@@ -18,6 +18,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   writeFileSync(`${runtime}/wiki/.backstory-marker`, identity);
   writeFileSync(`${runtime}/wiki/Slice.md`, bytes);
   writeFileSync(`${runtime}/wiki/Other.md`, '# Other\n\n## Details\n\nLocal target.\n');
+  writeFileSync(`${runtime}/wiki/TableKeyboard.md`, 'Before\n\n| Name | Value |\n| --- | --- |\n| unchanged | 7 |\n\nAfter');
   const env = { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings', BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`, BACKSTORY_IDENTITY_PATH: '.backstory-marker', BACKSTORY_COOKIE_MODE: 'localhost', BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' };
   const python = fileURLToPath(new URL('../../../.venv/bin/python', import.meta.url));
   for (const args of [['manage.py', 'migrate', '--noinput'], ['manage.py', 'collectstatic', '--noinput'], ['-c', 'import django; django.setup(); from django.contrib.auth import get_user_model; u, created = get_user_model().objects.get_or_create(username="slice"); (u.set_password("synthetic-slice-browser-only"), u.save()) if created else None']]) {
