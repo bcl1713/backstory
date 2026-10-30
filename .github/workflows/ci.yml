@@ -91,7 +91,9 @@ jobs:
         if: always()
         with:
           name: table-preview-${{ matrix.shard }}
-          path: /tmp/backstory-release-one/reports/table-preview-*.png
+          path: |
+            /tmp/backstory-release-one/reports/table-preview-*.png
+            /tmp/backstory-release-one/reports/editor-startup-*.png
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@v4
