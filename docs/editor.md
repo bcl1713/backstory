@@ -242,3 +242,26 @@ Emphasis, code and link labels render safely. Table links are display-only:
 enter source to edit them; the existing `gf` and completion exclusion for tables
 is unchanged. Images and HTML remain literal text, never loaded or executed.
 Wide unbroken cell text wraps rather than widening the document.
+
+### Open an existing note
+
+Press **Ctrl+Alt+O** (Control+Option+O on macOS), or choose **Menu → Open note**.
+Search a path, title or alias, then use the arrow keys and Enter to open a result.
+Tab also visits ordinary result links. Escape or Cancel returns focus to where
+you started, without changing the draft or Vim mode. Unsaved-draft protection
+still applies when opening a note. The chooser does not save or create files.
+
+Results use the existing note index, with at most 20 matches. Incomplete or stale
+index results are identified; refine the query or use the file tree if needed.
+A failed lookup is not a statement that the wiki has no matching files.
+Custom browser extensions or OS shortcuts may intercept Ctrl+Alt+O; the Menu
+entry remains available, including on phones. Browser bookmark shortcuts are
+not replaced, and the always-visible Zen toolbar remains Menu and Save.
+
+This deliberately completes a narrow keyboard-discovery increment. Wikilink
+completion already supports existing paths, titles and aliases; heading, tag,
+and frontmatter completion are deferred until a concrete editing workflow needs
+them. Wider Vim mappings are likewise not a promise of Neovim parity: `gf` and
+`gh` provide note navigation, while `:w` remains unconnected to Backstory saves.
+Use Save or the documented save shortcut rather than assuming a Vim command
+has persisted your draft.

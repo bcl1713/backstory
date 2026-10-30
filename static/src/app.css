@@ -187,3 +187,10 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
   [data-editor-state="loading"] > [data-editor-loading] { display: block; position: absolute; inset: 0 0 auto; }
   [data-editor-state="loading"] > [data-source-fallback]:target { display: block !important; visibility: visible; padding-top: 3rem; }
 }
+
+/* Transient note chooser: no permanent Zen-mode toolbar additions. */
+[data-quick-open] { color: var(--foreground); background: var(--background); width: min(42rem, 90vw); max-height: 80dvh; padding: 1.25rem; overflow: auto; }
+[data-quick-open]::backdrop { background: #0009; }
+[data-quick-open] input { width: 100%; box-sizing: border-box; }
+[data-quick-open-results] { padding-left: 1.25rem; }
+[data-quick-open-results] a { display: block; padding: .35rem; overflow-wrap: anywhere; }
