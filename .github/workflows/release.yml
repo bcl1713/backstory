@@ -12,9 +12,60 @@ permissions:
   contents: read
 
 jobs:
+  # Read-only probe: any failure or unverifiable evidence selects the full suite.
+  evidence:
+    continue-on-error: true
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      reuse: ${{ steps.decision.outputs.reuse }}
+      run_id: ${{ steps.decision.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: npm run build
+      - name: Probe application environments
+        run: |
+          python3 scripts/ci_evidence.py probe --profile formatter --output "$RUNNER_TEMP/ci-probe.json"
+          python3 scripts/ci_evidence.py probe --profile python --output "$RUNNER_TEMP/ci-probe.json"
+      - name: Use the upstream Ubuntu archive for browser dependencies
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+          fi
+      - run: npx playwright install --with-deps --only-shell chromium
+      - run: python3 scripts/ci_evidence.py probe --profile browser --output "$RUNNER_TEMP/ci-probe.json"
+      - name: Verify prior successful PR evidence
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_PROBE_FILE: ${{ runner.temp }}/ci-probe.json
+        run: python3 scripts/ci_evidence.py decide
+
   correctness:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
+    needs: evidence
+    if: ${{ always() && !cancelled() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
     uses: ./.github/workflows/ci.yml
+    with:
+      reuse_application: ${{ needs.evidence.result == 'success' && needs.evidence.outputs.reuse == 'true' }}
+      evidence_run_id: ${{ needs.evidence.outputs.run_id }}
 
   publish:
     needs: correctness
