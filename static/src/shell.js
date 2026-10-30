@@ -1,7 +1,9 @@
+import { mountQuickOpen } from './quick-open.js';
 import { mountFileTree } from './file-tree.js';
 import { mountThemes } from './themes.js';
 import { ensureWikiTimezone } from './wiki-timezone.js';
 
+mountQuickOpen();
 mountThemes();
 // Keep the explicit settings form's displayed compare-and-set value stable.
 if (!document.querySelector('[data-wiki-timezone-settings]')) {
