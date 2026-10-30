@@ -182,3 +182,19 @@ def list_notes(request):
         entries.append({**asdict(entry), 'href': href})
     return _json({'state': 'ok', 'path': page.path, 'entries': entries,
                   'next_cursor': page.next_cursor, 'authoritative': True})
+
+
+@_tool(methods=('POST',))
+def create_folder(request):
+    from .folders import create_folder as create
+    if request.content_type != 'application/json':
+        raise StorageError('invalid_folder_request')
+    try:
+        body = json.loads(request.body)
+        if not isinstance(body, dict) or set(body) != {'path'}:
+            raise ValueError
+    except (ValueError, UnicodeError, RequestDataTooBig):
+        raise StorageError('invalid_folder_request') from None
+    path = authorize_content(request, body['path'], 'folder')
+    result = create(path, request.user)
+    return _json(result, 201 if result['state'] == 'created' else 409 if result['state'] == 'uncertain' else 200)
