@@ -274,3 +274,12 @@ mechanism, **not a claim that it caused the October 30 deployment incidents**.
 No note I/O, formatting or content replay occurs inside that short queue transaction;
 ordinary lock waits retain the configured database timeout and there is no new
 retry loop. Other database failures remain explicitly delayed/diagnosed.
+
+Worker projection commits and final generation publication likewise reserve write
+intent before their dependent database reads. Disposable two-connection WAL tests
+exercise both real worker operations against a concurrent writer. The reservation
+covers only the existing database transaction: note reads and metadata projection
+stay outside it. Pending work still prevents publication, and ordinary lock
+contention still follows the existing timeout and bounded worker backoff. A busy
+worker resets scan progress for a fresh pass while retaining previously indexed
+rows; zero progress counters do not indicate deleted notes or an empty index.
