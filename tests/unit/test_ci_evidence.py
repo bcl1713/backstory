@@ -74,7 +74,7 @@ def test_valid_original_run_is_reusable(bundle):
     lambda b: b['run'].update(head_sha='f' * 40),
     lambda b: b['run'].update(created_at='2026-10-29T18:59:00Z'),
     lambda b: b['run'].update(created_at='2026-10-31T00:00:00Z'),
-    lambda b: b['run'].update(pull_requests=[]),
+    lambda b: b['run'].update(pull_requests=[{'number': 99}]),
     lambda b: b['jobs'].pop(),
     lambda b: b['jobs'].append(copy.deepcopy(b['jobs'][0])),
     lambda b: b['jobs'][0].update(conclusion='skipped'),
@@ -300,3 +300,10 @@ def test_probe_failure_is_optional_but_correctness_is_not():
     jobs = yaml.safe_load((PATH.parents[1] / '.github/workflows/release.yml').read_text())['jobs']
     assert jobs['evidence']['continue-on-error'] is True
     assert jobs['correctness'].get('continue-on-error', False) is False
+
+
+def test_github_cleared_run_association_after_merge_is_supported(bundle):
+    # Observed on real successful PR57 run after merge: GitHub returns [].
+    # The separate merged PR API + exact commit parents still bind provenance.
+    bundle['run']['pull_requests'] = []
+    assert module().validate_bundle(**bundle) == 12
