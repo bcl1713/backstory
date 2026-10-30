@@ -137,6 +137,13 @@ def parse_front_matter(source):
 
 
 @dataclass(frozen=True)
+class ProjectionFailure:
+    """Safe categories only: never store exception text or source snippets."""
+    phase: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class NoteProjection:
     path: str
     revision: str
@@ -148,12 +155,13 @@ class NoteProjection:
     edges: tuple
     diagnostics: tuple
     body: str
+    projection_failure: ProjectionFailure | None = None
 
 
 def project_note(snapshot):
     """Disposable projection only: no serializer, constructors or save path."""
     from pathlib import PurePosixPath
-    from .links import extract_links
+    from .links import LinkStructureLimit, extract_links
     from .markdown import _parser, _plain_heading
     diagnostics = []
     tree = None
@@ -179,6 +187,8 @@ def project_note(snapshot):
         return tuple(value[2] for value in nodes if value and value[0] == 'scalar' and value[1] == _PREFIX + 'str')
 
     title = next(iter(strings('title')), '')
+    failure = None
+    phase = 'title'
     try:
         if not title:
             tokens = _parser().parse(body, {})
@@ -186,13 +196,18 @@ def project_note(snapshot):
                 if token.type == 'heading_open':
                     title = _plain_heading(tokens[index + 1].children or [])
                     break
+        phase = 'links'
         edges = tuple(extract_links(body))
         offset = snapshot.source.count('\n') - body.count('\n')
         from dataclasses import replace
         edges = tuple(replace(edge, position=(edge.position[0] + offset, edge.position[1])) for edge in edges)
-    except (ValueError, RecursionError):
+    except (ValueError, RecursionError) as error:
+        reason = ('link_structure_limit' if isinstance(error, LinkStructureLimit)
+                  else 'projection_recursion_limit' if isinstance(error, RecursionError)
+                  else 'projection_parse_failed')
+        failure = ProjectionFailure(phase, reason)
         edges = ()
         diagnostics.append(Diagnostic('projection_parse_failed', 'Body projection unavailable. Source remains available.'))
     return NoteProjection(snapshot.path, snapshot.revision, title or PurePosixPath(snapshot.path).stem,
                           strings('id') + strings('ids'), strings('aliases') + strings('alias'),
-                          strings('tags'), tree, edges, tuple(diagnostics), body)
+                          strings('tags'), tree, edges, tuple(diagnostics), body, failure)

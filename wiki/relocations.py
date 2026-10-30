@@ -167,7 +167,17 @@ def _resolver(paths, notes, blocked=(), projections=None):
     for path, snapshot in notes.items():
         projection = projections[path] if projections is not None else project_note(replace(snapshot, path=path))
         if any(item.code == 'projection_parse_failed' for item in projection.diagnostics):
-            raise StorageError('incomplete_link_inventory', 409)
+            # Paths came from the authorized fresh scan. Never attach source or
+            # exception text; one failure is enough to refuse this preview.
+            validate_path(path, 'content')
+            error = StorageError('incomplete_link_inventory', 409)
+            failure = projection.projection_failure
+            error.inventory_failure = {
+                'path': path,
+                'phase': failure.phase if failure else 'projection',
+                'reason': failure.reason if failure else 'projection_parse_failed',
+            }
+            raise error
         for name, resolvable in note_names(path, projection.title, projection.ids, projection.aliases):
             if resolvable:
                 names.setdefault(name, set()).add(path)
