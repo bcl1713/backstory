@@ -7,6 +7,7 @@ import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects 
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
+import { tablePreview } from './table-preview.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
 import { createLiveLinksExtension, wikiLinks, linkAtCaret } from './live-links.js';
 import { createVimBindings } from './vim-bindings.js';
@@ -38,7 +39,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
     follow: () => followLink(linkAtCaret(view), getPath(), { doc: view.state.doc, selection: view.state.selection, path: getPath() }),
     home: () => { followLink.cancel(); activateLink('/'); },
   });
-  const liveExtensions = () => [createLivePreviewExtension(), createLiveLinksExtension({ getPath })];
+  const liveExtensions = () => [tablePreview, createLivePreviewExtension(), createLiveLinksExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
   const uniformEndings = new Map(['\n', '\r\n', '\r'].map(value => [value, { separator: value }]));
   const endingsFrom = (text, preferred) => {

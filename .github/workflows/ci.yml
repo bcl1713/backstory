@@ -88,6 +88,13 @@ jobs:
       # Each runner owns its server, SQLite database and synthetic wiki.
       - run: npm run test:browser -- --shard=${{ matrix.shard }}/4
       - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: table-preview-${{ matrix.shard }}
+          path: /tmp/backstory-release-one/reports/table-preview-*.png
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: browser-failure-${{ matrix.shard }}
