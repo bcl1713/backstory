@@ -16,6 +16,7 @@ for (const vim of [false, true]) {
     await host(page).evaluate(el => {
       const view = el.markdownEditor.view;
       window.tableDebug = [];
+      view.contentDOM.addEventListener('keydown', event => window.tableDebug.push({kind:'keydown',key:event.key,prevented:event.defaultPrevented,ctrl:event.ctrlKey,alt:event.altKey,meta:event.metaKey,vim:!!view.cm?.state.vim,insert:view.cm?.state.vim?.insertMode,count:view.cm?.state.vim?.inputState.getRepeat(),head:view.state.selection.main.head}),true);
       const dispatch = view.dispatch.bind(view);
       view.dispatch = (...specs) => {
         dispatch(...specs);
@@ -57,6 +58,7 @@ for (const direction of ['down', 'up']) {
     await host(page).evaluate(el => {
       const view = el.markdownEditor.view;
       window.tableDebug = [];
+      view.contentDOM.addEventListener('keydown', event => window.tableDebug.push({kind:'keydown',key:event.key,prevented:event.defaultPrevented,ctrl:event.ctrlKey,alt:event.altKey,meta:event.metaKey,vim:!!view.cm?.state.vim,insert:view.cm?.state.vim?.insertMode,count:view.cm?.state.vim?.inputState.getRepeat(),head:view.state.selection.main.head}),true);
       const dispatch = view.dispatch.bind(view);
       view.dispatch = (...specs) => {
         dispatch(...specs);
