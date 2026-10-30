@@ -33,7 +33,7 @@ test('signed-in tools read current source through fixed endpoints and never exec
   await page.goto('/accounts/login/');
   expect(await page.evaluate(() => Object.keys(window.registeredWikiTools))).toEqual([]);
   await login(page);
-  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'list_notes', 'read_note', 'save_note', 'search_notes']);
+  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'list_notes', 'read_note', 'read_notes', 'save_note', 'search_notes', 'wiki_status']);
   const requests = [];
   page.on('request', request => { if (request.url().includes('/tools/')) requests.push(request); });
   const result = await page.evaluate(async () => {
@@ -171,7 +171,7 @@ test('edits during a tool save survive and concurrent editor operations are held
   await expect(page.locator('[data-save]')).toBeDisabled();
   await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.setSource('# Newer human draft\n'));
   const concurrent = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Concurrent\n' });
-  expect(concurrent.reason_code).toBe('save_in_progress');
+  expect(concurrent).toMatchObject({ reason_code: 'save_in_progress', request_started: false, queued: false });
   await held.continue();
   const saved = await page.evaluate(async () => JSON.parse(await window.pendingToolSave));
   expect(saved.state).toBe('saved');
@@ -242,7 +242,7 @@ test('a host synchronously rejecting the save tool still discovers usable read t
   await login(page);
   const result = await callTool(page, 'read_note', { path: 'Slice.md' });
   expect(result.authoritative).toBe(true);
-  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'list_notes', 'read_note', 'search_notes']);
+  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'list_notes', 'read_note', 'read_notes', 'search_notes', 'wiki_status']);
 });
 
 test('create_folder is consequential, exclusive and does not initialize timezone or edit notes', async ({ page }) => {
@@ -276,4 +276,21 @@ test('lost create_folder acknowledgement is uncertain without an automatic retry
   expect(posts).toBe(1);
   const listing = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.list_notes.execute({ folder: '' })));
   expect(listing.entries.some(entry => entry.path === 'Synthetic lost folder ack')).toBe(true);
+});
+
+test('status and multiple reads are read-only tools with explicit partial results', async ({ page }) => {
+  await writeFile(`${runtime}/wiki/Tool batch.md`, '# Batch\n');
+  await stubHost(page);
+  await login(page);
+  await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.read_notes))).toBe(true);
+  const result = await page.evaluate(async () => ({
+    annotation: window.registeredWikiTools.read_notes.annotations,
+    status: JSON.parse(await window.registeredWikiTools.wiki_status.execute({})),
+    batch: JSON.parse(await window.registeredWikiTools.read_notes.execute({ paths: ['Tool batch.md', 'missing-batch.md'] })),
+  }));
+  expect(result.annotation.readOnlyHint).toBe(true);
+  expect(result.status.application.build).toBe('unknown');
+  expect(result.batch.state).toBe('partial');
+  expect(result.batch.results[0]).toMatchObject({ state: 'ok', source: '# Batch\n', authoritative: true });
+  expect(result.batch.results[1].state).toBe('missing');
 });

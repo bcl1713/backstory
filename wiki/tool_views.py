@@ -198,3 +198,23 @@ def create_folder(request):
     path = authorize_content(request, body['path'], 'folder')
     result = create(path, request.user)
     return _json(result, 201 if result['state'] == 'created' else 409 if result['state'] == 'uncertain' else 200)
+
+
+@_tool
+def status(request):
+    from .tool_status import status_snapshot
+    return _json(status_snapshot())
+
+
+@_tool(methods=('POST',))
+def read_many(request):
+    from .tool_reads import read_many as read_batch
+    if request.content_type != 'application/json':
+        raise StorageError('invalid_read_many_request')
+    try:
+        body = json.loads(request.body)
+        if not isinstance(body, dict) or set(body) != {'paths'}:
+            raise ValueError
+    except (ValueError, UnicodeError, RequestDataTooBig):
+        raise StorageError('invalid_read_many_request') from None
+    return _json(read_batch(request, body['paths']))
