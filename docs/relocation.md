@@ -37,6 +37,25 @@ after 30 minutes. Changes require a new preview; destinations are never replaced
 A Linux no-clobber rename is required. Filesystems lacking that operation fail
 with recovery available; there is no copy/delete fallback.
 
+## Incomplete link inventory
+
+If Markdown projection fails, preview reports `incomplete_link_inventory` and
+identifies the first failing eligible note by its wiki-relative path, the parsing
+phase, and a stable reason. A note outside the moved folder can block the preview
+because its links also need to be inventoried. No move or link edits occur.
+
+`link_structure_limit` means the note exceeded the supported link-structure
+budget; `projection_recursion_limit` means parsing exceeded its recursion limit.
+`projection_parse_failed` means the underlying cause is not yet known. Inspect
+the identified note and resolve the parsing problem, then request a new preview;
+additional failures may appear next. Diagnostics never include source text or
+raw exception messages. Protected notes remain excluded.
+
+This inventory reads wiki files directly. Waiting for or rebuilding the search
+index does not resolve a parse refusal; corrected source is picked up by the
+next preview without an index rebuild. Other inventory refusals, such as scan
+budgets or unreadable files, retain their own reason codes.
+
 ## Drafts and other editor tabs
 
 A note with unsaved changes blocks its move entry point and retains its source
