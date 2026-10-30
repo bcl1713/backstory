@@ -1,3 +1,4 @@
+import { settleEditorWithClock } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { source as mixedSource, bytes, runtime } from './support/server.js';
@@ -25,6 +26,7 @@ async function open(page, path = 'Vim.md', enhanced = true) {
   await page.clock.install({ time: now });
   await page.clock.pauseAt(new Date(now.getTime() + 1000));
   await page.goto(`/notes/${path}`);
+  await settleEditorWithClock(page);
   if (enhanced) await expect(content(page)).toBeVisible();
 }
 async function presentation(page, name) {
@@ -78,6 +80,7 @@ test('standard editing is default; opting in and disabling preserve source and s
   expect(await read(page)).toBe(source);
   expect(writes).toEqual([]);
   await page.reload();
+  await settleEditorWithClock(page);
   await expect(mode(page)).toHaveText('Vim · Off');
 });
 

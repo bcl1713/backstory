@@ -1,3 +1,4 @@
+import { settleEditorWithClock } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -16,6 +17,7 @@ test('autosave accepts authoritative metadata without another dirty save', async
     await page.clock.install({ time: now });
     await page.clock.pauseAt(new Date(now.getTime() + 1000));
     await page.goto('/notes/Metadata.md');
+    await settleEditorWithClock(page);
     await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
     const saves = [];
     page.on('request', request => { if (request.url().includes('/save/Metadata.md')) saves.push(request); });

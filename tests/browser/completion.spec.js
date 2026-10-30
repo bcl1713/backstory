@@ -1,3 +1,4 @@
+import { settleEditorWithClock } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -34,6 +35,7 @@ async function open(page, presentation = 'Live preview', vim = false, path = 'Co
   await page.clock.install({ time: now });
   await page.clock.pauseAt(new Date(now.getTime() + 1000));
   await page.goto(`/notes/${path}`);
+  await settleEditorWithClock(page);
   await expect(content(page)).toBeVisible();
   if (presentation !== 'Live preview') {
     await revealChrome(page);

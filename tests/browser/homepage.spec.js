@@ -1,3 +1,4 @@
+import { settleEditorWithClock } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { writeFile, unlink, readFile } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -73,5 +74,6 @@ test('saving from canonical home updates index.md using the normal save endpoint
   await expect(page.locator('[data-editor-status]')).toContainText('Saved');
   expect(await readFile(index, 'utf8')).toBe('# Saved home\n');
   await page.reload();
+  await settleEditorWithClock(page);
   await expect(page.locator('.cm-content')).toContainText('Saved home');
 });

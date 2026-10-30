@@ -1,3 +1,4 @@
+import { settleEditorWithClock } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -18,6 +19,7 @@ async function open(page) {
   await page.clock.install({ time: now });
   await page.clock.pauseAt(new Date(now.getTime() + 1000));
   await page.goto('/notes/SyncRecovery.md');
+  await settleEditorWithClock(page);
   await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
 }
 async function failRead(page) {

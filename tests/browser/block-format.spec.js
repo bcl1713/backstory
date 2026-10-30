@@ -1,3 +1,4 @@
+import { settleEditorWithClock } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { writeFile, readFile, rm } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -20,6 +21,7 @@ async function open(page, source = base) {
   const now = new Date('2026-10-26T15:00:00Z');
   await page.clock.install({ time: now }); await page.clock.pauseAt(new Date(now.getTime() + 1000));
   await page.goto('/notes/Blocks.md');
+  await settleEditorWithClock(page);
   await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
 }
 async function messyList(page) {
