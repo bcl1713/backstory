@@ -305,6 +305,8 @@ def preview_move(actor, source, destination):
     _actor(actor)
     try:
         with wiki_write_lock():
+            from .staging import cleanup_staged_saves
+            cleanup_staged_saves()
             # Bound abandoned previews without deleting recovery journals.
             MoveOperation.objects.filter(state='preview', created_at__lt=timezone.now() - timedelta(hours=1)).delete()
             MoveOperation.objects.filter(state__in=['completed', 'cancelled'], created_at__lt=timezone.now() - timedelta(days=30)).delete()
@@ -410,8 +412,7 @@ def _start(operation):
 
 
 def _relocate(operation):
-    from .staging import cleanup_staged_saves
-    cleanup_staged_saves()
+    # Namespace cleanup belongs before planning, never after validation.
     plan = operation.plan
     if policy_version() != plan['policy']:
         raise StorageError('move_policy_changed', 409)
@@ -423,12 +424,23 @@ def _relocate(operation):
     identity = plan['source_identity']
     if source is not None and destination is None:
         if _fingerprint(source) != identity:
-            raise StorageError('move_recovery_conflict', 409)
+            raise _conflict(operation.source)
         # Revalidate all descendants and inbound bytes on a resumed pre-rename
         # operation as well; never move unreviewed files after an interruption.
         witnesses, _, _ = _scan(operation.source)
         if witnesses != plan['witnesses']:
-            raise StorageError('move_recovery_conflict', 409)
+            changed = []
+            for path in sorted(set(witnesses) | set(plan['witnesses'])):
+                if witnesses.get(path) == plan['witnesses'].get(path) or not path:
+                    continue
+                try:
+                    validate_path(path, 'content')
+                except StorageError:
+                    continue
+                changed.append(path)
+                if len(changed) == 20:
+                    break
+            raise _conflict(*changed)
         _rename_noreplace(operation.source, operation.destination)
     elif source is None and destination is not None:
         if not _moved_identity(operation, destination):
@@ -484,6 +496,11 @@ def commit_move(actor, operation_id):
             assert_writes_available()
             if operation.created_at < timezone.now() - timedelta(minutes=30):
                 raise StorageError('move_preview_expired', 409)
+        # Cleanup may alter directory witnesses even for excluded temp siblings.
+        # Existing previews must fail stale rather than adopt those changes.
+        from .staging import cleanup_staged_saves
+        cleanup_staged_saves()
+        if operation.state == 'preview':
             _start(operation)
         try:
             if operation.plan.get('recovery_direction') == 'rollback':
