@@ -1,6 +1,10 @@
 import { test, expect } from '@playwright/test';
 
 test('ordinary editor can inspect wiki timezone without changing it', async ({ page }) => {
+  const background = [];
+  page.on('request', request => {
+    if (request.url().includes('/settings/timezone/?format=json')) background.push(request);
+  });
   await page.goto('/accounts/login/');
   await page.getByLabel('Username', { exact: true }).fill('slice');
   await page.getByLabel('Password', { exact: true }).fill('synthetic-slice-browser-only');
@@ -15,4 +19,5 @@ test('ordinary editor can inspect wiki timezone without changing it', async ({ p
   await expect(page.getByText('Only a wiki owner (staff or superuser) can change this setting.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save wiki timezone' })).toHaveCount(0);
   expect(writes).toHaveLength(0);
+  expect(background).toHaveLength(0);
 });

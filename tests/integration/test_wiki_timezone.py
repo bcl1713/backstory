@@ -66,3 +66,11 @@ def test_ordinary_reader_sees_fallback_and_csrf_protects_owner(reader, settings)
     user = get_user_model().objects.get(username='synthetic-reader'); user.is_staff = True; user.save()
     browser = Client(enforce_csrf_checks=True); browser.force_login(user)
     assert browser.post('/settings/timezone/', {'timezone': 'Asia/Tokyo', 'action': 'initialize'}).status_code == 403
+
+
+def test_shell_only_opts_owners_into_browser_initialization(reader):
+    from django.contrib.auth import get_user_model
+    assert b'data-wiki-timezone-owner="true"' not in reader.get('/').content
+    user = get_user_model().objects.get(username='synthetic-reader')
+    user.is_staff = True; user.save()
+    assert b'data-wiki-timezone-owner="true"' in reader.get('/').content

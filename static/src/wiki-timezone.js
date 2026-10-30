@@ -32,5 +32,10 @@ export async function initializeWikiTimezone({
 // A first save must not overtake the owner's one-time timezone initialization.
 export function ensureWikiTimezone(options = {}, host = globalThis) {
   const key = Symbol.for('backstory.wikiTimezoneReady');
+  // Ordinary editors cannot initialize the wiki zone. Avoid an unnecessary
+  // authenticated GET (and session write) on every page and before saves.
+  if (host.document && host.document.body?.dataset.wikiTimezoneOwner !== 'true') {
+    return host[key] ??= Promise.resolve();
+  }
   return host[key] ??= initializeWikiTimezone(options);
 }

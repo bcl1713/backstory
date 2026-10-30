@@ -44,7 +44,7 @@ test('startup errors are contained without retrying or blocking the editor', asy
 });
 
 test('first save shares and waits for in-flight owner initialization across bundles', async () => {
-  const host = {};
+  const host = { document: { body: { dataset: { wikiTimezoneOwner: 'true' } } } };
   let finish;
   let calls = 0;
   const options = { csrfToken: 'token', browserTimezone: () => 'America/Chicago', fetcher: async () => {
@@ -66,4 +66,14 @@ test('first save shares and waits for in-flight owner initialization across bund
   assert.equal(calls, 2);
   await ensureWikiTimezone(options, host);
   assert.equal(calls, 2);
+});
+
+test('ordinary editor startup and saves make no timezone requests', async () => {
+  const host = { document: { body: { dataset: {} } } };
+  let calls = 0;
+  const options = { csrfToken: 'token', fetcher: async () => { calls++; return response({ source: 'fallback', can_change: false }); } };
+  const startup = ensureWikiTimezone(options, host);
+  await startup;
+  assert.equal(ensureWikiTimezone(options, host), startup);
+  assert.equal(calls, 0);
 });
