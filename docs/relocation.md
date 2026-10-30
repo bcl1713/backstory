@@ -134,3 +134,22 @@ Disposable two-connection regressions cover a real competing session-table updat
 at each transaction's first history read, successful byte/journal convergence and
 idempotent subsequent calls. They establish the race and the narrow fix, not the
 unretained exception behind any specific historical CI or production request.
+
+### Orphan staging cleanup and inventory
+
+Relocation-owned cleanup removes registered orphan staging siblings under the
+wiki-write lock before
+preview captures the namespace and before confirmation revalidates it. Although
+staging filenames are excluded, removing one changes its parent directory's
+metadata. Cleanup must not occur between successful plan validation and the
+pre-rename namespace check.
+
+An older preview whose directory witnesses changed still requires a new preview;
+the application never substitutes fresh witnesses into a reviewed plan. Resumed
+operations and rollback retain guarded staging cleanup before recovery validation.
+Real source or namespace changes still stop a move. Pre-rename conflicts identify
+up to 20 currently authorized relative paths when available; a root-only change
+may retain the generic conflict rather than exposing internal or protected paths.
+
+Concurrent startup or maintenance cleanup can still cause a conservative stale
+preview or recovery conflict; it does not bypass namespace verification.
