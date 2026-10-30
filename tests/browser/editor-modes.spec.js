@@ -18,6 +18,8 @@ test('loading is distinct from ready and each presentation reports the actual vi
   await page.route('**/static/editor.js', async route => { await gate; await route.continue(); });
   await page.goto('/notes/Slice.md', { waitUntil: 'commit' });
   await expect(page.locator('[data-editor-readiness]')).toContainText('Loading');
+  await expect(page.getByLabel('Markdown source (plain text fallback)')).toBeHidden();
+  await page.getByRole('link', { name: 'Use plain text' }).click();
   await expect(page.getByLabel('Markdown source (plain text fallback)')).toBeVisible();
   const loadingSource = await page.getByLabel('Markdown source (plain text fallback)').inputValue();
   await page.getByLabel('Markdown source (plain text fallback)').fill(loadingSource + 'Edited during startup\n');

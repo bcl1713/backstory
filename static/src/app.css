@@ -175,3 +175,14 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 .cm-editor .lp-table-align-left { text-align: left; }
 .cm-editor .lp-table-align-center { text-align: center; }
 .cm-editor .lp-table-align-right { text-align: right; }
+
+/* Mask only the document, from server first paint through CM's first measured
+   layout. Visibility preserves the measuring box; no-JS keeps native source. */
+[data-editor-stage] { position: relative; min-height: 65vh; }
+[data-editor-loading] { display: none; margin: 0; padding: 1.5rem; color: var(--muted); }
+@media (scripting: enabled) {
+  [data-editor-state="loading"] > [data-markdown-editor],
+  [data-editor-state="loading"] > [data-source-fallback]:not(:target) { visibility: hidden; }
+  [data-editor-state="loading"] > [data-editor-loading] { display: block; position: absolute; inset: 0 0 auto; }
+  [data-editor-state="loading"] > [data-source-fallback]:target { display: block !important; visibility: visible; padding-top: 3rem; }
+}

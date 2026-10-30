@@ -3,6 +3,7 @@ import { initialVimEnabled, rememberVimEnabled, shouldFocusEditor } from './edit
 import { isVimToggleShortcut } from './editor-shortcuts.js';
 import { ChangeSet, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, keymap, drawSelection } from '@codemirror/view';
+import { forceParsing, syntaxTreeAvailable } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
@@ -136,6 +137,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
 function attachNoteEditor() {
   const parent = document.querySelector('[data-markdown-editor]');
   if (!parent) return;
+  const stage = document.querySelector('[data-editor-stage]');
   const fallback = document.querySelector('#source');
   const fallbackRegion = document.querySelector('[data-source-fallback]');
   const controls = document.querySelector('[data-editor-controls]');
@@ -193,6 +195,10 @@ function attachNoteEditor() {
     });
     const name = plain ? 'Plain text fallback' : mode === 'source' ? 'Raw source' : 'Live preview';
     readiness.textContent = failed ? 'Enhanced editor unavailable. Ready · Plain text fallback · Complete document source.' : `Ready · ${name}${plain ? ' · Complete document source' : ''}`;
+    if (!plain && stage?.dataset.editorState === 'loading') {
+      readiness.dataset.readyText = readiness.textContent;
+      readiness.textContent = 'Rendering enhanced editor…';
+    } else delete readiness.dataset.readyText;
     controls.hidden = false;
     if (focus) { if (plain) fallback.focus(); else api.focus(); }
   };
@@ -204,13 +210,14 @@ function attachNoteEditor() {
       onCompletionStatus: showCompletionStatus,
       onFailure: () => queueMicrotask(() => setPresentation('plain', true)) });
     parent.markdownEditor = api;
-    setPresentation('live', false, false);
+    setPresentation((stage?.dataset.plainRequested === 'true' || location.hash === '#plain-source') ? 'plain' : 'live', false, false);
     vimToggle.hidden = false;
     vimStatus.hidden = false;
   } catch {
     parent.replaceChildren();
     setPresentation('plain', true, false);
   }
+  stage?.addEventListener('editor-fallback', () => setPresentation('plain', true, false));
   const toggleVim = () => {
     if (!api) return;
     vimEnabled = !vimEnabled;
@@ -255,8 +262,52 @@ function attachNoteEditor() {
   };
   onChange = mountNoteActions({ editor, initialSource, isNew: parent.dataset.isNew === 'true', bom: parent.dataset.bom === 'true' });
   if (source !== initialSource) onChange(source);
-  if (api && !parent.hidden && shouldFocusEditor(desktop, document.activeElement, document.body, document.documentElement)) {
-    api.view.contentDOM.focus({ preventScroll: true });
-  }
+  const reveal = () => {
+    stage?.dispatchEvent(new Event('editor-ready'));
+    // Independent of the small network-failure guard successfully loading.
+    if (stage) stage.dataset.editorState = 'ready';
+    const loading = document.querySelector('[data-editor-loading]');
+    if (loading) loading.hidden = true;
+    if (readiness.dataset.readyText) {
+      readiness.textContent = readiness.dataset.readyText;
+      delete readiness.dataset.readyText;
+    }
+    if (api && !parent.hidden && shouldFocusEditor(desktop, document.activeElement, document.body, document.documentElement)) {
+      api.view.contentDOM.focus({ preventScroll: true });
+    }
+  };
+  // CM must measure in its final-width box before it becomes visible. Do not
+  // use display:none here: that would defer layout until after the reveal.
+  // The native link also works if the independent guard failed to download.
+  window.addEventListener('hashchange', () => {
+    if (location.hash === '#plain-source' && stage?.dataset.editorState === 'loading') {
+      setPresentation('plain', false, false);
+      reveal();
+    }
+  });
+  const measureReady = () => {
+    if (parent.hidden) { reveal(); return; }
+    // Large documents may need more than CM's initial synchronous parse budget.
+    // Only the visible viewport must be complete before its first paint.
+    if (!forceParsing(api.view, api.view.viewport.to, 50)) {
+      requestAnimationFrame(measureReady);
+      return;
+    }
+    api.view.requestMeasure({
+      read: () => null,
+      write: () => requestAnimationFrame(() => {
+        if (syntaxTreeAvailable(api.view.state, api.view.viewport.to)) reveal();
+        else measureReady();
+      }),
+    });
+  };
+  if (api && !parent.hidden) {
+    // font-display:swap must not change wrapping immediately after reveal.
+    const style = getComputedStyle(api.view.contentDOM);
+    // font-variant/features can make the computed font shorthand empty.
+    const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    Promise.resolve().then(() => document.fonts?.load(font))
+      .catch(() => {}).then(measureReady);
+  } else reveal();
 }
 attachNoteEditor();
