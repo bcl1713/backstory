@@ -13,23 +13,7 @@ for (const vim of [false, true]) {
       await page.goto(`/notes/TableKeyboard-${vim ? 'vim' : 'arrows'}-${direction}.md`);
       await host(page).evaluate((el, vim) => el.markdownEditor.setVimEnabled(vim), vim);
       await page.locator('.cm-content').focus();
-    await host(page).evaluate(el => {
-      const view = el.markdownEditor.view;
-      window.tableDebug = [];
-      view.contentDOM.addEventListener('keydown', event => window.tableDebug.push({kind:'keydown',key:event.key,prevented:event.defaultPrevented,ctrl:event.ctrlKey,alt:event.altKey,meta:event.metaKey,vim:!!view.cm?.state.vim,insert:view.cm?.state.vim?.insertMode,count:view.cm?.state.vim?.inputState.getRepeat(),head:view.state.selection.main.head}),true);
-      const dispatch = view.dispatch.bind(view);
-      view.dispatch = (...specs) => {
-        dispatch(...specs);
-        window.tableDebug.push({kind:'dispatch', effects:specs.map(s => s.effects?.value), head:view.state.selection.main.head, widgets:view.dom.querySelectorAll('.lp-table').length});
-      };
-      const move = view.moveVertically.bind(view);
-      view.moveVertically = (...args) => {
-        const before = {kind:'move', from:args[0].head, forward:args[1], widgets:view.dom.querySelectorAll('.lp-table').length};
-        const result = move(...args);
-        window.tableDebug.push({...before,to:result.head});
-        return result;
-      };
-    });
+
       // Navigate from the document edge with actual keys. Direct selection
       // dispatch into the table would miss a layout-driven navigation skip.
       if (vim) await page.keyboard.type(direction === 'down' ? 'gg' : 'G');
@@ -39,7 +23,7 @@ for (const vim of [false, true]) {
       await page.keyboard.press(key);
       await page.keyboard.press(key);
       const line = await host(page).evaluate(el => { const s = el.markdownEditor.view.state; return s.doc.lineAt(s.selection.main.head).number; });
-      expect(line, JSON.stringify(await page.evaluate(() => window.tableDebug))).toBe(direction === 'down' ? 3 : 5);
+      expect(line).toBe(direction === 'down' ? 3 : 5);
       await expect(page.locator('.lp-table')).toHaveCount(0);
       expect(await host(page).evaluate(el => el.markdownEditor.getSource())).toBe(source);
     });
@@ -55,29 +39,13 @@ for (const direction of ['down', 'up']) {
     await page.goto(`/notes/TableKeyboard-count-${direction}.md`);
     await host(page).evaluate(el => el.markdownEditor.setVimEnabled(true));
     await page.locator('.cm-content').focus();
-    await host(page).evaluate(el => {
-      const view = el.markdownEditor.view;
-      window.tableDebug = [];
-      view.contentDOM.addEventListener('keydown', event => window.tableDebug.push({kind:'keydown',key:event.key,prevented:event.defaultPrevented,ctrl:event.ctrlKey,alt:event.altKey,meta:event.metaKey,vim:!!view.cm?.state.vim,insert:view.cm?.state.vim?.insertMode,count:view.cm?.state.vim?.inputState.getRepeat(),head:view.state.selection.main.head}),true);
-      const dispatch = view.dispatch.bind(view);
-      view.dispatch = (...specs) => {
-        dispatch(...specs);
-        window.tableDebug.push({kind:'dispatch', effects:specs.map(s => s.effects?.value), head:view.state.selection.main.head, widgets:view.dom.querySelectorAll('.lp-table').length});
-      };
-      const move = view.moveVertically.bind(view);
-      view.moveVertically = (...args) => {
-        const before = {kind:'move', from:args[0].head, forward:args[1], widgets:view.dom.querySelectorAll('.lp-table').length};
-        const result = move(...args);
-        window.tableDebug.push({...before,to:result.head});
-        return result;
-      };
-    });
+
     const edge = direction === 'down' ? 'gg' : 'G';
     const motion = direction === 'down' ? 'j' : 'k';
     await page.keyboard.type(edge + 'lll');
     await expect(page.locator('.lp-table')).toHaveCount(1);
     await page.keyboard.type('2' + motion);
-    expect(await host(page).evaluate(el => { const s = el.markdownEditor.view.state; return s.doc.lineAt(s.selection.main.head).number; }), JSON.stringify(await page.evaluate(() => window.tableDebug))).toBe(direction === 'down' ? 3 : 5);
+    expect(await host(page).evaluate(el => { const s = el.markdownEditor.view.state; return s.doc.lineAt(s.selection.main.head).number; })).toBe(direction === 'down' ? 3 : 5);
     await expect(page.locator('.lp-table')).toHaveCount(0);
     await page.keyboard.type(edge);
     await expect(page.locator('.lp-table')).toHaveCount(1);

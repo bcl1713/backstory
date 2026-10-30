@@ -151,13 +151,23 @@ const tableMotionRange = StateField.define({
   },
 });
 
+// A block replacement can absorb its adjacent empty text line in layout.
+// Include that one-line halo so the first upward key cannot skip the table.
 export function tableMotionPath(state, direction, count = 1) {
   const lines = state.selection.ranges.flatMap(range => {
     const line = state.doc.lineAt(range.head).number;
-    const target = Math.max(1, Math.min(state.doc.lines, line + direction * count));
+    const target = Math.max(1, Math.min(state.doc.lines, line + direction * (count + 1)));
     return [line, target];
   });
   return { from: state.doc.line(Math.min(...lines)).from, to: state.doc.line(Math.max(...lines)).to };
+}
+
+export function tableMotionCount(input) {
+  // The Vim engine transfers leading digits from keyBuffer into repeat arrays
+  // only when it handles the final motion key. Observers run before that step.
+  const pending = /^[1-9]\d*/.exec(input.keyBuffer.join(''))?.[0];
+  return (Number(input.prefixRepeat.join('')) || 1)
+    * (Number(input.motionRepeat.join('')) || 1) * (Number(pending) || 1);
 }
 
 const tableKeyboardMotion = ViewPlugin.fromClass(class {
@@ -172,7 +182,7 @@ const tableKeyboardMotion = ViewPlugin.fromClass(class {
       const direction = event.key === 'ArrowDown' || (vimMotion && event.key === 'j') ? 1
         : event.key === 'ArrowUp' || (vimMotion && event.key === 'k') ? -1 : 0;
       if (!direction) return;
-      const count = vimMotion ? Math.max(1, vim.inputState.getRepeat() || 1) : 1;
+      const count = vimMotion ? tableMotionCount(vim.inputState) : 1;
       const path = tableMotionPath(view.state, direction, count);
       let hidden = false;
       view.state.field(tablePreview).between(path.from, path.to, () => { hidden = true; });

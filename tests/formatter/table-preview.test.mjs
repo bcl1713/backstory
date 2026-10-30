@@ -61,12 +61,12 @@ test('middle and trailing empty cells, optional outer pipes and escaped delimite
   }
 });
 
-import { revealTableMotion, tableMotionPath } from '../../static/src/table-preview.js';
+import { revealTableMotion, tableMotionPath, tableMotionCount } from '../../static/src/table-preview.js';
 test('vertical motion reveals only its source path until explicit cleanup, without editing source', () => {
   let s = EditorState.create({doc:source, extensions:[markdown({base:markdownLanguage}), tablePreview]});
   const path = tableMotionPath(s, 1, 2);
   assert.equal(path.from, 0);
-  assert.equal(path.to, s.doc.line(3).to);
+  assert.equal(path.to, s.doc.line(4).to);
   s = s.update({effects:revealTableMotion.of(path)}).state;
   assert.equal(s.field(tablePreview).size, 0);
   s = s.update({selection:{anchor:s.doc.line(2).from}}).state;
@@ -85,4 +85,19 @@ test('motion range is bounded and leaves tables outside its path rendered', () =
   assert.equal(s.field(tablePreview).iter().from,source.indexOf('| A'));
   assert.equal(tableMotionPath(s,1,100000).to,s.doc.length);
   assert.equal(tableMotionPath(s,-1,100000).from,0);
+});
+
+test('pending Vim count digits combine with operator counts before handler normalization', () => {
+  assert.equal(tableMotionCount({prefixRepeat:[],motionRepeat:[],keyBuffer:['2']}),2);
+  assert.equal(tableMotionCount({prefixRepeat:['2'],motionRepeat:[],keyBuffer:['3']}),6);
+  assert.equal(tableMotionCount({prefixRepeat:[],motionRepeat:[],keyBuffer:['2','g']}),2);
+  assert.equal(tableMotionCount({prefixRepeat:[],motionRepeat:[],keyBuffer:[]}),1);
+});
+
+test('upward path includes the empty-line halo below a block table', () => {
+  let s = EditorState.create({doc:source, selection:{anchor:source.length}, extensions:[markdown({base:markdownLanguage}),tablePreview]});
+  const path = tableMotionPath(s,-1);
+  assert.equal(path.from,s.doc.line(5).from);
+  s = s.update({effects:revealTableMotion.of(path)}).state;
+  assert.equal(s.field(tablePreview).size,0);
 });
