@@ -1,3 +1,4 @@
+import { settleEditorWithClock } from './support/editor-ready.js';
 import { expectCreatedMetadata } from './support/metadata.js';
 import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
@@ -23,6 +24,7 @@ async function open(page) {
   await page.clock.install({ time: now });
   await page.clock.pauseAt(new Date(now.getTime() + 1000));
   await page.goto('/notes/Auto.md');
+  await settleEditorWithClock(page);
   await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
 }
 
@@ -187,6 +189,7 @@ test('a new note requires a valid filename and uses create-if-absent autosave', 
   const created = `${runtime}/wiki/Drafts/Auto-created.md`;
   await rm(created, { force: true });
   await page.goto('/new/?folder=Drafts');
+  await settleEditorWithClock(page);
   await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
   await draft(page, '# New automatic note\n');
   await page.getByLabel('Note filename').fill('bad/name.md');
@@ -229,6 +232,7 @@ test('recovered protected drafts and historical views require an explicit first 
   await page.locator('[data-store-draft]').click();
   await expect(page.locator('[data-stored-draft]')).toBeVisible();
   await page.goto(await page.locator('[data-stored-draft]').getAttribute('href'));
+  await settleEditorWithClock(page);
   await expect(page.locator('[data-editor-status]')).toContainText('Recovered draft');
   await draft(page, base + '\nProtected work edited.\n');
   await advance(page, 20000);

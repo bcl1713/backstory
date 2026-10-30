@@ -11,6 +11,7 @@ for (const vim of [false, true]) {
       await page.getByLabel('Password').fill('synthetic-slice-browser-only');
       await page.getByRole('button', { name: 'Sign in' }).click();
       await page.goto(`/notes/TableKeyboard-${vim ? 'vim' : 'arrows'}-${direction}.md`);
+      await expect(page.locator('[data-editor-stage]')).toHaveAttribute('data-editor-state', 'ready');
       await host(page).evaluate((el, vim) => el.markdownEditor.setVimEnabled(vim), vim);
       await page.locator('.cm-content').focus();
 
@@ -37,6 +38,7 @@ for (const direction of ['down', 'up']) {
     await page.getByLabel('Password').fill('synthetic-slice-browser-only');
     await page.getByRole('button', { name: 'Sign in' }).click();
     await page.goto(`/notes/TableKeyboard-count-${direction}.md`);
+      await expect(page.locator('[data-editor-stage]')).toHaveAttribute('data-editor-state', 'ready');
     await host(page).evaluate(el => el.markdownEditor.setVimEnabled(true));
     await page.locator('.cm-content').focus();
 
