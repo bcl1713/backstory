@@ -1,3 +1,4 @@
+import { tableGeometryCases } from './table-geometry.js';
 import { spawnSync, spawn } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -19,6 +20,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   writeFileSync(`${runtime}/wiki/Slice.md`, bytes);
   writeFileSync(`${runtime}/wiki/Other.md`, '# Other\n\n## Details\n\nLocal target.\n');
   for (const suffix of ['vim-down', 'vim-up', 'arrows-down', 'arrows-up', 'count-down', 'count-up']) writeFileSync(`${runtime}/wiki/TableKeyboard-${suffix}.md`, 'Before\n\n| Name | Value |\n| --- | --- |\n| unchanged | 7 |\n\nAfter');
+  for (const fixture of tableGeometryCases) for (const vim of [false, true]) writeFileSync(`${runtime}/wiki/TableGeometry-${fixture.rows}-${vim}.md`, fixture.source);
   const env = { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings', BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`, BACKSTORY_IDENTITY_PATH: '.backstory-marker', BACKSTORY_COOKIE_MODE: 'localhost', BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' };
   const python = fileURLToPath(new URL('../../../.venv/bin/python', import.meta.url));
   for (const args of [['manage.py', 'migrate', '--noinput'], ['manage.py', 'collectstatic', '--noinput'], ['-c', 'import django; django.setup(); from django.contrib.auth import get_user_model; u, created = get_user_model().objects.get_or_create(username="slice"); (u.set_password("synthetic-slice-browser-only"), u.save()) if created else None']]) {
