@@ -86,3 +86,19 @@ def test_status_requires_current_session(reader, wiki, end_session):
     else:
         SessionDevice.objects.update(absolute_expires_at=timezone.now() - timedelta(seconds=1))
     assert reader.get('/tools/status/').status_code == 401
+
+
+def test_status_reads_real_index_backoff_without_resetting_diagnostics(reader, wiki):
+    import time
+    from indexing.models import ScanState
+    until = time.time() + 60
+    ScanState.objects.create(pk=1, backoff_until=until, errors=2,
+                             last_error='index_database_busy', last_completed=123)
+    result = reader.get('/tools/status/').json()
+    assert result['index']['state'] == 'backoff'
+    assert result['index']['reason_code'] == 'index_database_busy'
+    assert result['index']['backoff_until'] == until
+    assert result['index']['last_completed'] == 123
+    state = ScanState.objects.get(pk=1)
+    assert state.errors == 2 and state.last_error == 'index_database_busy'
+    assert state.backoff_until == until

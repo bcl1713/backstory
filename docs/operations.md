@@ -230,3 +230,47 @@ and residual external-writer races. This walkthrough uses localhost/proxyoff
 defaults. For opt-in HTTPS forwarding, follow the [generic proxy contract](reverse-proxy.md)
 and its pending combined acceptance gate. The peer/header guard also covers
 `/health/`; use the real TLS proxy and canonical hostname for health probes.
+
+## Index failures versus saved content
+
+`saved_index_delayed` (or its source-recovery equivalent) means the note was
+published but its priority index enqueue failed. Read the note/revision to verify
+content; **do not replay the save** merely to update search. Normal `partial` and
+`stale` index states are not failed saves. The existing incremental/verification
+worker catches up from authoritative files; queue overflow retains a reconciliation
+request. A failed worker keeps its existing bounded backoff (5–300 seconds).
+
+Index failure boundaries now emit privacy-safe JSON lines through the
+`backstory.index` logger, in both web and indexer process logs. Retain those logs
+using your deployment's normal bounded retention/rotation policy. Historical log
+events remain historical after the current status becomes healthy; there is no new
+unbounded database history table. Correlate by UTC `timestamp`, `event_id`, and
+`operation` (`enqueue`, `worker`, `worker_failure_state`, `search`, `resolve`).
+They include fixed exception classes, safe reason codes, SQLite numeric/extended
+error names when available, and `budget_triggered`. They deliberately omit raw
+exception messages, tracebacks, note paths/content, revisions, SQL and credentials.
+Request/security log redaction is unchanged. A logging-sink failure cannot undo a
+successful save; in that case diagnostic retention itself may be unavailable.
+
+Search freshness includes an additive `reason_code`:
+
+- `search_budget_exceeded`: the query's own progress budget actually interrupted
+  SQLite. Narrow the query, or deliberately retry from the first page.
+- `index_database_busy`: SQLite reported busy/locked; retry the same read-only
+  search after the concurrent operation finishes.
+- `index_database_error`: another database failure; consult the corresponding safe
+  diagnostic and worker status before retrying. Do not assume that it is a disk
+  failure or fix it by raising query budgets.
+
+A failed/limited empty search is **incomplete**, not proof of absence. Do not create
+replacement notes based on it. Direct note reads remain authoritative. Persistent
+failures warrant investigating the logged failure class; they do not automatically
+require a production index rebuild.
+
+The priority queue acquires database write intent before taking its read snapshot.
+A synthetic two-connection WAL regression demonstrates and prevents a
+`SQLITE_BUSY_SNAPSHOT` read-to-write upgrade race. This is a verified local failure
+mechanism, **not a claim that it caused the October 30 deployment incidents**.
+No note I/O, formatting or content replay occurs inside that short queue transaction;
+ordinary lock waits retain the configured database timeout and there is no new
+retry loop. Other database failures remain explicitly delayed/diagnosed.

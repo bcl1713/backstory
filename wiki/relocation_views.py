@@ -31,6 +31,7 @@ def move(request):
         return render(request, 'wiki/move.html', context)
     except StorageError as error:
         context['diagnostic'] = error.reason_code
+        context['inventory_failure'] = getattr(error, 'inventory_failure', None)
         return render(request, 'wiki/move.html', context, status=error.status)
     except (OSError, DatabaseError):
         context['diagnostic'] = 'move_storage_unavailable'

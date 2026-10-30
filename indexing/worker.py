@@ -15,6 +15,7 @@ from wiki.readiness import check_readiness
 from wiki.storage import read_note, require_ready
 from .models import IndexGeneration, IndexedNote, IndexedName, IndexJob, LinkEdge, ScanState
 from .scanner import file_stat, next_paths
+from .diagnostics import record_failure, failure_reason
 
 BATCH_SIZE = 20
 YIELD_SECONDS = 1
@@ -271,10 +272,11 @@ def run_batch(now=None):
         try:
             return _run(now, progress)
         except (StorageError, OSError, OperationalError) as error:
+            record_failure("worker", error)
             try:
                 state, _ = ScanState.objects.get_or_create(pk=1)
                 state.errors += 1
-                state.last_error = error.reason_code if isinstance(error, StorageError) else 'index_io_error'
+                state.last_error = error.reason_code if isinstance(error, StorageError) else failure_reason(error)
                 state.backoff_until = now + min(300, 5 * 2 ** min(state.errors - 1, 6))
                 if state.checkpoint:
                     # Retry the complete scan, retaining useful old rows and the
@@ -284,8 +286,8 @@ def run_batch(now=None):
                     state.checkpoint = cp
                     state.processed = state.discovered = 0
                 state.save(update_fields=['checkpoint', 'errors', 'last_error', 'backoff_until', 'processed', 'discovered'])
-            except OperationalError:
-                pass
+            except OperationalError as persist_error:
+                record_failure("worker_failure_state", persist_error)
             return BatchResult(progress[0], progress[0], pending=True, state='backoff')
 
 

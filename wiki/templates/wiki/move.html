@@ -2,7 +2,16 @@
 {% block title %}Move or rename · Backstory{% endblock %}
 {% block content %}
 <h1>Move or rename</h1>
-{% if diagnostic %}<p role="alert">{{ diagnostic }}. No unreviewed change will be applied. A started operation retains its recovery journal; inspect its status before retrying.</p>{% endif %}
+{% if inventory_failure %}
+<section role="alert" aria-label="Link inventory failure">
+<h2>Move preview could not complete</h2>
+<p><code>{{ diagnostic }}</code></p>
+<p>No move or link edits occurred. The first failing note is <code>{{ inventory_failure.path }}</code>.</p>
+<dl><dt>Phase</dt><dd>{{ inventory_failure.phase }}</dd><dt>Reason</dt><dd>{{ inventory_failure.reason }}</dd></dl>
+<p>{% if inventory_failure.reason == 'link_structure_limit' %}The note exceeds the supported Markdown link-structure limit.{% elif inventory_failure.reason == 'projection_recursion_limit' %}Markdown parsing exceeded its recursion limit.{% else %}The note's Markdown projection could not be parsed. The underlying cause is not yet known.{% endif %}</p>
+<p>Inspect this note and resolve the parsing problem, then request a new preview. More failures may be reported on that preview. This scan reads wiki files directly; waiting for or rebuilding the search index does not resolve this refusal.</p>
+</section>
+{% elif diagnostic %}<p role="alert">{{ diagnostic }}. No unreviewed change will be applied. A started operation retains its recovery journal; inspect its status before retrying.</p>{% endif %}
 {% if writes_paused and not pending_moves %}<p role="alert">Writes are paused for an interrupted move. The account that started it or your administrator must recover it before new writes can proceed.</p>{% endif %}
 {% if pending_moves %}<section aria-label="Move recovery"><h2>Recovery needed</h2><p>New writes are paused until the interrupted move is resumed or rolled back.</p><ul>{% for pending in pending_moves %}<li><a href="{% url 'wiki:move-operation' pending.pk %}">{{ pending.source }} → {{ pending.destination }}</a> · {{ pending.reason_code }}</li>{% endfor %}</ul></section>{% endif %}
 {% if operation %}
