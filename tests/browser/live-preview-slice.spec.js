@@ -72,6 +72,8 @@ test('active blocks and multiline selections reveal syntax and preserve reversed
   await revealChrome(page);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   expect(await selection(page)).toEqual({ anchor: end, head: offset });
+  const tableOffset = await editor(page).evaluate(el => el.markdownEditor.view.state.doc.toString().indexOf('| Name'));
+  await select(page, tableOffset + 2);
   await expect(content).toContainText('| unchanged | 7 |');
   await expect(page.locator('.lp-source-region').filter({ hasText: '| unchanged | 7 |' })).toBeVisible();
   await expect(content).toContainText('const literal = "**source**";');

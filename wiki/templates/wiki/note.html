@@ -4,7 +4,7 @@
 {% block note_tools %}
 <nav class="zen-chrome" aria-label="Breadcrumb" data-breadcrumb></nav>
 <h1 class="zen-chrome" data-note-title>{% if is_new %}New note{% else %}{{ note.path }}{% endif %}</h1>
-<section id="editor-tools" class="zen-chrome" aria-label="Editor tools"><p class="editor-help">Edit Markdown directly. Move into a block to reveal its source. Links on inactive lines are clickable; use arrow keys to edit their line. Front matter, tables, code and unfamiliar syntax stay visible.</p>
+<section id="editor-tools" class="zen-chrome" aria-label="Editor tools"><p class="editor-help">Edit Markdown directly. Move into a block to reveal its source. Links on inactive lines are clickable; use arrow keys to edit their line. Tables render when inactive and reveal Markdown when selected. Front matter, code and unfamiliar syntax stay visible.</p>
 <div class="editor-controls" data-editor-controls hidden role="group" aria-label="Editor presentation">
 <button type="button" data-editor-mode="live" aria-pressed="true">Live preview</button>
 <button type="button" data-editor-mode="source" aria-pressed="false">Raw source</button>

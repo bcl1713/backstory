@@ -24,6 +24,7 @@
     "@codemirror/state": "6.7.6",
     "@codemirror/view": "6.43.15",
     "@replit/codemirror-vim": "6.4.0",
+    "entities": "8.1.0",
     "ignore": "7.0.14",
     "jsonc-parser": "3.3.1",
     "markdownlint-cli2": "0.24.0",

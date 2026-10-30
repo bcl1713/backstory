@@ -229,3 +229,16 @@ and missing-note handling; it does not save or create a note automatically.
 Code, images, and plain text are not link targets. Menu navigation remains
 available. The decorative active-editor left stripe is removed; caret and other
 control focus indicators remain.
+
+### Live tables
+
+Inactive GFM tables render within the same 80ch note column, with subtle row
+separators and wrapping inside cells. Moving the caret or a selection into a
+table reveals its entire Markdown source for normal editing, Vim and automatic
+block formatting. Rendering does not save or rewrite source. Raw-source mode
+always shows the original table.
+
+Emphasis, code and link labels render safely. Table links are display-only:
+enter source to edit them; the existing `gf` and completion exclusion for tables
+is unchanged. Images and HTML remain literal text, never loaded or executed.
+Wide unbroken cell text wraps rather than widening the document.
