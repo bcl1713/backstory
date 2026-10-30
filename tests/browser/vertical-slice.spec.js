@@ -1,3 +1,4 @@
+import { expectCreatedMetadata } from './support/metadata.js';
 import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, stat, readdir, unlink } from 'node:fs/promises';
@@ -191,15 +192,15 @@ for (const presentation of ['live', 'source']) {
     expect(response.status()).toBe(200);
     expect(response.request().headers()['if-none-match']).toBe('*');
     expect(response.request().headers()['if-match']).toBeUndefined();
-    expect(await readFile(created)).toEqual(Buffer.from('# New\n'));
+    expectCreatedMetadata(await readFile(created, 'utf8'), '# New\n', 'new');
     await expect(page).toHaveURL(new RegExp(`/notes/Drafts/Created-${presentation}\\.md$`));
     await page.reload();
-    expect(await readSource(page)).toBe('# New\n');
+    expect(await readSource(page)).toBe(await readFile(created, 'utf8'));
     await page.goto('/new/?folder=Drafts');
     await page.getByLabel('Note filename').fill(filename);
     await replace(page, '# Collision\n');
     expect((await action(page, 'Create note')).status()).toBe(412);
-    expect(await readFile(created)).toEqual(Buffer.from('# New\n'));
+    expectCreatedMetadata(await readFile(created, 'utf8'), '# New\n', 'new');
     await page.getByRole('button', { name: 'Accept current revision for manual merge' }).click();
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
     await replace(page, '# Manually merged new note\n');

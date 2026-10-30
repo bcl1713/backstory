@@ -79,5 +79,7 @@ def test_new_draft_still_requires_guarded_create_save(reader, wiki, draft_contex
     assert not target.exists()
     saved = reader.post("/save/Notes/new.md", data=body, content_type="application/json", HTTP_IF_NONE_MATCH="*")
     assert saved.status_code == 200
-    assert target.read_bytes() == b"# New synthetic\n"
+    from tests.integration.test_saves import assert_created_note
+    assert_created_note(target.read_text(), "# New synthetic\n", "new-synthetic")
+    assert saved.json()["source"] == target.read_text()
     assert reader.post("/save/Notes/new.md", data=body, content_type="application/json", HTTP_IF_NONE_MATCH="*").status_code == 412

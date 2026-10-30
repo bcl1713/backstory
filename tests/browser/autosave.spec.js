@@ -1,3 +1,4 @@
+import { expectCreatedMetadata } from './support/metadata.js';
 import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, stat, rm } from 'node:fs/promises';
@@ -196,7 +197,10 @@ test('a new note requires a valid filename and uses create-if-absent autosave', 
   await advance(page);
   expect((await response).request().headers()['if-none-match']).toBe('*');
   await expect(page).toHaveURL(/\/notes\/Drafts\/Auto-created.md$/);
-  expect(await readFile(created, 'utf8')).toBe('# New automatic note\n');
+  expectCreatedMetadata(await readFile(created, 'utf8'), '# New automatic note\n', 'new-automatic-note');
+  expect(await read(page)).toBe(await readFile(created, 'utf8'));
+  await advance(page, 15000);
+  expect(await read(page)).toBe(await readFile(created, 'utf8'));
 });
 
 test('pending save retains the existing navigation and browser-close warning', async ({ page }) => {

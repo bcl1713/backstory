@@ -212,3 +212,15 @@ LOGGING = {
 }
 
 BACKSTORY_REVISION_RETENTION_DAYS = 30
+
+# Explicit operator override wins over the saved wiki setting.
+BACKSTORY_WIKI_TIMEZONE = os.environ.get("BACKSTORY_WIKI_TIMEZONE", "")
+if BACKSTORY_WIKI_TIMEZONE:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from django.core.exceptions import ImproperlyConfigured
+    try:
+        if BACKSTORY_WIKI_TIMEZONE != "UTC" and "/" not in BACKSTORY_WIKI_TIMEZONE:
+            raise ValueError
+        ZoneInfo(BACKSTORY_WIKI_TIMEZONE)
+    except (ValueError, ZoneInfoNotFoundError):
+        raise ImproperlyConfigured("BACKSTORY_WIKI_TIMEZONE must be an IANA timezone, for example America/Chicago") from None

@@ -1,3 +1,4 @@
+import { expectCreatedMetadata } from './support/metadata.js';
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -51,7 +52,10 @@ test('keyboard creates through the existing editor and original link opens the n
   await expect(async () => readFile(`${runtime}/wiki/CreateLinks/New.md`)).rejects.toThrow();
   await create(page);
   await expect(page).toHaveURL(/\/notes\/CreateLinks\/New.md#preview-details$/);
-  await expect.poll(() => editor(page).evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(7);
+  await expect.poll(() => editor(page).evaluate(el => {
+    const api = el.markdownEditor;
+    return api.view.state.selection.main.head === api.getSource().indexOf('## Details');
+  })).toBe(true);
   await expect(page.locator('[data-editor-status]')).toContainText('Saved.');
   expect(await readFile(`${runtime}/wiki/CreateSource.md`, 'utf8')).toBe(source);
   await page.goto('/notes/CreateSource.md');
@@ -193,7 +197,7 @@ test('linked creation preserves literal whitespace in the offered filename', asy
   await editor(page).evaluate(el => el.markdownEditor.setSource('# Literal filename\n'));
   await page.getByRole('button', { name: 'Create note', exact: true }).click();
   await expect(page).toHaveURL(/\/notes\/%20Leading%20space.md$/);
-  expect(await readFile(`${runtime}/wiki/ Leading space.md`, 'utf8')).toBe('# Literal filename\n');
+  expectCreatedMetadata(await readFile(`${runtime}/wiki/ Leading space.md`, 'utf8'), '# Literal filename\n', 'literal-filename');
   await expect(readFile(`${runtime}/wiki/Leading space.md`)).rejects.toThrow();
   await page.goto('/notes/CreateSource.md');
   await expect(page.getByRole('link', { name: 'Literal label', exact: true })).toHaveAttribute('href', '/notes/%20Leading%20space.md');
