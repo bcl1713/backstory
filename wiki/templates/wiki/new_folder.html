@@ -1,0 +1,7 @@
+{% extends 'wiki/shell.html' %}
+{% block content %}<h1>New folder</h1>
+<p>Create one folder using its root-relative path. Its parent must already exist. No notes or parent folders will be created.</p>
+{% if result %}<p role="status">{{ result.state }}{% if result.reason_code %}: {{ result.reason_code }}{% endif %}</p>
+{% if result.authoritative %}<a href="{{ result.href }}">Open {{ result.path }}</a>{% else %}<p>The result is uncertain. Inspect the parent folder before deciding whether to try again. An existing folder does not identify who created it.</p>{% endif %}
+{% else %}<form method="post">{% csrf_token %}<label for="folder-path">Root-relative folder path</label><input id="folder-path" name="path" value="{{ path }}" required maxlength="4096" autofocus><button type="submit">Create folder</button></form>{% endif %}
+{% endblock %}

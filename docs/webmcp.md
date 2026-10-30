@@ -148,3 +148,34 @@ conditionally save, read back and compare the returned source/revision. Also
 exercise a stale save and an unsaved editor draft. Record host/browser versions
 and outcomes before claiming actual-host write acceptance or closing issue #10.
 An ordinary editor save or registration-stub test is not that verification.
+
+## Explicit folder creation
+
+`create_folder` posts `{ "path": "existing-parent/new-folder" }` to
+`/tools/create-folder/`. It is consequential and requires the same active session,
+CSRF token, storage readiness and cooperative write lock as saves. The UI's
+**New folder** action uses the same service. Specify an exact root-relative path;
+the parent must already exist. Names retain their case and Unicode spelling.
+
+The service creates one directory exclusively with deployment umask permissions.
+It never creates ancestors or index notes, replaces entries, modifies existing
+permissions, moves content or changes navigation. Hidden/admin paths, symlinks,
+traversal and file collisions are refused. Recovery-paused writes remain paused.
+`created` (HTTP 201) and `already_exists` (200) include canonical `path`, `href`
+and `authoritative: true`. Existing directories may be empty or nonempty;
+`already_exists` does not identify who created them. Fresh folder listings see the
+result directly, without an index refresh.
+
+Errors use fixed safe reason codes (`destination_conflict`, `parent_changed`,
+`folder_creation_failed`, or the existing policy/readiness/recovery codes).
+After publication, failed verification returns `uncertain`,
+`folder_creation_unconfirmed` and `inspect_before_retry: true`. Lost transport or
+an invalid acknowledgement is also uncertain. Inspect the parent with
+`list_notes` before deciding on a deliberate retry; the adapter never retries.
+Descriptor-relative creation and parent-identity checks prevent following a
+replaced pathname, but cannot atomically exclude an external non-cooperating
+filesystem writer. Do not interpret an acknowledgement as a permanent guarantee.
+
+Browser adapter tests use a controlled host stub. Real assistant-host discovery
+and execution must be verified on the deployed build before claiming that host
+supports this capability.

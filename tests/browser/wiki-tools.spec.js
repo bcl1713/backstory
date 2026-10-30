@@ -33,7 +33,7 @@ test('signed-in tools read current source through fixed endpoints and never exec
   await page.goto('/accounts/login/');
   expect(await page.evaluate(() => Object.keys(window.registeredWikiTools))).toEqual([]);
   await login(page);
-  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['list_notes', 'read_note', 'save_note', 'search_notes']);
+  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'list_notes', 'read_note', 'save_note', 'search_notes']);
   const requests = [];
   page.on('request', request => { if (request.url().includes('/tools/')) requests.push(request); });
   const result = await page.evaluate(async () => {
@@ -242,5 +242,38 @@ test('a host synchronously rejecting the save tool still discovers usable read t
   await login(page);
   const result = await callTool(page, 'read_note', { path: 'Slice.md' });
   expect(result.authoritative).toBe(true);
-  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['list_notes', 'read_note', 'search_notes']);
+  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'list_notes', 'read_note', 'search_notes']);
+});
+
+test('create_folder is consequential, exclusive and does not initialize timezone or edit notes', async ({ page }) => {
+  await stubHost(page);
+  await login(page);
+  await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.create_folder))).toBe(true);
+  const requests = [];
+  page.on('request', request => { if (request.method() === 'POST') requests.push(new URL(request.url()).pathname); });
+  const result = await page.evaluate(async () => {
+    const tool = window.registeredWikiTools.create_folder;
+    return { annotations: tool.annotations, first: JSON.parse(await tool.execute({ path: 'Synthetic tool folder' })), second: JSON.parse(await tool.execute({ path: 'Synthetic tool folder' })) };
+  });
+  expect(result.annotations).toMatchObject({ readOnlyHint: false, consequentialHint: true });
+  expect(result.first).toMatchObject({ state: 'created', authoritative: true });
+  expect(result.second.state).toBe('already_exists');
+  expect(requests).toEqual(['/tools/create-folder/', '/tools/create-folder/']);
+});
+
+test('lost create_folder acknowledgement is uncertain without an automatic retry', async ({ page }) => {
+  await stubHost(page);
+  await login(page);
+  await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.create_folder))).toBe(true);
+  let posts = 0;
+  await page.route('**/tools/create-folder/', async route => {
+    posts++;
+    await route.fetch();
+    await route.abort('failed');
+  });
+  const result = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.create_folder.execute({ path: 'Synthetic lost folder ack' })));
+  expect(result).toMatchObject({ state: 'uncertain', read_before_retry: true });
+  expect(posts).toBe(1);
+  const listing = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.list_notes.execute({ folder: '' })));
+  expect(listing.entries.some(entry => entry.path === 'Synthetic lost folder ack')).toBe(true);
 });
