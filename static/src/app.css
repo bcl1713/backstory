@@ -116,6 +116,16 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 .note-page #source:focus-visible { border-color: var(--focus); }
 .note-page .skip-link { position: absolute; left: -10000px; }
 .note-page .skip-link:focus { position: relative; left: 0; }
+/* The stylesheet is render-blocking; shell.js is deferred. Start quiet before
+   enhancement arrives, without hiding navigation from no-JavaScript clients.
+   Keep the class-based rules below as a fallback for older browsers. */
+@media (scripting: enabled) {
+  .note-page:not(.chrome-open) .zen-chrome { display: none; }
+  .note-page:not(.chrome-open) .app-layout { grid-template-columns: minmax(0, 1fr); }
+}
+/* A real link keeps browsing available if the enhancement bundle fails. */
+.note-page.zen-enabled [data-navigation-fallback] { display: none; }
+[data-navigation-fallback] { box-sizing: border-box; min-height: 44px; padding: .5rem .8rem; border: 1px solid var(--border); border-radius: .3rem; background: var(--surface-raised); color: var(--foreground); text-decoration: none; }
 .note-page.zen-enabled:not(.chrome-open) .zen-chrome { display: none; }
 .note-page.zen-enabled:not(.chrome-open) .app-layout { grid-template-columns: minmax(0, 1fr); }
 .note-page .zen-chrome, .note-page [data-source-fallback] > label, .note-page [data-source-fallback] > p { margin-left: 1.5rem; margin-right: 1.5rem; }
