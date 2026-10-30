@@ -60,3 +60,29 @@ test('middle and trailing empty cells, optional outer pipes and escaped delimite
     assert.deepEqual(model.rows[2].cells[0],[{text:'a'},{text:'|'},{text:'b'}]);
   }
 });
+
+import { revealTableMotion, tableMotionPath } from '../../static/src/table-preview.js';
+test('vertical motion reveals only its source path until explicit cleanup, without editing source', () => {
+  let s = EditorState.create({doc:source, extensions:[markdown({base:markdownLanguage}), tablePreview]});
+  const path = tableMotionPath(s, 1, 2);
+  assert.equal(path.from, 0);
+  assert.equal(path.to, s.doc.line(3).to);
+  s = s.update({effects:revealTableMotion.of(path)}).state;
+  assert.equal(s.field(tablePreview).size, 0);
+  s = s.update({selection:{anchor:s.doc.line(2).from}}).state;
+  assert.equal(s.field(tablePreview).size, 0, 'remain raw across intermediate command transactions');
+  s = s.update({effects:revealTableMotion.of(null)}).state;
+  assert.equal(s.field(tablePreview).size, 1);
+  assert.equal(s.doc.toString(), source);
+});
+
+test('motion range is bounded and leaves tables outside its path rendered', () => {
+  const doc = source + '\n\n' + source;
+  let s = EditorState.create({doc, selection:{anchor:source.length + 2}, extensions:[markdown({base:markdownLanguage}), tablePreview]});
+  assert.equal(s.field(tablePreview).size, 2);
+  s = s.update({effects:revealTableMotion.of(tableMotionPath(s,1,2))}).state;
+  assert.equal(s.field(tablePreview).size,1);
+  assert.equal(s.field(tablePreview).iter().from,source.indexOf('| A'));
+  assert.equal(tableMotionPath(s,1,100000).to,s.doc.length);
+  assert.equal(tableMotionPath(s,-1,100000).from,0);
+});

@@ -1,7 +1,8 @@
 import { decodeHTMLStrict } from 'entities';
-import { StateField } from '@codemirror/state';
-import { Decoration, EditorView, WidgetType } from '@codemirror/view';
+import { StateEffect, StateField } from '@codemirror/state';
+import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
+import { getCM } from '@replit/codemirror-vim';
 
 // DOM is built from syntax nodes and textContent only: no HTML interpretation,
 // image loading, or navigation occurs while a table is a presentation widget.
@@ -124,10 +125,11 @@ class TableWidget extends WidgetType {
 }
 
 export function tableDecorations(state) {
+  const motion = state.field(tableMotionRange, false);
   const decorations = [];
   syntaxTree(state).iterate({ enter(node) {
     if (node.name !== 'Table') return;
-    if (!state.selection.ranges.some(range => range.from <= node.to && range.to >= node.from)) {
+    if (!(motion && motion.from <= node.to && motion.to >= node.from) && !state.selection.ranges.some(range => range.from <= node.to && range.to >= node.from)) {
       decorations.push(Decoration.replace({ block: true, widget: new TableWidget(tableModel(node.node, state), node.from, state.doc.sliceString(node.from, node.to)) }).range(node.from, node.to));
     }
     return false;
@@ -135,11 +137,63 @@ export function tableDecorations(state) {
   return Decoration.set(decorations, true);
 }
 
+// Block widgets are intentionally skipped by CodeMirror's vertical geometry
+// navigation. Reveal only tables in this key's source-line path before the
+// normal editor/Vim handlers run, so their counts and operators see real lines.
+export const revealTableMotion = StateEffect.define();
+const tableMotionRange = StateField.define({
+  create: () => null,
+  update(value, transaction) {
+    for (const effect of transaction.effects) if (effect.is(revealTableMotion)) return effect.value;
+    return value && transaction.docChanged
+      ? { from: transaction.changes.mapPos(value.from, -1), to: transaction.changes.mapPos(value.to, 1) }
+      : value;
+  },
+});
+
+export function tableMotionPath(state, direction, count = 1) {
+  const lines = state.selection.ranges.flatMap(range => {
+    const line = state.doc.lineAt(range.head).number;
+    const target = Math.max(1, Math.min(state.doc.lines, line + direction * count));
+    return [line, target];
+  });
+  return { from: state.doc.line(Math.min(...lines)).from, to: state.doc.line(Math.max(...lines)).to };
+}
+
+const tableKeyboardMotion = ViewPlugin.fromClass(class {
+  constructor() { this.destroyed = false; this.generation = 0; }
+  destroy() { this.destroyed = true; }
+}, {
+  eventObservers: {
+    keydown(event, view) {
+      if (event.defaultPrevented || event.isComposing || event.altKey || event.metaKey || event.ctrlKey) return;
+      const vim = getCM(view)?.state.vim;
+      const vimMotion = vim && !vim.insertMode;
+      const direction = event.key === 'ArrowDown' || (vimMotion && event.key === 'j') ? 1
+        : event.key === 'ArrowUp' || (vimMotion && event.key === 'k') ? -1 : 0;
+      if (!direction) return;
+      const count = vimMotion ? Math.max(1, vim.inputState.getRepeat() || 1) : 1;
+      const path = tableMotionPath(view.state, direction, count);
+      let hidden = false;
+      view.state.field(tablePreview).between(path.from, path.to, () => { hidden = true; });
+      if (!hidden) return;
+      const generation = ++this.generation;
+      view.dispatch({ effects: revealTableMotion.of(path) });
+      // Keep raw geometry through every synchronous transaction in a command,
+      // including operator-pending Vim. Restore before the browser can paint,
+      // even for a no-op key. A removed live-mode plugin must not dispatch.
+      queueMicrotask(() => {
+        if (!this.destroyed && this.generation === generation) view.dispatch({ effects: revealTableMotion.of(null) });
+      });
+    },
+  },
+});
+
 export const tablePreview = StateField.define({
   create: tableDecorations,
   update(value, transaction) {
-    return transaction.docChanged || transaction.selection || syntaxTree(transaction.startState) !== syntaxTree(transaction.state)
+    return transaction.docChanged || transaction.selection || transaction.effects.some(effect => effect.is(revealTableMotion)) || syntaxTree(transaction.startState) !== syntaxTree(transaction.state)
       ? tableDecorations(transaction.state) : value;
   },
-  provide: field => EditorView.decorations.from(field),
+  provide: field => [tableMotionRange, tableKeyboardMotion, EditorView.decorations.from(field)],
 });
