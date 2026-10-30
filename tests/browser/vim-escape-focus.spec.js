@@ -51,3 +51,23 @@ test('Escape closes Menu then returns editor focus without consuming the next Vi
   await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Normal');
   await expect(content(page)).toBeFocused();
 });
+
+test.describe('non-touch desktop', () => {
+  test.use({ hasTouch: false });
+  test('repeated empty and edited Insert Escape cycles retain keyboard control', async ({ page }) => {
+    await open(page, 'Alpha beta\nSecond line\n');
+    await expect(content(page)).toBeFocused();
+    for (const insert of ['i', 'iX', 'aY', 'i']) {
+      await page.keyboard.type(insert);
+      await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Insert');
+      await page.keyboard.press('Escape');
+      await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Normal');
+      await expect(content(page)).toBeFocused();
+      await expect(page.locator('.cm-fat-cursor.cm-cursor-primary')).toBeVisible();
+      await page.keyboard.type('j');
+      expect(await host(page).evaluate(el => el.markdownEditor.view.state.doc.lineAt(el.markdownEditor.view.state.selection.main.head).number)).toBe(2);
+      await page.keyboard.type('k');
+      expect(await host(page).evaluate(el => el.markdownEditor.view.state.doc.lineAt(el.markdownEditor.view.state.selection.main.head).number)).toBe(1);
+    }
+  });
+});
