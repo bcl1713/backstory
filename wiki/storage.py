@@ -161,6 +161,8 @@ def _folder_entries(directory, path, after):
             try:
                 validate_path(candidate, "content")
                 info = entry.stat(follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode):
+                    validate_path(candidate, "folder")
             except (PathDenied, FileNotFoundError):
                 continue
             if stat.S_ISDIR(info.st_mode):

@@ -122,13 +122,15 @@ def _scan(source):
                     path = '/'.join(filter(None, [folder, entry.name]))
                     try:
                         validate_path(path, 'content')
+                        info = entry.stat(follow_symlinks=False)
+                        if stat.S_ISDIR(info.st_mode):
+                            validate_path(path, 'folder')
                     except StorageError:
                         if _inside(path, source):
                             raise StorageError('protected_move_descendant', 409) from None
                         continue
                     if len(witnesses) >= MAX_ENTRIES:
                         raise StorageError('move_inventory_limit', 413)
-                    info = entry.stat(follow_symlinks=False)
                     selected = _inside(path, source)
                     regular, directory_entry = stat.S_ISREG(info.st_mode), stat.S_ISDIR(info.st_mode)
                     if not regular and not directory_entry:
@@ -243,6 +245,9 @@ def _plan(source, destination):
         raise StorageError('not_found', 404)
     if not (stat.S_ISDIR(source_info.st_mode) or stat.S_ISREG(source_info.st_mode) and source.lower().endswith('.md')):
         raise PathDenied()
+    if stat.S_ISDIR(source_info.st_mode):
+        validate_path(source, 'folder')
+        validate_path(destination, 'folder')
     if stat.S_ISREG(source_info.st_mode) and not destination.lower().endswith('.md'):
         raise StorageError('markdown_extension_required')
     if _stat(destination) is not None:
