@@ -91,3 +91,45 @@ def test_read_many_requires_csrf(reader, wiki):
     protected = Client(enforce_csrf_checks=True)
     protected.cookies = reader.cookies
     assert read_many(protected, ['a.md']).status_code == 403
+
+
+def test_syncthing_documentation_reads_and_lists_without_weakening_guards(reader, wiki, settings):
+    from wiki.storage import list_folder
+    (wiki / 'docs').mkdir()
+    path = 'docs/syncthing-overview.md'
+    (wiki / path).write_text('# Documentation\n')
+    single = reader.get('/tools/read/', {'path': path})
+    assert single.status_code == 200
+    batch = read_many(reader, [path]).json()
+    assert batch['state'] == 'complete'
+    assert batch['results'][0]['source'] == '# Documentation\n'
+    assert batch['results'][0]['revision'] == single.json()['revision']
+    assert path in [entry.path for entry in list_folder('docs').entries]
+    (wiki / 'docs/syncthing-link.md').symlink_to(wiki / path)
+    denied = read_many(reader, ['docs/syncthing-link.md']).json()['results'][0]
+    assert denied['state'] == 'denied'
+    settings.BACKSTORY_EXCLUSIONS = [path]
+    assert read_many(reader, [path]).json()['results'][0]['state'] == 'denied'
+    assert path not in [entry.path for entry in list_folder('docs').entries]
+
+
+def test_markdown_named_sync_directory_is_not_exposed(reader, wiki):
+    from wiki.storage import list_folder
+    from indexing.scanner import next_paths
+    from wiki.relocations import _scan, _plan
+    from wiki.contracts import PathDenied
+    (wiki / 'syncthing.md').mkdir()
+    (wiki / 'ordinary').mkdir()
+    assert 'syncthing.md' not in [entry.path for entry in list_folder('').entries]
+    cursor = {}
+    done = False
+    while not done:
+        _, done = next_paths(cursor, entry_limit=1)
+        assert all(frame['path'] != 'syncthing.md' for frame in cursor.get('stack', []))
+    witnesses, _, _ = _scan('ordinary')
+    assert 'syncthing.md' not in witnesses
+    with pytest.raises(PathDenied):
+        _plan('ordinary', 'syncthing-new.md')
+
+    with pytest.raises(PathDenied):
+        _plan('syncthing.md', 'renamed')

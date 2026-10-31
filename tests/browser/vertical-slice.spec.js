@@ -17,6 +17,7 @@ async function login(page, route = '/notes/Editable.md') {
 }
 const readSource = page => page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource());
 async function replace(page, value) {
+  await expect(page.locator('[data-editor-stage]')).toHaveAttribute('data-editor-state', 'ready');
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+a');
   await page.keyboard.insertText(value);
@@ -299,6 +300,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: expired au
 test('a confirmed save of an earlier draft never replaces edits typed while its response is pending', async ({ page }) => {
   await login(page);
   await replace(page, '# Earlier draft\n');
+  expect(await readSource(page)).toBe('# Earlier draft\r\n');
   let release;
   let published;
   const gate = new Promise(resolve => { release = resolve; });
