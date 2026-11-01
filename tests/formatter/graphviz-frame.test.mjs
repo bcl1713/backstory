@@ -68,7 +68,7 @@ test('live frame concurrency and response rate are bounded until explicit destro
  for(let i=0;i<5;i++)receive({data:{version:1,type:'unknown',token:'wrong'}});
  assert.deepEqual(e.statuses,['error']);h.destroy();
 });
-test('distinct ready frames serialize rendering and cancellation releases only its own slot',()=>{
+test('distinct Graphviz and Vega-Lite frames serialize rendering and cancellation releases only its own slot',()=>{
  const win=new Target(),frames=[],events=[];
  class Channel{constructor(){this.port1={sent:[],postMessage(data){this.sent.push(data);events.push('render:'+frames.indexOf(this.frame));},close(){},start(){}};this.port2={owner:this.port1};}}
  Object.assign(globalThis,{window:win,MessageChannel:Channel,document:{createElement(){
@@ -78,7 +78,7 @@ test('distinct ready frames serialize rendering and cancellation releases only i
  const host={append(){}};
  const ready=frame=>{frame.emit('load');win.emit('message',{source:frame.contentWindow,origin:'null',data:hello});frame.port.onmessage({data:{version:1,type:'ready',token:frame.token}});};
  const success=frame=>frame.port.onmessage({data:{version:1,type:'result',token:frame.token,status:'ok',width:100,height:100}});
- const a=controller.createGraphvizFrame(host,'digraph{a->b}'),b=controller.createGraphvizFrame(host,'digraph{c->d}');ready(frames[0]);ready(frames[1]);
+ const a=controller.createGraphvizFrame(host,'digraph{a->b}'),b=controller.createVegaLiteFrame(host,JSON.stringify({data:{values:[{x:'A',y:1}]},mark:'bar',encoding:{x:{field:'x',type:'nominal'},y:{field:'y',type:'quantitative'}}}));ready(frames[0]);ready(frames[1]);
  assert.equal(frames[0].port.sent.length,1);assert.equal(frames[1].port.sent.length,0);
  success(frames[0]);assert.equal(frames[1].port.sent.length,1);a.destroy();
  const c=controller.createGraphvizFrame(host,'digraph{e->f}');ready(frames[2]);assert.equal(frames[2].port.sent.length,0);c.destroy();

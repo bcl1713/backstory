@@ -1,9 +1,10 @@
 import { parseFlowchart } from './mermaid-model.js';
 import {parseDot} from './graphviz-model.js';
+import {parseVegaLite} from './vega-lite-model.js';
 import { diagramView } from './diagram-view.js';
 const hydrated=new WeakSet();
 export function hydrate(root=document){
-  hydrateEngine(root,'mermaid',parseFlowchart);hydrateEngine(root,'graphviz',parseDot);
+  hydrateEngine(root,'mermaid',parseFlowchart);hydrateEngine(root,'graphviz',parseDot);hydrateEngine(root,'vega-lite',parseVegaLite);
 }
 function hydrateEngine(root,engine,parse){
   const enabled=root.matches?.(`[data-${engine}-enabled="true"]`)||root.closest?.(`[data-${engine}-enabled="true"]`)||root.querySelector?.(`[data-${engine}-enabled="true"]`);

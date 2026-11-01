@@ -1,18 +1,21 @@
 import { parseDot } from './graphviz-model.js';
+import {parseVegaLite} from './vega-lite-model.js';
 const DIAGRAM_LIMITS={active:2,width:1600,height:1200};
 let running=null;const waiting=[];
 function pump(){if(running)return;const job=waiting.shift();if(job){running=job;job.start();}}
 let active = 0;
 const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).sort().join(',') === [...keys].sort().join(',');
-export function createGraphvizFrame(container, source, { onStatus = () => {}, onSize = () => {} } = {}) {
-  parseDot(source); // Reject before allocating a browsing context or cloning source.
+export const createGraphvizFrame=(container,source,options)=>createFrame(container,source,'graphviz',options);
+export const createVegaLiteFrame=(container,source,options)=>createFrame(container,source,'vega-lite',options);
+function createFrame(container, source, engine, { onStatus = () => {}, onSize = () => {} } = {}) {
+  (engine==='graphviz'?parseDot:parseVegaLite)(source); // Reject before allocating a browsing context or cloning source.
   if (active >= DIAGRAM_LIMITS.active) throw new Error('renderer_busy');
   const frame = document.createElement('iframe');
   frame.setAttribute('sandbox', 'allow-scripts');
-  frame.setAttribute('title', 'Graphviz diagram');
+  frame.setAttribute('title', engine==='graphviz'?'Graphviz diagram':'Vega-Lite chart');
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.setAttribute('allow', "camera 'none'; microphone 'none'; geolocation 'none'; payment 'none'");
-  frame.src = '/renderers/graphviz-frame/';
+  frame.src = `/renderers/${engine}-frame/`;
   const bytes = new Uint8Array(32); crypto.getRandomValues(bytes);
   const token = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
   let alive = true, loads = 0, hello = false, connected = false, rendered = false, finished = false, messages = 0, port;
