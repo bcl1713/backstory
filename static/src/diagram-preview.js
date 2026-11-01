@@ -1,11 +1,12 @@
-import { StateEffect, StateField } from '@codemirror/state';
+import { Facet, StateEffect, StateField } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import { getCM } from '@replit/codemirror-vim';
 import { tableMotionCount, tableMotionPath } from './table-preview.js';
 import { diagramModelsFromTree } from './diagram-syntax.js';
 import { diagramView } from './diagram-view.js';
-export function diagramModels(state){return diagramModelsFromTree(syntaxTree(state),(from,to)=>state.doc.sliceString(from,to));}
+export const diagramEngines=Facet.define({combine:values=>values.at(-1)||['mermaid']});
+export function diagramModels(state){return diagramModelsFromTree(syntaxTree(state),(from,to)=>state.doc.sliceString(from,to),state.facet(diagramEngines));}
 export const revealDiagramMotion=StateEffect.define();
 export const diagramMotionRange=StateField.define({create:()=>null,update(value,transaction){for(const effect of transaction.effects)if(effect.is(revealDiagramMotion))return effect.value;return value&&transaction.docChanged?{from:transaction.changes.mapPos(value.from,-1),to:transaction.changes.mapPos(value.to,1)}:value;}});
 export function diagramIsActive(state,model){

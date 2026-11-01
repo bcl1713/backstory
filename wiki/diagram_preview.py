@@ -10,21 +10,24 @@ def _units(value):
 def _fence(self, tokens, index, options, env):
     token = tokens[index]
     # Presentation only for complete, top-level column-zero explicit fences.
-    if (token.info.strip() != 'mermaid' or token.level or not token.meta.get('mermaid_complete')):
+    if (token.info.strip() not in {'mermaid', 'graphviz', 'dot'} or token.level or not token.meta.get('mermaid_complete')):
         return RendererHTML.fence(self, tokens, index, options, env)
-    if _units(token.content) > 8192 or token.meta.get('mermaid_source_units', 0) > 8292 or env.get('mermaid_count', 0) >= 32:
-        env['diagnostics'].setdefault('preview_mermaid_limit', None)
+    engine = 'mermaid' if token.info.strip() == 'mermaid' else 'graphviz'
+    count_key = engine + '_count'
+    if _units(token.content) > 8192 or token.meta.get('mermaid_source_units', 0) > 8292 or env.get(count_key, 0) >= 32:
+        env['diagnostics'].setdefault('preview_' + engine + '_limit', None)
         return RendererHTML.fence(self, tokens, index, options, env)
-    env['mermaid_count'] = env.get('mermaid_count', 0) + 1
-    return ('<pre class="lp-diagram-preview" data-mermaid-source="' + escape(token.content, quote=True)
+    env[count_key] = env.get(count_key, 0) + 1
+    name = 'Mermaid' if engine == 'mermaid' else 'Graphviz'
+    return ('<pre class="lp-diagram-preview" data-' + engine + '-source="' + escape(token.content, quote=True)
             + '"><code>' + escape(token.content) + '</code>'
-            + '<span class="lp-diagram-status">Mermaid source; local rendering requires JavaScript and explicit configuration.</span></pre>\n')
+            + '<span class="lp-diagram-status">' + name + ' source; local rendering requires JavaScript and explicit configuration.</span></pre>\n')
 
 
 def mark_complete_fences(tokens, source):
     lines = source.replace('\r\n', '\n').replace('\r', '\n').split('\n')
     for token in tokens:
-        if token.type != 'fence' or token.info.strip() != 'mermaid' or not token.map or token.level:
+        if token.type != 'fence' or token.info.strip() not in {'mermaid', 'graphviz', 'dot'} or not token.map or token.level:
             continue
         start, end = token.map
         if start >= len(lines) or end > len(lines) or end - start < 2:

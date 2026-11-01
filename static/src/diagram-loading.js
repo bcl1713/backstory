@@ -1,4 +1,5 @@
 import { createMermaidFrame } from './mermaid-frame-parent.js';
+import {createGraphvizFrame} from './bounded-frame-parent.js';
 function observeViewport(element,change){
   if(typeof IntersectionObserver!=='function')return()=>{}; // Keep readable source, never allocate offscreen blindly.
   const observer=new IntersectionObserver(entries=>{for(const entry of entries)change(entry.isIntersecting);});
@@ -56,10 +57,11 @@ export function createDiagramScheduler({createFrame=createMermaidFrame,observe=o
   return Object.freeze({mount,prune});
 }
 const scheduler=createDiagramScheduler();
+const graphvizScheduler=createDiagramScheduler({createFrame:createGraphvizFrame});
 let cleanupObserver;
 export function mountDiagram(element,model,valid,callbacks={}){
   if(!cleanupObserver&&typeof MutationObserver==='function'){
-    cleanupObserver=new MutationObserver(()=>scheduler.prune());cleanupObserver.observe(element.ownerDocument.documentElement,{childList:true,subtree:true});
+    cleanupObserver=new MutationObserver(()=>{scheduler.prune();graphvizScheduler.prune();});cleanupObserver.observe(element.ownerDocument.documentElement,{childList:true,subtree:true});
   }
-  return scheduler.mount(element,model.expression,valid,callbacks);
+  return (model.engine==='graphviz'?graphvizScheduler:scheduler).mount(element,model.expression,valid,callbacks);
 }
