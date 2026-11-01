@@ -5,7 +5,9 @@ export function bindSourceEdit(surface, { label, valid, activate }) {
   const button = surface.ownerDocument.createElement('button');
   button.type = 'button';
   button.className = 'lp-source-edit';
-  button.textContent = label;
+  button.textContent = '✎';
+  button.setAttribute('aria-label', label);
+  button.title = label;
   surface.classList.add('lp-direct-edit');
   surface.appendChild(button);
   let gesture;

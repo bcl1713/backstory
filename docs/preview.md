@@ -130,8 +130,8 @@ retain the authoritative source and its existing undo history.
 
 Math, image and diagram previews all support intentional click/tap to enter
 source and render again when the caret leaves. Scrolling or dragging does not
-activate editing. Tab reaches a native **Edit … source** button that appears
-only while keyboard-focused; Enter/Space activates it. The focus outline marks
+activate editing. Tab reaches a native pencil button labeled **Edit … source**
+that appears only while keyboard-focused; Enter/Space activates it. The focus outline marks
 the preview, and math/image semantics remain separate from the button. Source
 controls are also available to screen readers without adding permanent buttons
 to prose. Rendering and activation never rewrite source.

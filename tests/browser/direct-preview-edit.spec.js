@@ -80,6 +80,7 @@ test('source buttons do not occupy prose but are keyboard reachable with visible
     for (let steps = 0; steps < 20 && !(await edit.evaluate(el => el === document.activeElement)); steps++) await page.keyboard.press('Tab');
     await expect(edit).toBeFocused();
     expect(await edit.evaluate(el => getComputedStyle(el).outlineStyle)).not.toBe('none');
+    expect((await edit.boundingBox()).height).toBeLessThanOrEqual(48);
     if (item.name === 'inline math' || item.name === 'diagram') await page.screenshot({ path: `${runtime}/reports/direct-edit-focus-${item.name.replace(' ', '-')}.png` });
     await page.keyboard.press(item.name === 'image' ? 'Space' : 'Enter');
     await expect(surface).toHaveCount(0);
