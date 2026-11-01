@@ -34,3 +34,18 @@ test('decorative omission refuses mutated shadow payloads and dangling reference
  const filter=shadow(fixture.filters[0]);assert.throws(()=>withParsedSvg(root([filter],'0 0 100 100'),()=>safeSvg('<svg/>',document)),{message:'unsafe_output'});
  const dangling=root([new Element('defs',{},[shadow(fixture.filters[0])]),new Element('g',{'clip-path':'url(#diagram-svg-drop-shadow)'})],'0 0 100 100');assert.throws(()=>withParsedSvg(dangling,()=>safeSvg('<svg/>',document)),{message:'unsafe_output'});
 });
+test('classless node text gets an owned center rule and SVG width never upscales beyond natural viewBox',()=>{
+ const clean=withParsedSvg(root([new Element('g',{class:'node default'},[new Element('g',{class:'label'},[new Element('text',{},[])])])]),()=>safeSvg('<svg/>',document));
+ const style=clean.querySelectorAll('*').find(node=>node.localName==='style').textContent;
+ assert.match(style,/\.node text\{text-anchor:middle\}/);
+ assert.equal(clean.style.width,'615.109375px');assert.equal(clean.style.maxWidth,'100%');assert.equal(clean.style.height,'auto');
+ for(const viewBox of ['0 0 0 100','0 0 100 -1'])assert.throws(()=>withParsedSvg(root([],viewBox),()=>safeSvg('<svg/>',document)),{message:'unsafe_output'});
+ const missing=root();missing.removeAttribute('viewBox');assert.throws(()=>withParsedSvg(missing,()=>safeSvg('<svg/>',document)),{message:'unsafe_output'});
+});
+test('frame sizing uses the bounded natural viewport, not a mobile-first measurement that locks later desktop width',async()=>{
+ const api=await import('../../static/src/mermaid-svg.js');assert.equal(typeof api.svgViewport,'function','natural viewport reply helper missing');
+ const clean=withParsedSvg(root(),()=>safeSvg('<svg/>',document));
+ assert.deepEqual(api.svgViewport(clean),{width:615.109375,height:193.71286011});
+ const wide=withParsedSvg(root([],'0 0 5000 500'),()=>safeSvg('<svg/>',document));assert.deepEqual(api.svgViewport(wide),{width:1600,height:162});
+ const tall=withParsedSvg(root([],'0 0 200 5000'),()=>safeSvg('<svg/>',document));assert.deepEqual(api.svgViewport(tall),{width:200,height:1200});
+});

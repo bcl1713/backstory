@@ -41,3 +41,12 @@ test('same-turn detached CodeMirror widgets survive eager stale-job pruning unti
  assert.equal(h.frames.length,2,'both newborn widgets must remain observed through the DOM construction batch');
  assert.equal(h.watched.has(a.element),true);assert.equal(h.watched.has(b.element),true);a.job.destroy();b.job.destroy();
 });
+
+test('successful disconnected previews unconditionally dispose owned measurement resources once',async()=>{
+ let disposed=0,stateCalls=0,callbacks,destroyed=0;const element={isConnected:true};
+ const scheduler=api.createDiagramScheduler({observe:(el,visible)=>{visible(true);return()=>{};},createFrame:(el,source,handlers)=>{callbacks=handlers;return{destroy(){destroyed++;}};}});
+ const registration=scheduler.mount(element,'flowchart TD\nA-->B',()=>true,{state:()=>stateCalls++,dispose:()=>disposed++});
+ await tick();callbacks.onStatus('ok');const statesBeforeDetach=stateCalls;
+ element.isConnected=false;scheduler.prune();scheduler.prune();registration.destroy();
+ assert.equal(destroyed,1);assert.equal(stateCalls,statesBeforeDetach,'detached status callbacks remain suppressed');assert.equal(disposed,1,'cleanup is not conditional on connected/valid status delivery');
+});

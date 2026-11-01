@@ -9,7 +9,7 @@ export function createDiagramScheduler({createFrame=createMermaidFrame,observe=o
   const current=job=>!job.disposed&&job.element.isConnected&&job.valid();
   function state(job,value){if(current(job))job.callbacks.state?.(value);}
   function stop(job){if(job.handle){job.handle.destroy();job.handle=null;active.delete(job);}}
-  function dispose(job){if(job.disposed)return;stop(job);job.disposed=true;job.unobserve?.();jobs.delete(job);schedule();}
+  function dispose(job){if(job.disposed)return;stop(job);job.disposed=true;job.unobserve?.();job.callbacks.dispose?.();jobs.delete(job);schedule();}
   function prune(){
     for(const job of jobs){
       if(job.element.isConnected){job.wasConnected=true;if(!job.valid())dispose(job);}

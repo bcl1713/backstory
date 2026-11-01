@@ -71,7 +71,12 @@ A bare ID used before a different labeled declaration is intentionally unsupport
 Limits: 8,192 UTF-16 source units, 32 nodes, 48 edges, 80 label units, subgraph/depth
 zero, two simultaneously live controllers, one render per frame, 250,000 output
 units, 4,000 output elements, 20,000 output attributes and 16,000 text units.
-Returned viewport dimensions are finite and bounded to 1,600 x 1,200 pixels.
+Returned natural viewport dimensions are finite and bounded to 1,600 x 1,200 pixels.
+Application-owned node-text centering and natural SVG/frame widths prevent
+upscaling. Widths shrink to the available viewport; the frame aspect ratio and
+resize measurement preserve fit when changing between desktop and mobile,
+without rerendering or resending source. Wide diagrams scale down; over-height
+diagrams retain bounded internal scrolling.
 Unsupported input fails before allocating a parent frame and again before draw
 inside the child. There is no blacklist fallback to general Mermaid parsing.
 Other engines, subgraphs, init directives/YAML, HTML/Markdown/resource labels,

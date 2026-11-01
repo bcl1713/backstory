@@ -65,7 +65,18 @@ function decorativeShadow(node,svgId){
   return shadow.nodeType===1&&shadow.localName==='feDropShadow'&&shadow.namespaceURI===NS&&shadow.childNodes.length===0&&attributes(shadow,{dx:small?'2':'4',dy:small?'2':'4',stdDeviation:'0','flood-opacity':'0.06','flood-color':'#000000'});
 }
 // Final styles are application-owned, never Mermaid's returned stylesheet bytes.
-const FIXED_STYLE='svg{font:16px Arial,sans-serif;color:#172033}text{fill:#172033}.node rect,.node circle,.node ellipse,.node polygon,.node path{fill:#eef2ff;stroke:#58627a;stroke-width:1.5px}.flowchart-link{fill:none;stroke:#58627a;stroke-width:1.5px}.marker{fill:#58627a;stroke:#58627a}.edgeLabel rect,.labelBkg{fill:#fff}.nodeLabel,.edgeLabel{text-anchor:middle}';
+const FIXED_STYLE='svg{font:16px Arial,sans-serif;color:#172033}text{fill:#172033}.node rect,.node circle,.node ellipse,.node polygon,.node path{fill:#eef2ff;stroke:#58627a;stroke-width:1.5px}.flowchart-link{fill:none;stroke:#58627a;stroke-width:1.5px}.marker{fill:#58627a;stroke:#58627a}.edgeLabel rect,.labelBkg{fill:#fff}.nodeLabel,.edgeLabel{text-anchor:middle}.node text{text-anchor:middle}';
+function naturalViewport(svg){
+  const viewport=svg.getAttribute('viewBox')?.split(' ').map(Number);
+  if(!viewport||viewport.length!==4||!viewport.every(value=>Number.isFinite(value)&&Math.abs(value)<=1000000)||viewport[2]<=0||viewport[3]<=0)throw new Error('unsafe_output');
+  return{width:viewport[2],height:viewport[3]};
+}
+export function svgViewport(svg){
+  const natural=naturalViewport(svg),scale=Math.min(1,DIAGRAM_LIMITS.width/natural.width);
+  // Two pixels accommodate fractional layout/viewport rounding; wide/tall
+  // diagrams still keep the existing finite width/height scrolling limits.
+  return{width:Math.max(1,natural.width*scale),height:Math.max(1,Math.min(DIAGRAM_LIMITS.height,natural.height*scale+2))};
+}
 export function safeSvg(svg, document) {
   if(typeof svg!=='string'||svg.length>DIAGRAM_LIMITS.output) throw new Error('unsafe_output');
   const parsed=new DOMParser().parseFromString(svg,'image/svg+xml');
@@ -98,7 +109,10 @@ export function safeSvg(svg, document) {
   }
   const clean=copy(parsed.documentElement), style=document.createElementNS(NS,'style');
   style.textContent=FIXED_STYLE; clean.prepend(style);
+  const viewport=naturalViewport(clean);
   clean.removeAttribute('width'); clean.removeAttribute('height');
-  clean.style.maxWidth='100%'; clean.style.height='auto';
+  // A responsive maximum alone lets an intrinsic SVG fill/upscale the frame.
+  // Own its natural width explicitly; shrink to available space, never enlarge.
+  clean.style.width=`${viewport.width}px`; clean.style.maxWidth='100%'; clean.style.height='auto'; clean.style.display='block';
   return clean;
 }

@@ -1,6 +1,6 @@
 import mermaid from 'mermaid';
 import { installFrameProtocol } from './mermaid-frame-protocol.js';
-import { safeSvg } from './mermaid-svg.js';
+import { safeSvg, svgViewport } from './mermaid-svg.js';
 import { DIAGRAM_LIMITS } from './mermaid-model.js';
 const config={startOnLoad:false,securityLevel:'strict',htmlLabels:false,theme:'default',fontFamily:'Arial, sans-serif',fontSize:16,logLevel:'fatal',suppressErrorRendering:true,maxTextSize:DIAGRAM_LIMITS.source,maxEdges:DIAGRAM_LIMITS.edges,arrowMarkerAbsolute:false,layout:'dagre',flowchart:{htmlLabels:false,useMaxWidth:true,defaultRenderer:'dagre-wrapper',curve:'linear'}, deterministicIds:true, deterministicIDSeed:'bounded-flowchart'};
 config.secure=Object.keys(config);
@@ -15,7 +15,8 @@ installFrameProtocol(window, document.body.dataset.parentOrigin, async canonical
     const svg=safeSvg(result.svg,document);
     main.replaceChildren(svg);
     document.body.style.margin='0';main.style.overflow='auto';main.style.maxHeight=`${DIAGRAM_LIMITS.height}px`;
-    const box=svg.getBoundingClientRect();
-    return{width:Math.max(1,Math.ceil(box.width)),height:Math.max(1,Math.ceil(box.height))};
+    // Reply with a bounded natural viewport so parent CSS can respond to later
+    // resize without a second message, frame reload, or source resend.
+    return svgViewport(svg);
   } finally { staging.remove(); }
 });

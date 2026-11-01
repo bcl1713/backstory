@@ -2,6 +2,7 @@ import {test,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {runtime} from './support/server.js';
 import {revealChrome} from './support/chrome.js';
+import {expectDiagramGeometry} from './support/diagram-geometry.js';
 const fence='```mermaid\nflowchart TD\nA[Start] --> B{Ready?}\nB -->|Yes| C((Done))\nB -.-> D(Retry)\n```';
 const source='Before\n\n'+fence+'\n\n```mermaid\nsequenceDiagram\nA->>B:Hi\n```\n\n```mermaid\nflowchart TD\nA[<img src=/diagram-private-canary>]\n```\n\nAfter\n';
 const motion='Before\n\n'+fence+'\n\nAfter';
@@ -13,7 +14,7 @@ async function open(page,note='Diagrams'){
 }
 test.beforeAll(async()=>{
  await mkdir(`${runtime}/reports`,{recursive:true});
- for(const[note,text]of Object.entries({Diagrams:source,DiagramMotion:motion,DiagramMany:'Before\n\n'+Array.from({length:5},(_,i)=>'```mermaid\nflowchart LR\nA[Diagram '+i+']-->B\n```').join('\n\n')+'\n\nAfter\n\n'+('Distant paragraph.\n\n'.repeat(150))}))await writeFile(`${runtime}/wiki/${note}.md`,text);
+ for(const[note,text]of Object.entries({Diagrams:source,DiagramMotion:motion,DiagramWide:motion.replace('flowchart TD','flowchart LR'),DiagramMany:'Before\n\n'+Array.from({length:5},(_,i)=>'```mermaid\nflowchart LR\nA[Diagram '+i+']-->B\n```').join('\n\n')+'\n\nAfter\n\n'+('Distant paragraph.\n\n'.repeat(150))}))await writeFile(`${runtime}/wiki/${note}.md`,text);
 });
 test('explicit Mermaid widgets use only fixed local frame assets, retain unsupported source and never save',async({page})=>{
  const requests=[],effects=[];page.on('request',r=>{requests.push(r.url());if(r.method()==='POST'&&/\/(save|format|draft)/.test(r.url()))effects.push(r.url());});
@@ -72,7 +73,7 @@ test('disabled UI does not allocate frames; frame failures retain source and do 
 });
 for(const width of [1180,390])test(`Mermaid editor and preview fit ${width}px with screenshot evidence`,async({page})=>{
  await page.setViewportSize({width,height:900});await open(page,'DiagramMotion');await expect(host(page).getByText('Mermaid flowchart.',{exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- await page.screenshot({path:`${runtime}/reports/mermaid-${width}.png`,fullPage:true});await page.goto('/preview/DiagramMotion.md');await expect(page.getByText('Mermaid flowchart.',{exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:`${runtime}/reports/mermaid-${width}-preview.png`,fullPage:true});
+ await expectDiagramGeometry(host(page).locator('iframe'));await page.screenshot({path:`${runtime}/reports/mermaid-${width}.png`,fullPage:true});await page.goto('/preview/DiagramMotion.md');await expect(page.getByText('Mermaid flowchart.',{exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await expectDiagramGeometry(page.locator('iframe'));await page.screenshot({path:`${runtime}/reports/mermaid-${width}-preview.png`,fullPage:true});
 });
 for(const direction of ['down','up'])test(`Vim counts and delete/undo preserve Mermaid fence source ${direction}`,async({page})=>{
  await open(page,'DiagramMotion');await expect(host(page).getByText('Mermaid flowchart.',{exact:true})).toBeVisible();await host(page).evaluate(el=>el.markdownEditor.setVimEnabled(true));await page.locator('.cm-content').focus();
@@ -103,4 +104,35 @@ test('replacing a full 32-diagram draft and immediately hydrating registers the 
  await expect(preview.locator('.lp-diagram')).toHaveCount(32);
  await expect(preview.getByText('Mermaid flowchart.',{exact:true}).first()).toBeVisible();
  expect(await preview.locator('iframe').count()).toBeLessThanOrEqual(2);
+});
+
+for(const preview of [false,true])test(`Mermaid natural sizing survives desktop/mobile resize without rerender (${preview?'preview':'editor'})`,async({page})=>{
+ const loads=[];page.on('request',request=>{if(new URL(request.url()).pathname==='/renderers/mermaid-frame/')loads.push(request.url());});
+ await page.setViewportSize({width:1180,height:1000});await open(page,'DiagramWide');if(preview)await page.goto('/preview/DiagramWide.md');
+ await expect(page.getByText('Mermaid flowchart.',{exact:true})).toBeVisible();const iframe=page.locator('iframe'),initial=await expectDiagramGeometry(iframe),count=loads.length;
+ expect(initial.parentWidth).toBeGreaterThan(400);
+ for(const width of [390,1180,390,1180]){
+  await page.setViewportSize({width,height:1000});
+  await expect.poll(async()=>{const box=await iframe.boundingBox();return width===390?box.width<390:Math.abs(box.width-initial.parentWidth)<2;}).toBe(true);
+  const geometry=await expectDiagramGeometry(iframe);if(width===390)expect(geometry.width).toBeLessThan(initial.width);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ }
+ expect(loads.length).toBe(count);await page.screenshot({path:`${runtime}/reports/mermaid-resize-${preview?'preview':'editor'}.png`,fullPage:true});
+});
+
+test('removing a successfully hydrated preview disconnects its owned resize observer',async({page})=>{
+ await page.addInitScript(()=>{
+  const Native=window.ResizeObserver,observed=new Map();
+  window.ResizeObserver=class extends Native{
+   constructor(callback){super(callback);observed.set(this,new Set());}
+   observe(target,options){super.observe(target,options);observed.get(this).add(target);}
+   unobserve(target){super.unobserve(target);observed.get(this).delete(target);}
+   disconnect(){super.disconnect();observed.get(this).clear();}
+  };
+  window.mermaidResizeCount=()=>[...observed.values()].reduce((n,targets)=>n+[...targets].filter(el=>el.matches('iframe[title="Mermaid flowchart"]')).length,0);
+ });
+ await open(page,'DiagramMotion');await page.goto('/preview/DiagramMotion.md');await expect(page.getByText('Mermaid flowchart.',{exact:true})).toBeVisible();
+ await expect.poll(()=>page.evaluate(()=>window.mermaidResizeCount())).toBe(1);
+ await page.locator('[aria-label="Markdown preview"]').evaluate(el=>el.replaceChildren());
+ await expect.poll(()=>page.evaluate(()=>window.mermaidResizeCount())).toBe(0);await expect(page.locator('iframe')).toHaveCount(0);
 });
