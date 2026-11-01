@@ -194,3 +194,16 @@ test('formatter fails closed when full syntax verification exceeds its visit bud
   assert.equal(result.source, source);
   assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === 'format-math-source' && diagnostic.message.includes('safety budget')));
 });
+
+test('formatter refuses Mermaid fence rewrites including the 33rd fence beyond presentation cap',()=>{
+  const ordinary='```mermaid\nflowchart TD\nA[keep  two  spaces]\n```\n\n';
+  for(const source of ['# Diagram\n\n~~~~mermaid\nflowchart TD\nA-->B\n~~~~\n','# Diagram\n\n'+ordinary.repeat(32)+'~~~~mermaid\nsequenceDiagram\nA->>B: Hi\n~~~~\n']){
+    const result=helper(source);assert.equal(result.outcome,'failed');assert.equal(result.source,source);
+    assert.ok(result.diagnostics.some(d=>d.code==='format-mermaid-source'));
+  }
+});
+test('unchanged Mermaid fence source permits surrounding Markdown formatting and EOL conversion',()=>{
+ const source='# Diagram\n\n* item\n\n```mermaid\nflowchart TD\nA[keep  two  spaces]-->B\n```\n';
+ const result=helper(source,{'.editorconfig':'root=true\n[*.md]\nend_of_line=crlf\n'});
+ assert.equal(result.outcome,'ok');assert.equal(result.source,source.replace('* item','- item').replaceAll('\n','\r\n'));
+});

@@ -17,6 +17,10 @@ export function markdownBlock(state, position) {
     for (let visited = 0; visited < 10000; visited++) {
       if (cursor.from < node.from || cursor.to > node.to) break;
       if (cursor.name === 'MathInline' || cursor.name === 'MathBlock') return null;
+      if (cursor.name === 'FencedCode') {
+        const info = cursor.node.getChild('CodeInfo');
+        if (info && /^mermaid(?:[ \t]|$)/i.test(state.doc.sliceString(info.from, info.to).trim())) return null;
+      }
       if (!cursor.next()) break;
       if (visited === 9999) return null;
     }

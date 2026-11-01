@@ -12,6 +12,7 @@ import nh3
 from .attachments import INLINE_RASTER_SUFFIXES
 from .contracts import Preview
 from .links import heading_slug, resolve_link
+from .diagram_preview import install_diagrams, mark_complete_fences
 from .math_preview import install_math, preserve_table_math_source
 
 _LINK_LIMIT = 200
@@ -23,7 +24,7 @@ _TAGS = {
 _ATTRIBUTES = {
     "a": {"href", "title", "class", "aria-label"}, "img": {"src", "alt", "title", "loading"},
     "span": {"class", "data-math-source", "data-math-expression", "data-math-display"}, "input": {"checked", "disabled"},
-    "ol": {"start"}, **{f"h{level}": {"id"} for level in range(1, 7)},
+    "pre": {"class", "data-mermaid-source"}, "ol": {"start"}, **{f"h{level}": {"id"} for level in range(1, 7)},
 }
 
 
@@ -147,6 +148,7 @@ def _parser():
     parser.add_render_rule("wiki_link", _wiki_render)
     parser.add_render_rule("image", _image_render)
     install_math(parser)
+    install_diagrams(parser)
     return parser
 
 
@@ -162,6 +164,7 @@ def render_preview(source: str, source_path: str) -> Preview:
         parser = _parser()
         tokens = parser.parse(source, env)
         preserve_table_math_source(tokens)
+        mark_complete_fences(tokens, source)
         counts = {}
         used = set()
         for index, token in enumerate(tokens):

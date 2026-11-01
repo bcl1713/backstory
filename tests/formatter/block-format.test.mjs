@@ -67,3 +67,9 @@ test('math source guard is scoped to the exited block rather than later sibling 
   assert.equal(markdownBlock(doc, source.indexOf('After'))?.type, 'Paragraph');
   assert.equal(markdownBlock(doc, source.indexOf('\\(')), null);
 });
+
+test('automatic list formatting does not reinterpret an embedded Mermaid source fence',()=>{
+ const source='Before\n\n- Item\n\n  ```mermaid\n  flowchart TD\n  A[keep  two  spaces]\n  ```\n';
+ assert.equal(markdownBlock(state(source),source.indexOf('Item')),null);
+ assert.equal(state(source).doc.toString(),source);
+});

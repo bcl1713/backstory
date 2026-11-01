@@ -1,4 +1,4 @@
 {% extends 'wiki/shell.html' %}
 {% load static %}
 {% block title %}Preview · {{ note.path }} · Backstory{% endblock %}
-{% block content %}<h1>Preview: {{ note.path }}</h1><p><a href="{% url 'wiki:note' note.path %}">View original source</a></p><section aria-label="Markdown preview">{% for diagnostic in preview.diagnostics %}<p role="status">{{ diagnostic }}</p>{% endfor %}{{ preview.html|safe }}</section><script type="module" src="{% static 'math-preview-page.js' %}"></script>{% endblock %}
+{% block content %}<h1>Preview: {{ note.path }}</h1><p><a href="{% url 'wiki:note' note.path %}">View original source</a></p><section aria-label="Markdown preview" data-mermaid-enabled="{{ mermaid_enabled|yesno:'true,false' }}">{% for diagnostic in preview.diagnostics %}<p role="status">{{ diagnostic }}</p>{% endfor %}{{ preview.html|safe }}</section><script type="module" src="{% static 'math-preview-page.js' %}"></script>{% if mermaid_enabled %}<script type="module" src="{% static 'diagram-preview-page.js' %}"></script>{% endif %}{% endblock %}

@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import { mkdir, copyFile } from 'node:fs/promises';
 await build({
-  entryPoints: ['static/src/app.css', 'static/src/editor.js', 'static/src/editor-startup.js', 'static/src/shell.js', 'static/src/connectivity.js', 'static/src/wiki-tools.js', 'static/src/math-preview-page.js'],
+  entryPoints: ['static/src/app.css', 'static/src/editor.js', 'static/src/editor-startup.js', 'static/src/shell.js', 'static/src/connectivity.js', 'static/src/wiki-tools.js', 'static/src/math-preview-page.js', 'static/src/diagram-preview-page.js'],
   outdir: 'static',
   bundle: true,
   external: ['/static/math-renderer.js'],
@@ -23,3 +23,5 @@ await copyFile('node_modules/@codemirror/autocomplete/LICENSE', 'static/licenses
 
 await copyFile('node_modules/katex/LICENSE', 'static/licenses/katex.txt');
 await copyFile('node_modules/@lezer/markdown/LICENSE', 'static/licenses/lezer-markdown.txt');
+// Separate public classic bundle; source only crosses the private frame port.
+await import('./build-mermaid-frame.mjs');

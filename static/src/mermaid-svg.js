@@ -1,0 +1,70 @@
+import { DIAGRAM_LIMITS } from './mermaid-model.js';
+const NS='http://www.w3.org/2000/svg';
+const TAGS=new Set(['svg','g','defs','marker','path','rect','circle','ellipse','polygon','polyline','line','text','tspan','title','desc','clipPath']);
+const ID=/^[A-Za-z][A-Za-z0-9_-]{0,100}$/;
+const NUMBER='-?(?:\\d{1,6}(?:\\.\\d{1,8})?|\\.\\d{1,8})';
+const NUM=new RegExp(`^${NUMBER}(?:px|em|%)?$`);
+const LIST=new RegExp(`^${NUMBER}(?:[ ,]+${NUMBER}){1,7}$`);
+function boundedNumbers(value) { const numbers=value.match(/-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/g)||[]; return numbers.length<=8000 && numbers.every(n=>Number.isFinite(Number(n))&&Math.abs(Number(n))<=1000000); }
+export function safeSvgAttribute(tag,name,value,ids) {
+  if(typeof value!=='string'||value.length>40000) return false;
+  if(name==='id') return ID.test(value) && ids.has(value);
+  if(name==='class') return /^[A-Za-z0-9_ -]{0,240}$/.test(value);
+  if(['role','aria-roledescription','aria-label','aria-labelledby','aria-describedby'].includes(name)) return /^[A-Za-z0-9_ -]{1,240}$/.test(value);
+  if(name==='viewBox') return new RegExp(`^${NUMBER}(?:[ ,]+${NUMBER}){3}$`).test(value);
+  if(['x','y','dx','dy','x1','y1','x2','y2','cx','cy','r','rx','ry','width','height','markerWidth','markerHeight','refX','refY','stroke-width','opacity','stroke-dashoffset'].includes(name)) return NUM.test(value);
+  if(name==='d') return /^[MmZzLlHhVvCcSsQqTtAa0-9eE., +\-]+$/.test(value) && boundedNumbers(value);
+  if(name==='points') return /^[0-9., +\-]+$/.test(value) && boundedNumbers(value);
+  if(name==='stroke-dasharray') return LIST.test(value);
+  if(name==='font-weight') return value==='normal'||value==='bold';
+  if(name==='font-style') return value==='normal'||value==='italic';
+  if(name==='stroke-linecap') return ['butt','round','square'].includes(value);
+  if(name==='stroke-linejoin') return ['miter','round','bevel'].includes(value);
+  if(name==='transform') return /^(?:(?:translate|scale|rotate|matrix)\([-0-9., ]{1,160}\)\s*)+$/.test(value) && boundedNumbers(value);
+  if(name==='marker-start'||name==='marker-end'||name==='clip-path') { const m=/^url\(#([A-Za-z][A-Za-z0-9_-]{0,100})\)$/.exec(value); return !!m&&ids.has(m[1]); }
+  if(name==='fill'||name==='stroke') return /^(?:none|currentColor|#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,20})$/.test(value);
+  if(name==='text-anchor') return ['start','middle','end'].includes(value);
+  if(name==='dominant-baseline') return ['auto','middle','central','hanging','text-before-edge'].includes(value);
+  if(name==='markerUnits') return ['strokeWidth','userSpaceOnUse'].includes(value);
+  if(name==='orient') return value==='auto'||value==='auto-start-reverse'||NUM.test(value);
+  if(name==='preserveAspectRatio') return value==='xMinYMin meet'||value==='xMidYMid meet';
+  if(name==='xmlns') return value===NS;
+  return false;
+}
+// Final styles are application-owned, never Mermaid's returned stylesheet bytes.
+const FIXED_STYLE='svg{font:16px Arial,sans-serif;color:#172033}text{fill:#172033}.node rect,.node circle,.node ellipse,.node polygon,.node path{fill:#eef2ff;stroke:#58627a;stroke-width:1.5px}.flowchart-link{fill:none;stroke:#58627a;stroke-width:1.5px}.marker{fill:#58627a;stroke:#58627a}.edgeLabel rect,.labelBkg{fill:#fff}.nodeLabel,.edgeLabel{text-anchor:middle}';
+export function safeSvg(svg, document) {
+  if(typeof svg!=='string'||svg.length>DIAGRAM_LIMITS.output) throw new Error('unsafe_output');
+  const parsed=new DOMParser().parseFromString(svg,'image/svg+xml');
+  if(parsed.doctype||parsed.querySelector('parsererror')||parsed.documentElement.localName!=='svg') throw new Error('unsafe_output');
+  const elements=[parsed.documentElement,...parsed.documentElement.querySelectorAll('*')];
+  if(elements.length>DIAGRAM_LIMITS.elements) throw new Error('unsafe_output');
+  const ids=new Set();
+  for(const node of elements) { if(node.hasAttribute('id')) { const id=node.getAttribute('id'); if(!ID.test(id)||ids.has(id)) throw new Error('unsafe_output'); ids.add(id); } }
+  let attributes=0, text=0;
+  function copy(node,depth=0) {
+    if(depth>32) throw new Error('unsafe_output');
+    if(node.nodeType===3) { text+=node.textContent.length; if(text>16000) throw new Error('unsafe_output'); return document.createTextNode(node.textContent); }
+    if(node.nodeType!==1) throw new Error('unsafe_output');
+    // Drop returned style (known fixed config) rather than trusting raw CSS.
+    if(node.localName==='style'&&node.namespaceURI===NS) return document.createTextNode('');
+    if(node.namespaceURI!==NS||!TAGS.has(node.localName)) throw new Error('unsafe_output');
+    const clean=document.createElementNS(NS,node.localName);
+    for(const attr of node.attributes) {
+      if(++attributes>20000) throw new Error('unsafe_output');
+      // Library-only bookkeeping and inline CSS are not copied into the final SVG.
+      if(attr.name==='style'||attr.name.startsWith('data-')) continue;
+      if(attr.name==='xmlns:xlink'&&attr.value==='http://www.w3.org/1999/xlink') continue;
+      if(attr.namespaceURI&&attr.name!=='xmlns') throw new Error('unsafe_output');
+      if(!safeSvgAttribute(node.localName,attr.name,attr.value,ids)) throw new Error('unsafe_output');
+      clean.setAttribute(attr.name,attr.value);
+    }
+    for(const child of node.childNodes) clean.append(copy(child,depth+1));
+    return clean;
+  }
+  const clean=copy(parsed.documentElement), style=document.createElementNS(NS,'style');
+  style.textContent=FIXED_STYLE; clean.prepend(style);
+  clean.removeAttribute('width'); clean.removeAttribute('height');
+  clean.style.maxWidth='100%'; clean.style.height='auto';
+  return clean;
+}

@@ -9,7 +9,7 @@
 
 ## Global Constraints
 - Rendering and mode switches never write source, format, save, execute code, or fetch remote resources.
-- Keep authentication, exclusions, no-follow storage, CSP and source/draft/conflict semantics unchanged.
+- Keep authentication, exclusions, no-follow storage and source/draft/conflict semantics unchanged. Parent/preview/other-route CSP remains unchanged; only the explicitly approved successful authenticated Mermaid renderer shell has its exact-origin framing/nonce/frame-local-style policy exception (see spec and docs/mermaid-frame.md).
 - No live deployment; independent review and CI before merge, coordinated with parent.
 - Tests use synthetic wiki fixtures, isolated browser runtime/port, and bounded malformed/hostile input.
 
@@ -46,3 +46,17 @@ Files: new static/src/math-preview.js and renderer; editor/build/package files; 
 - [ ] Full Python and Node suites, production asset build, isolated browser suite and final whole-branch review.
 - [ ] Draft PR against current dev with staged evidence and issue checklist; resolve review/CI failures without weakening assertions.
 - [ ] Notify parent before merge/publication; merge only after independent review and required checks. No deployment.
+
+## Verified progress (2026-11-01)
+
+- [x] Image stage implemented, source/parser/security tests and build verified; independently reviewed.
+- [x] Math stage implemented with escaped source HTML, native MathML and complete-or-refused formatter signatures; independently reviewed.
+- [x] Mermaid isolated frame infrastructure and two review corrections implemented and independently reviewed.
+- [x] Mermaid integration RED tests executed for fence models, scheduler/capacity/lifetime, inert preview/flagging, formatter integrity and screenshot-artifact paths.
+- [ ] Combined integration independent pre-commit review and final local commit.
+- [ ] Combined actual browser/visual/mobile/CSP/network/performance acceptance and screenshot inspection.
+- [ ] Final required CI/release review, publication and merge; no deployment.
+
+Earlier image/math browser CI evidence does not establish the combined Mermaid
+acceptance gate. The local browser remains infrastructure-blocked; authored or
+collected cases and screenshot paths are not recorded as browser/visual passes.

@@ -6,7 +6,7 @@ literal text tokens (including raw blocks and tag attributes), never raw HTML. A
 the generated fragment; the application CSP permits only local scripts, styles
 and images. External links remain ordinary navigation. External embedded images
 show a placeholder without fetching their URL. Missing, excluded and non-raster
-image targets show an unavailable placeholder. SVG and HTML never render inline.
+image targets show an unavailable placeholder. SVG attachments and source HTML never render inline; generated Mermaid SVG stays inside its dedicated opaque renderer frame.
 
 `render_preview(source, source_path)` returns an immutable `Preview(html,
 diagnostics)` and never writes source. `/preview/<path>` accepts authenticated GET
@@ -215,3 +215,52 @@ a consumer that mounts the sanitized fragment may call
 bounded enhancer. The ordinary sanitizer still admits no MathML/SVG/raw HTML;
 attachment policy, authentication, source bytes, draft/formatter semantics and
 application response policy remain unchanged.
+
+## Mermaid diagrams
+
+With an explicitly configured matching canonical application origin, inactive
+complete top-level, column-zero `mermaid` fences display diagrams in the live
+editor and separate preview. Both backtick and tilde fences work; incomplete,
+nested, indented, other-language and extra-info fences remain ordinary source.
+Configuration defaults to disabled: the editor creates no diagram widgets/frames
+and preview does not load the diagram enhancer. See [renderer configuration,
+accepted flowchart grammar and security boundary](mermaid-frame.md).
+
+This is the bounded plain-flowchart subset described there, **not full Mermaid**.
+The parser rejects unsupported syntax before allocating a renderer frame;
+unsupported engines, labels or over-budget diagrams retain source with a clear
+fixed fallback. No source is placed in a frame URL. SVG remains inside the
+reviewed opaque sandbox; it is never imported into the editor/preview DOM.
+
+Only visible diagrams allocate frames, at most **two live previews** per page.
+Additional visible diagrams keep source and an explicit capacity status with a
+**Show Mermaid diagram** button. Choosing it replaces the oldest active preview
+with a paused source fallback. There is no automatic carousel or retry loop.
+Scrolling away, selecting source, changing mode/document or destroying a widget
+releases its frame. Scrolling back can resume eligible diagrams; failed source
+is remembered within the bounded page cache and is not retried on every caret
+or viewport update. Edit the source or reload after a loading/auth failure.
+
+**Edit Mermaid source** is distinct from Show: it reveals the original fence and
+focuses the editor without changing source, undo or save state. Ordinary arrows,
+Vim motions/counts, selections and raw/plain-text modes use source-line semantics.
+The formatter protects all parser-recognized Mermaid fences (including unsupported,
+incomplete, nested and extra-info/case variants), independently of the 32-widget
+presentation limit. Automatic formatting skips blocks containing such fences;
+explicit formatting refuses any fence/source rewrite or incomplete safety-budget
+scan with `format-mermaid-source`, retaining the original source and existing
+explicit unformatted-save recovery. Surrounding Markdown/EOL conversion can still
+format when diagram source is unchanged. Existing math protections stay in force.
+
+Server GET and draft POST use only escaped inert `pre[data-mermaid-source]`
+placeholders through the ordinary sanitizer; raw note HTML cannot forge them.
+Without JavaScript/configuration the source stays readable. Draft-fragment
+consumers on an enabled preview may call
+`window.backstoryMermaidPreview.hydrate(container)`. **Show Mermaid source** pauses
+a preview and restores its code without navigating or writing anything.
+
+Real browser compatibility, layout, source navigation, CSP/network behavior and
+worst-case responsiveness must pass CI before release. Local browser execution
+and visual inspection were infrastructure-blocked; authored screenshot tests do
+not by themselves establish a visual pass. CI retains image, math and Mermaid
+PNGs from the shared browser runtime's `reports` directory.
