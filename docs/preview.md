@@ -280,3 +280,5 @@ runtime's `reports` directory.
 ## Graphviz diagrams
 
 Explicit `graphviz` and `dot` fences support bounded networks and dependency graphs after the separate Graphviz origin opt-in. Click/tap a rendered graph or use its keyboard source control to edit; leaving the source renders it again. Unsupported or failed graphs remain source. See [supported DOT syntax, limits and isolated worker policy](graphviz-frame.md). This is not full DOT compatibility.
+
+Explicit `vega-lite` fences support bar, line and point charts from bounded inline records after their separate origin opt-in. Charts use the same direct source editing and keyboard controls as diagrams. Unsupported syntax remains readable source. See [chart fields, limits and isolated interpreter policy](vega-lite-frame.md).

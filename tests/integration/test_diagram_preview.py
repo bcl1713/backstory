@@ -74,3 +74,11 @@ def test_graphviz_placeholders_do_not_consume_existing_mermaid_budget():
     assert result.html.count('data-mermaid-source=')==1
     assert 'preview_graphviz_limit' in result.diagnostics
     assert 'preview_mermaid_limit' not in result.diagnostics
+
+def test_vega_lite_inert_placeholders_keep_independent_source_budget():
+    from wiki.markdown import render_preview
+    source='```vega-lite\n{"data":{"values":[]},"mark":"bar"}\n```'
+    result=render_preview((source+'\n\n')*33+FENCE,'note.md')
+    assert result.html.count('data-vega-lite-source=')==32
+    assert result.html.count('data-mermaid-source=')==1
+    assert '<iframe' not in result.html and '<svg' not in result.html

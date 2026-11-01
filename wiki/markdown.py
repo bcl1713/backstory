@@ -24,7 +24,7 @@ _TAGS = {
 _ATTRIBUTES = {
     "a": {"href", "title", "class", "aria-label"}, "img": {"src", "alt", "title", "loading"},
     "span": {"class", "data-math-source", "data-math-expression", "data-math-display"}, "input": {"checked", "disabled"},
-    "pre": {"class", "data-mermaid-source", "data-graphviz-source"}, "ol": {"start"}, **{f"h{level}": {"id"} for level in range(1, 7)},
+    "pre": {"class", "data-mermaid-source", "data-graphviz-source", "data-vega-lite-source"}, "ol": {"start"}, **{f"h{level}": {"id"} for level in range(1, 7)},
 }
 
 

@@ -39,16 +39,19 @@ class ResponsePolicyMiddleware:
             )
             response['Referrer-Policy'] = 'no-referrer'
             response['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
-        from .isolated_renderers import successful_graphviz_shell, graphviz_origin
-        if successful_graphviz_shell(request, response):
+        from .isolated_renderers import successful_graphviz_shell, graphviz_origin, successful_vega_lite_shell, vega_lite_origin
+        graphviz_shell = successful_graphviz_shell(request, response)
+        if graphviz_shell or successful_vega_lite_shell(request, response):
+            wasm = " 'wasm-unsafe-eval'" if graphviz_shell else ""
+            origin = graphviz_origin(request) if graphviz_shell else vega_lite_origin(request)
             del response['X-Frame-Options']
             response['Content-Security-Policy'] = (
                 "default-src 'none'; "
-                f"script-src 'nonce-{request.csp_script_nonce}' 'wasm-unsafe-eval'; "
+                f"script-src 'nonce-{request.csp_script_nonce}'{wasm}; "
                 "style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; "
                 "font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; "
                 "worker-src blob:; base-uri 'none'; form-action 'none'; "
-                f"frame-ancestors {graphviz_origin(request)}; sandbox allow-scripts"
+                f"frame-ancestors {origin}; sandbox allow-scripts"
             )
             response['Referrer-Policy'] = 'no-referrer'
             response['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
