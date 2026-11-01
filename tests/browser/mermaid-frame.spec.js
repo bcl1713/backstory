@@ -94,3 +94,13 @@ test('bounded worst-case fixtures render or fail safely with responsive fallback
  await page.evaluate(()=>window.diagramHandle.destroy());
  await expect(render(page,'flowchart TD\n'+'A --> B\n'.repeat(49))).rejects.toThrow('unsupported_diagram');
 });
+
+test('captured Mermaid geometry and pinned decorative shadows reconstruct without filter machinery',async({page})=>{
+ await login(page);
+ const result=await page.evaluate(async()=>{
+  const{safeSvg}=await import('/static/src/mermaid-svg.js');
+  const svg=safeSvg('<svg xmlns="http://www.w3.org/2000/svg" id="diagram-svg" viewBox="0 0 615.109375 191.71286010742188"><circle cx="0" cy="0" r="36.97523746105992"/><defs><filter id="diagram-svg-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs><defs><filter id="diagram-svg-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs></svg>',document);
+  return{viewBox:svg.getAttribute('viewBox'),radius:svg.querySelector('circle').getAttribute('r'),filters:svg.querySelectorAll('filter,feDropShadow,feImage').length};
+ });
+ expect(result).toEqual({viewBox:'0 0 615.109375 191.71286011',radius:'36.97523746',filters:0});
+});

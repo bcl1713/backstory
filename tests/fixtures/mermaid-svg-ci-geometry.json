@@ -1,0 +1,11 @@
+{
+  "provenance": "Synthetic flowchart from CI 41257902284 diagnostic: 96 nodes, 14542 UTF-16 units; first failing SVG attribute branch at bundle543:5106",
+  "viewBox": "0 0 615.109375 191.71286010742188",
+  "canonicalViewBox": "0 0 615.109375 191.71286011",
+  "canonicalRadius": "36.97523746",
+  "circleRadius": "36.97523746105992",
+  "filters": [
+    {"suffix":"-drop-shadow","size":"130%","offset":"4"},
+    {"suffix":"-drop-shadow-small","size":"150%","offset":"2"}
+  ]
+}

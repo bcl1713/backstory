@@ -82,7 +82,13 @@ Fixed trusted renderer settings use strict security, SVG text labels, system
 Arial/sans-serif, fixed theme/dagre layout, conservative max text/edges, no error
 rendering, no auto-render, and no `bindFunctions`. SVG never leaves the frame.
 Final output is rebuilt through positive SVG element/attribute/owned-local-reference
-checks. Mermaid-returned CSS and data/inline-style attributes are discarded;
+checks. Finite bounded decimal geometry is canonicalized to at most eight fractional
+places, so normal IEEE-754 layout precision is not mistaken for unsafe input.
+Scalar/list length and spelling checks precede conversion; NaN, Infinity,
+exponents and values beyond the fixed magnitude bound are rejected. The two
+unconditional Mermaid 12.2 default drop-shadow definitions are omitted only after
+matching their exact decorative subtree/attributes; filter machinery is not
+allowed into final output, and references to omitted IDs remain invalid. Mermaid-returned CSS and data/inline-style attributes are discarded;
 a small application-owned stylesheet supplies final presentation. No links,
 foreignObject, images, scripts, event attributes, external references, filters,
 animations or arbitrary HTML are copied. Exact typography/shape fidelity is a
