@@ -50,3 +50,13 @@ test('successful disconnected previews unconditionally dispose owned measurement
  element.isConnected=false;scheduler.prune();scheduler.prune();registration.destroy();
  assert.equal(destroyed,1);assert.equal(stateCalls,statesBeforeDetach,'detached status callbacks remain suppressed');assert.equal(disposed,1,'cleanup is not conditional on connected/valid status delivery');
 });
+
+test('intersection delivery order may render the third diagram while the first retains activatable capacity source',async()=>{
+ const h=harness(),first=h.mount('first'),second=h.mount('second'),third=h.mount('third');
+ second.show(true);third.show(true);await tick();first.show(true);await tick();
+ assert.equal(h.frames.length,2);assert.ok(h.states.some(([id,status])=>id==='first'&&status==='capacity'));
+ assert.equal(h.states.some(([id,status])=>id==='third'&&status==='capacity'),false);
+ first.job.activate();await tick();assert.equal(h.frames.length,3);assert.equal(h.frames[0].destroyed,true);assert.equal(h.frames[1].destroyed,false);
+ assert.ok(h.states.some(([id,status])=>id==='second'&&status==='paused'));
+ first.job.destroy();second.job.destroy();third.job.destroy();assert.ok(h.frames.every(frame=>frame.destroyed));
+});
