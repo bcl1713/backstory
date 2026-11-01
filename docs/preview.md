@@ -115,17 +115,26 @@ as source-relative Markdown URLs, including percent-encoded filenames and
 within-root parent-relative paths. Only resolved `/attachments/` raster targets
 become image sources. No image destination is loaded directly. External,
 scheme-relative, data and active URLs are blocked; missing, excluded, non-raster
-and failed image loads show a safe text fallback and an **Edit image source**
-button. No rendering action writes, formats or saves the note.
+and failed image loads show a safe text fallback. No rendering action writes,
+formats or saves the note.
 
 Images are lazy-loaded, constrained to the note width and viewport height, and
 retain the source description as alternative text. **Enlarge image** opens a
 local modal with a labeled close button; Escape closes it and restores button
-focus without moving the editor selection. **Edit image source**, moving the
+focus without moving the editor selection. Click/tap the image itself or its
+fallback to edit; the compact enlargement control is separate. Moving the
 caret onto the line, or a selection intersecting the line reveals the original
 Markdown. Arrow and Vim vertical motions reveal nearby image source before
 navigation uses its geometry. Raw source and plain-text presentations always
 retain the authoritative source and its existing undo history.
+
+Math, image and diagram previews all support intentional click/tap to enter
+source and render again when the caret leaves. Scrolling or dragging does not
+activate editing. Tab reaches a native **Edit … source** button that appears
+only while keyboard-focused; Enter/Space activates it. The focus outline marks
+the preview, and math/image semantics remain separate from the button. Source
+controls are also available to screen readers without adding permanent buttons
+to prose. Rendering and activation never rewrite source.
 
 This first stage intentionally leaves images inside table cells, images nested
 inside a Markdown link, and image syntax spanning multiple lines as editable
@@ -190,7 +199,8 @@ one per event-loop task; CodeMirror virtualization avoids mounting offscreen
 widgets. Model extraction visits at most 100,000 syntax nodes. The renderer is a
 separate lazy local ESM asset, not included in the editor's initial IIFE. No
 formula DOM or macro state is cached across notes. Disposed, changed or selected
-widgets cannot receive late results. **Edit math source**, selection, and normal
+widgets cannot receive late results. Clicking/tapping math, its focus-revealed
+**Edit math source** button, selection, and normal
 arrow/Vim source-line navigation reveal the original notation; rendering never
 calls save/format or changes source/undo history. Automatic block-exit formatting
 skips blocks containing explicit math; the full-note formatter compares exact
@@ -241,8 +251,11 @@ releases its frame. Scrolling back can resume eligible diagrams; failed source
 is remembered within the bounded page cache and is not retried on every caret
 or viewport update. Edit the source or reload after a loading/auth failure.
 
-**Edit Mermaid source** is distinct from Show: it reveals the original fence and
-focuses the editor without changing source, undo or save state. Ordinary arrows,
+Click/tap a diagram or use its focus-revealed **Edit Mermaid source** button to
+reveal the original fence and focus the editor without changing source, undo or
+save state. Pointer interaction stays in the parent; the opaque iframe has no
+edit authority and retains its sandbox and CSP. **Show Mermaid diagram** remains
+a separate action for capacity/paused fallbacks. Ordinary arrows,
 Vim motions/counts, selections and raw/plain-text modes use source-line semantics.
 The formatter protects all parser-recognized Mermaid fences (including unsupported,
 incomplete, nested and extra-info/case variants), independently of the 32-widget
@@ -260,7 +273,7 @@ consumers on an enabled preview may call
 a preview and restores its code without navigating or writing anything.
 
 Real browser compatibility, layout, source navigation, CSP/network behavior and
-worst-case responsiveness must pass CI before release. Local browser execution
-and visual inspection were infrastructure-blocked; authored screenshot tests do
-not by themselves establish a visual pass. CI retains image, math and Mermaid
-PNGs from the shared browser runtime's `reports` directory.
+worst-case responsiveness must pass CI before release. Screenshot tests require
+actual visual inspection; authored tests alone do not establish a visual pass.
+CI retains image, math, direct-edit and Mermaid PNGs from the shared browser
+runtime's `reports` directory.

@@ -29,7 +29,7 @@ test('explicit Mermaid widgets use only fixed local frame assets, retain unsuppo
 test('source entry, repeated selection, raw/plain switches, edit/undo and navigation clean up frames',async({page})=>{
  await open(page,'DiagramMotion');await expect(host(page).getByText('Mermaid flowchart.',{exact:true})).toBeVisible();
  for(let i=0;i<3;i++){
-  await host(page).getByRole('button',{name:'Edit Mermaid source',exact:true}).click();await expect(host(page).locator('iframe')).toHaveCount(0);expect(await read(page)).toBe(motion);
+  await host(page).getByRole('button',{name:'Edit Mermaid source',exact:true}).focus();await page.keyboard.press('Enter');await expect(host(page).locator('iframe')).toHaveCount(0);expect(await read(page)).toBe(motion);
   await select(page,0);await expect(host(page).getByText('Mermaid flowchart.',{exact:true})).toBeVisible();
   await select(page,0,motion.length);await expect(host(page).locator('.lp-diagram')).toHaveCount(0);await select(page,0);await expect(host(page).locator('iframe')).toHaveCount(1);
  }

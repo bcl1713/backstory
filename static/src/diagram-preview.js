@@ -17,7 +17,6 @@ class DiagramWidget extends WidgetType{
   eq(other){return this.model.from===other.model.from&&this.model.source===other.model.source;}
   toDOM(view){
     const wrapper=view.dom.ownerDocument.createElement('div');wrapper.contentEditable='false';
-    wrapper.addEventListener('mousedown',event=>{if(event.button===0)event.preventDefault();});
     const valid=()=>!wrapper.diagramDisposed&&view.state.doc.sliceString(this.model.from,this.model.to)===this.model.source&&!diagramIsActive(view.state,this.model);
     wrapper.disposeDiagram=diagramView(wrapper,this.model,{valid,onSource:()=>{view.dispatch({selection:{anchor:this.model.from},scrollIntoView:true});view.focus();},measured:()=>{if(!wrapper.diagramDisposed&&wrapper.isConnected)view.requestMeasure();}});
     return wrapper;

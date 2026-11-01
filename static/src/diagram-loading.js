@@ -30,7 +30,7 @@ export function createDiagramScheduler({createFrame=createMermaidFrame,observe=o
       try{job.handle=createFrame(job.element,job.source,{
         onStatus:status=>{if(!current(job)||!job.visible){dispose(job);return;}if(status==='ok')state(job,'ok');else fail(job,status);},
         onSize:size=>{if(current(job)&&job.visible)job.callbacks.size?.(size);},
-      });}catch{active.delete(job);fail(job,'error');}
+      });job.callbacks.frame?.(job.handle.frame);}catch{active.delete(job);fail(job,'error');}
     }
   }
   function mount(element,source,valid,callbacks={}){

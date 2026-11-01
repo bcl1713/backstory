@@ -197,10 +197,11 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 
 /* Image widgets stay within the note measure, including inline/list images. */
 .cm-editor .lp-image { display: inline-block; max-width: 100%; vertical-align: middle; white-space: normal; padding: .35rem 0; }
-.cm-editor .lp-image-enlarge { display: block; box-sizing: border-box; max-width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.cm-editor .lp-image-enlarge { position: absolute; top: .35rem; right: 0; width: 44px; height: 44px; padding: 0; font-size: 1.4rem; background: var(--surface); cursor: zoom-in; }
 .cm-editor .lp-image img { display: block; max-width: 100%; max-height: 65vh; width: auto; height: auto; object-fit: contain; }
+.cm-editor .lp-image img[hidden] { display: none; }
+.cm-editor .lp-image:has(.lp-image-enlarge:not([hidden])) { box-sizing: border-box; padding-right: 48px; min-height: calc(44px + .7rem); }
 .cm-editor .lp-image-status { color: var(--muted); overflow-wrap: anywhere; }
-.cm-editor .lp-image-edit { display: block; min-height: 44px; margin-top: .15rem; padding: .25rem .5rem; font: inherit; font-size: .8em; color: var(--muted); }
 .lp-image-dialog { box-sizing: border-box; max-width: calc(100vw - 2rem); max-height: calc(100vh - 2rem); padding: .75rem; border: 1px solid var(--border); background: var(--surface); color: var(--foreground); overflow: auto; }
 .lp-image-dialog::backdrop { background: #000b; }
 .lp-image-dialog > button { display: block; margin-bottom: .75rem; min-height: 44px; }
@@ -214,8 +215,6 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 .lp-math-display { display: block; max-width: 100%; padding: .5rem 0; overflow: auto; }
 .lp-math-display .lp-math-ready { display: block; }
 .lp-math code { white-space: pre-wrap; overflow-wrap: anywhere; }
-.lp-math-edit { display: inline-block; min-height: 44px; padding: .2rem .4rem; margin-inline-start: .3rem; font: inherit; font-size: .75em; color: var(--muted); }
-.lp-math-display .lp-math-edit { display: block; margin-inline-start: 0; }
 .lp-math-status { color: var(--muted); overflow-wrap: anywhere; }
 
 /* Mermaid SVG remains inside its opaque frame; parent owns source and controls. */
@@ -225,3 +224,10 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 .lp-diagram-source[hidden], .lp-diagram button[hidden] { display: none; }
 .lp-diagram-status { display: block; font-size: .85em; margin: .25rem 0; }
 .lp-diagram button { margin-inline-end: .5rem; }
+
+/* The parent owns editing; the opaque child remains a semantic diagram only. */
+.lp-direct-edit { position: relative; cursor: text; }
+.lp-direct-edit iframe { pointer-events: none; }
+.lp-direct-edit:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
+.lp-direct-edit > .lp-source-edit { position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; margin: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.lp-direct-edit > .lp-source-edit:focus-visible { top: 0; left: 0; z-index: 1; width: auto; height: auto; min-height: 44px; max-width: 100%; padding: .25rem .5rem; clip-path: none; white-space: normal; background: var(--surface); color: var(--foreground); outline: 2px solid var(--focus); }

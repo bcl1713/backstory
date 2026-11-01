@@ -150,6 +150,7 @@ jobs:
           path: |
             /tmp/backstory-release-one/browser-runtime/reports/images-*.png
             /tmp/backstory-release-one/browser-runtime/reports/math-*.png
+            /tmp/backstory-release-one/browser-runtime/reports/direct-edit-*.png
             /tmp/backstory-release-one/browser-runtime/reports/mermaid-*.png
           if-no-files-found: ignore
           retention-days: 7
