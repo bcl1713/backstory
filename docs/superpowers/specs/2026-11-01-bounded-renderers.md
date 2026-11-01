@@ -1,0 +1,36 @@
+# Backstory renderer checkpoint — 2026-11-01
+
+Baseline: fresh origin/dev b1dc978166fbae631e9f6ed51eed60a7531d1739.
+Issues #73 (Graphviz), #74 (Vega-Lite), and #75 (uploads) were created after a single authorized retry with newly supplied explicit publication authority. Renderer policy/dependency changes remain paused; independent bounded parser work proceeds on feat/73-graphviz.
+
+## Independent review refinements for the approval decision
+
+The second exact route is /renderers/vega-lite-frame/. Both routes use separate default-empty BACKSTORY_GRAPHVIZ_PARENT_ORIGIN and BACKSTORY_VEGA_LITE_PARENT_ORIGIN settings, validated exactly like the existing Mermaid origin. Existing Mermaid configuration grants neither. Source-only behavior remains the default; no production values will be changed. Each successful shell gets its own strict response-type and resolved-view gate. Denied requests, queries, wrong methods, inactive sessions, redirects and errors retain global framing denial.
+
+Both new shells need worker-src blob: for a trusted build-owned worker; only Graphviz needs wasm-unsafe-eval. Vega uses the official interpreter and headless SVG export with a denying loader supplied at construction, subject to a real-browser compatibility gate. A fixed HTTP worker does not share an opaque frame's origin; do not move execution to the parent or grant same-origin to work around this. Blob workers inherit creator CSP. CSP permits blob workers generally, not just the intended single worker: that residual authority is part of the approval request.
+
+Concurrency is aggregate across the two new engines: one worker executing and two new-engine frames alive. Mermaid keeps its existing two-controller budget; total maximum is four visual frames and at most one new-engine worker. Deadline starts before worker initialization/compilation and is 2000ms. Terminate worker and revoke its object URL on completion, stale work, failure, timeout and disposal. No fallback to parent execution or weaker CSP if the browser compatibility gates fail.
+
+Vega input JSON depth at most 8, field names ASCII identifiers at most 32 units remapped to owned names (no field-path interpretation), 8 fields/256 records, 32 categorical values per channel, absolute numeric values at most 1e9, strings at most 80 units, source at most 65536 UTF-8 bytes. Initial mark bar/line/point with x/y nominal or quantitative and optional nominal color only; no supplied transforms/expressions. Compiler-generated internal expressions must use interpreter ASTs. Output bounds match Graphviz: 250000 units, 4000 elements, 20000 attributes, 16000 text units, finite viewport at most 1600x1200. Check output before worker transfer and again before child DOM reconstruction. Hostile inputs, compiler output and CSP inheritance still require empirical browser gates.
+
+## Graphviz: proposed design requiring explicit policy approval
+
+Maintained candidate: @viz-js/viz (official https://viz-js.com/api/). It compiles Graphviz to WebAssembly. Pin a stable registry release after approval, not repository development version. Existing renderer CSP prohibits compilation and workers.
+
+Proposed exact exception: a dedicated authenticated GET /renderers/graphviz-frame/ successful typed response only, with query/method/auth/origin checks matching the Mermaid shell. Remove X-Frame-Options only for that response and set exact configured frame-ancestors, sandbox allow-scripts without allow-same-origin. Add wasm-unsafe-eval to that shell's nonce script policy and worker-src blob: for one application-owned, bundled, network-free worker. All connect/image/font/media/object/nested-frame requests remain none. The worker would inherit the shell CSP; its source and embedded WASM come only from trusted build output, never note input. No eval/Function, imports, remote fetch or script URLs from notes. Mermaid/global policy stays unchanged. Enabling a new frame route is itself part of this requested exception. Existing Mermaid opt-in must not silently enable new engine authority; exact opt-in design needs to accompany approval.
+
+Reason for worker: Viz rendering API is synchronous. An iframe alone does not guarantee a separate process/thread. A dedicated worker allows real termination at a deadline and keeps editor input responsive. Risk: new WASM compilation and worker capabilities increase browser engine attack surface and memory pressure. Worker termination bounds elapsed work, not a portable hard process memory limit. Verify package memory configuration before selecting limits.
+
+Initial useful DOT subset: graph/digraph; named nodes; directed/undirected edges; label strings; fixed allowed shapes; rankdir TB/LR. Positive tokenizer/parser, no HTML IDs/labels, subgraphs initially, resource attributes, URIs, arbitrary attributes or user engine selection. Reconstruct owned model/IDs for dot engine. Proposed limits: 8192 UTF-16 source units plus byte cap, 32 nodes, 48 edges, 80-character labels, one worker render at a time, two live visual frames, 2-second render deadline, 250000 output units/4000 SVG elements. Rebuild approved SVG geometry/text in the child; no source/generated SVG enters parent HTML. Parent owns direct-edit gestures, keyboard fallback, stale-result checks and lazy disposal.
+
+Alternative server Graphviz is rejected for this stage because it moves hostile execution onto server infrastructure. An old asm.js distribution is not selected merely to avoid a CSP gate.
+
+## Vega-Lite: second stage
+
+Official CSP-safe route uses vega.parse(..., {ast:true}) with vega-interpreter passed to View (https://vega.github.io/vega/usage/interpreter/). Do not allow default Function-based expression generation. Initial constrained JSON: mark bar/line/point; data.values only; x/y field and nominal/quantitative types; optional bounded color grouping. No arbitrary transforms, expressions, params, signal, URLs, images, href, actions, custom config or raw Vega. Strict own-key validation and reconstruction rather than forwarding user JSON; reject prototype-sensitive keys recursively. Proposed 256 records, 8 fields, 80-character strings, 64KiB source, finite bounded numbers and bounded categories/marks/output. No date parsing ambiguity in first stage.
+
+Dedicated opaque frame requires the same narrowly reviewed new-route framing exception; no WASM permission. Consider worker-based SVG serialization with the official interpreter if supported without DOM; otherwise bounded render responsiveness must be demonstrated before claiming deadline protection. No dependency installation or implementation before the relevant policy gate. Preserve Graphviz then Vega-Lite implementation order.
+
+## Verification plan
+
+Issue first, isolated stage branches from fresh dev, red parser/security tests before implementation. Test hostile resources, malformed/oversized inputs, output sanitation, no outbound traffic, unchanged global/Mermaid headers, unauthenticated and malformed shell requests, real worker timeout/disposal/capacity, repeat source edits and exact formatter preservation. Full Python/Node/build/browser CI on exact final heads, independent review, desktop/touch/keyboard and actual pixel inspection; draft PRs and stop before parent-coordinated merge. No deployment.
