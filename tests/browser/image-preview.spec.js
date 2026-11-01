@@ -62,7 +62,7 @@ test('local ordinary and reference images load lazily; enlargement is accessible
 test('source selection, source editing, undo and presentation switches preserve exact image Markdown', async ({ page }) => {
   await open(page);
   await expect(page.getByRole('button', { name: 'Enlarge image: Landscape', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Edit image source: Landscape', exact: true }).click();
+  await host(page).getByRole('img', { name: 'Landscape', exact: true }).click();
   await expect(host(page).getByRole('img', { name: 'Landscape', exact: true })).toHaveCount(0);
   expect(await host(page).evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(source.indexOf('![Landscape]'));
   await select(page, source.indexOf('![Landscape]'), source.indexOf('![Missing]'));

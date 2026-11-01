@@ -4,6 +4,7 @@ import { syntaxTree } from '@codemirror/language';
 import { getCM } from '@replit/codemirror-vim';
 import { tableMotionCount, tableMotionPath } from './table-preview.js';
 import { mountMath } from './math-loading.js';
+import { bindSourceEdit } from './preview-source-edit.js';
 
 import { mathModelsFromTree } from './math-syntax.js';
 export { mathSyntax } from './math-syntax.js';
@@ -36,14 +37,10 @@ class MathWidget extends WidgetType {
     const source = doc.createElement('code');
     source.textContent = this.model.source;
     output.appendChild(source);
-    const edit = doc.createElement('button');
-    edit.type = 'button';
-    edit.className = 'lp-math-edit';
-    edit.textContent = 'Edit math source';
-    edit.addEventListener('click', () => { view.dispatch({ selection: { anchor: this.model.from }, scrollIntoView: true }); view.focus(); });
-    wrapper.addEventListener('mousedown', event => { if (event.button === 0) event.preventDefault(); });
-    wrapper.append(output, edit);
+    wrapper.append(output);
     const valid = () => !wrapper.mathDisposed && wrapper.isConnected && view.state.doc.sliceString(this.model.from, this.model.to) === this.model.source && !mathIsActive(view.state, this.model);
+    bindSourceEdit(wrapper, { label: 'Edit math source', valid,
+      activate: () => { view.dispatch({ selection: { anchor: this.model.from }, scrollIntoView: true }); view.focus(); } });
     mountMath(output, this.model, valid, () => { if (valid()) view.requestMeasure(); });
     return wrapper;
   }

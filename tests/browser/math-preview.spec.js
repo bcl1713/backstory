@@ -87,7 +87,7 @@ test('code and currency do not load the renderer; delayed import cannot revive s
 test('math source entry, selection, edit/undo and mode switches retain authoritative source', async ({ page }) => {
   await open(page);
   await expect(host(page).locator('math').first()).toBeVisible();
-  await host(page).getByRole('button', { name: 'Edit math source', exact: true }).first().click();
+  await host(page).locator('math').first().click();
   expect(await host(page).evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(source.indexOf('\\('));
   await expect(host(page).locator('math mfrac')).toHaveCount(0);
   await select(page, 0, source.length);
@@ -171,7 +171,8 @@ test('renderer loading failure leaves editable source and no renderer exception 
   await expect(host(page).locator('math')).toHaveCount(0);
   await expect(host(page).getByText('Math unavailable; source retained.', { exact: false })).toBeVisible();
   await expect(host(page).locator('code')).toContainText('\\begin{matrix}');
-  await host(page).getByRole('button', { name: 'Edit math source', exact: true }).click();
+  await host(page).getByRole('button', { name: 'Edit math source', exact: true }).focus();
+  await page.keyboard.press('Enter');
   expect(await host(page).evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(motionSource.indexOf('$$'));
   expect(await read(page)).toBe(motionSource);
 });

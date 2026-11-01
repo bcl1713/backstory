@@ -4,6 +4,7 @@ import { Decoration, ViewPlugin, WidgetType } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 import { getCM } from '@replit/codemirror-vim';
 import { tableMotionCount, tableMotionPath } from './table-preview.js';
+import { bindSourceEdit } from './preview-source-edit.js';
 
 const imageLimit = 200;
 const nodeLimit = 100000;
@@ -88,14 +89,13 @@ export function imageIsActive(state, image) {
 }
 
 class ImageWidget extends WidgetType {
-  constructor(image, result) { super(); this.image = image; this.result = result; }
-  eq(other) { return this.image.from === other.image.from && this.image.label === other.image.label && this.result.state === other.result.state && this.result.href === other.result.href; }
+  constructor(image, result, source) { super(); this.image = image; this.result = result; this.source = source; }
+  eq(other) { return this.image.from === other.image.from && this.image.to === other.image.to && this.source === other.source && this.image.label === other.image.label && this.result.state === other.result.state && this.result.href === other.result.href; }
   toDOM(view) {
     const document = view.dom.ownerDocument;
     const wrapper = document.createElement('span');
     wrapper.className = 'lp-image';
     wrapper.contentEditable = 'false';
-    wrapper.addEventListener('mousedown', event => { if (event.button === 0) event.preventDefault(); });
     const label = this.image.label || 'Unlabeled image';
     const message = document.createElement('span');
     message.className = 'lp-image-status';
@@ -107,15 +107,16 @@ class ImageWidget extends WidgetType {
       enlarge.className = 'lp-image-enlarge';
       enlarge.setAttribute('aria-label', `Enlarge image: ${label}`);
       enlarge.title = 'Enlarge image';
+      enlarge.textContent = '⛶';
       const image = document.createElement('img');
       image.alt = this.image.label;
       image.loading = 'lazy';
       image.decoding = 'async';
       image.referrerPolicy = 'same-origin';
       image.addEventListener('load', measure);
-      image.addEventListener('error', () => { enlarge.hidden = true; unavailable(); });
+      image.addEventListener('error', () => { image.hidden = true; enlarge.hidden = true; unavailable(); });
       image.src = this.result.href;
-      enlarge.appendChild(image);
+      wrapper.appendChild(image);
       enlarge.addEventListener('click', () => {
         if (wrapper.closeImage) return;
         const dialog = document.createElement('dialog');
@@ -127,7 +128,7 @@ class ImageWidget extends WidgetType {
         const full = document.createElement('img');
         full.alt = this.image.label;
         full.src = this.result.href;
-        full.addEventListener('error', () => { dialog.close(); enlarge.hidden = true; unavailable(); });
+        full.addEventListener('error', () => { dialog.close(); image.hidden = true; enlarge.hidden = true; unavailable(); });
         dialog.append(close, full);
         document.body.appendChild(dialog);
         // Window capture precedes the shell's Menu/proposal Escape handlers.
@@ -157,13 +158,11 @@ class ImageWidget extends WidgetType {
       wrapper.appendChild(enlarge);
     } else message.textContent = this.result.state === 'blocked' ? `External image blocked: ${label}`
       : this.result.state === 'pending' ? `Loading image: ${label}` : `Image unavailable: ${label}`;
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'lp-image-edit';
-    edit.textContent = 'Edit image source';
-    edit.setAttribute('aria-label', `Edit image source: ${label}`);
-    edit.addEventListener('click', () => { view.dispatch({ selection: { anchor: this.image.from }, scrollIntoView: true }); view.focus(); });
-    wrapper.append(message, edit);
+    wrapper.append(message);
+    bindSourceEdit(wrapper, { label: `Edit image source: ${label}`,
+      valid: () => !wrapper.imageDisposed && this.image.to <= view.state.doc.length
+        && view.state.doc.sliceString(this.image.from, this.image.to) === this.source && !imageIsActive(view.state, this.image),
+      activate: () => { view.dispatch({ selection: { anchor: this.image.from }, scrollIntoView: true }); view.focus(); } });
     return wrapper;
   }
   destroy(dom) { dom.imageDisposed = true; dom.closeImage?.(false); }
@@ -227,7 +226,7 @@ export function createImagePreviewExtension({ getPath = () => '' } = {}) {
         }
         if (imageIsActive(state, image)) continue;
         const result = targetState === 'local' ? entry?.result || { state: 'unavailable' } : { state: targetState };
-        ranges.push(Decoration.replace({ widget: new ImageWidget(image, result) }).range(image.from, image.to));
+        ranges.push(Decoration.replace({ widget: new ImageWidget(image, result, state.doc.sliceString(image.from, image.to)) }).range(image.from, image.to));
       }
       return Decoration.set(ranges, true);
     }
