@@ -194,3 +194,26 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 [data-quick-open] input { width: 100%; box-sizing: border-box; }
 [data-quick-open-results] { padding-left: 1.25rem; }
 [data-quick-open-results] a { display: block; padding: .35rem; overflow-wrap: anywhere; }
+
+/* Image widgets stay within the note measure, including inline/list images. */
+.cm-editor .lp-image { display: inline-block; max-width: 100%; vertical-align: middle; white-space: normal; padding: .35rem 0; }
+.cm-editor .lp-image-enlarge { display: block; box-sizing: border-box; max-width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.cm-editor .lp-image img { display: block; max-width: 100%; max-height: 65vh; width: auto; height: auto; object-fit: contain; }
+.cm-editor .lp-image-status { color: var(--muted); overflow-wrap: anywhere; }
+.cm-editor .lp-image-edit { display: block; min-height: 44px; margin-top: .15rem; padding: .25rem .5rem; font: inherit; font-size: .8em; color: var(--muted); }
+.lp-image-dialog { box-sizing: border-box; max-width: calc(100vw - 2rem); max-height: calc(100vh - 2rem); padding: .75rem; border: 1px solid var(--border); background: var(--surface); color: var(--foreground); overflow: auto; }
+.lp-image-dialog::backdrop { background: #000b; }
+.lp-image-dialog > button { display: block; margin-bottom: .75rem; min-height: 44px; }
+.lp-image-dialog > img { display: block; max-width: 100%; max-height: calc(100vh - 7rem); width: auto; height: auto; object-fit: contain; }
+
+/* Native MathML needs no KaTeX stylesheet, downloaded font, or inline style. */
+.lp-math { display: inline-block; box-sizing: border-box; max-width: 100%; vertical-align: middle; white-space: normal; }
+.lp-math > span:first-child, .lp-math-preview { max-width: 100%; }
+.lp-math-ready { display: inline-block; box-sizing: border-box; max-width: 100%; max-height: 65vh; overflow: auto; vertical-align: middle; }
+.lp-math math { font-family: math; font-size: 1.1em; }
+.lp-math-display { display: block; max-width: 100%; padding: .5rem 0; overflow: auto; }
+.lp-math-display .lp-math-ready { display: block; }
+.lp-math code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.lp-math-edit { display: inline-block; min-height: 44px; padding: .2rem .4rem; margin-inline-start: .3rem; font: inherit; font-size: .75em; color: var(--muted); }
+.lp-math-display .lp-math-edit { display: block; margin-inline-start: 0; }
+.lp-math-status { color: var(--muted); overflow-wrap: anywhere; }

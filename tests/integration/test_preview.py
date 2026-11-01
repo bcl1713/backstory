@@ -98,3 +98,23 @@ def test_note_open_does_not_render_secondary_preview(reader, wiki, monkeypatch):
     assert response.status_code == 200
     assert b"Synthetic source" in response.content
     assert b"/preview/note.md" in response.content
+
+
+@pytest.mark.django_db
+def test_math_get_and_draft_post_are_inert_source_preserving_and_use_local_enhancer(reader, wiki):
+    source = b'Before\r\n\r\n\\(x^2\\)\r\n\r\n$$\r\n\\frac{a}{b}\r\n$$\r\n'
+    (wiki / "math.md").write_bytes(source)
+    before = (wiki / "math.md").stat()
+    get = reader.get("/preview/math.md")
+    assert get.status_code == 200
+    assert b'data-math-source=' in get.content
+    assert b'/static/math-preview-page.js' in get.content
+    assert b'<math' not in get.content
+    assert "unsafe-inline" not in get["Content-Security-Policy"]
+    draft = reader.post("/preview/math.md", data=json.dumps({"source": r"Draft \(\sqrt{x}\)"}), content_type="application/json")
+    assert draft.status_code == 200
+    assert 'data-math-expression="\\sqrt{x}"' in draft.json()["html"]
+    assert "<math" not in draft.json()["html"]
+    assert "<script" not in draft.json()["html"]
+    assert (wiki / "math.md").read_bytes() == source
+    assert (wiki / "math.md").stat().st_mtime_ns == before.st_mtime_ns

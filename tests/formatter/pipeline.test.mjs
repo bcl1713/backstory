@@ -154,3 +154,43 @@ test('Prettier honors root gitignore while markdownlint gitignore stays independ
   assert.equal(both.outcome,'skipped');
   assert.equal(both.source,source);
 });
+
+test('packaged formatter preserves explicit TeX delimiters and expressions at its fixed point', () => {
+  const source = '# Math\n\nInline \\(a_1 + \\frac{b}{c}\\); $5 and $10.\n\n\\[x^2 + y^2\\]\n\n$$\n\\begin{matrix}a&b\\\\c&d\\end{matrix}\n$$\n';
+  const result = helper(source);
+  assert.equal(result.outcome, 'ok');
+  assert.equal(result.source, source);
+  assert.equal(helper(result.source).source, source);
+});
+
+test('formatting fails closed rather than rewriting exact explicit math source', () => {
+  for (const source of ['# Math\n\nInline \\(\\verb|a  b|\\).\n', '# Math\n\n\\[\\text{a  b}\\]\n']) {
+    const result = helper(source);
+    assert.equal(result.outcome, 'failed');
+    assert.equal(result.source, source);
+    assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === 'format-math-source'));
+  }
+});
+
+test('formatting ordinary Markdown around unchanged math still works with configured EOL conversion', () => {
+  const source = '# Math\n\n* item \\(x^2\\)\n';
+  const result = helper(source, { '.editorconfig': 'root=true\n[*.md]\nend_of_line=crlf\n' });
+  assert.equal(result.outcome, 'ok');
+  assert.equal(result.source, '# Math\r\n\r\n- item \\(x^2\\)\r\n');
+});
+
+test('full formatter rejects TeX drift in the 101st formula rather than trusting the display cap', () => {
+  const source = '# Math\n\n' + '\\(x\\)\n\n'.repeat(100) + '\\(\\verb|a  b|\\)\n';
+  const result = helper(source);
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.source, source);
+  assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === 'format-math-source'));
+});
+
+test('formatter fails closed when full syntax verification exceeds its visit budget', () => {
+  const source = '# Math\n\n' + '***\n\n'.repeat(100001) + '\\(\\verb|a  b|\\)\n';
+  const result = helper(source, { '.prettierignore': 'notes/\n', '.markdownlint-cli2.jsonc': '{"config":{"default":false}}' });
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.source, source);
+  assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === 'format-math-source' && diagnostic.message.includes('safety budget')));
+});

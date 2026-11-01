@@ -1,26 +1,7 @@
 import { Decoration, ViewPlugin } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
 
-// This parser only recognizes the source boundary; YAML is never interpreted.
-export const frontMatter = {
-  defineNodes: [{ name: 'FrontMatter', block: true }],
-  parseBlock: [{
-    name: 'FrontMatter', before: 'HorizontalRule',
-    parse(cx, line) {
-      if (cx.lineStart !== 0 || line.text !== '---') return false;
-      let end = line.text.length;
-      while (cx.nextLine()) {
-        end = cx.lineStart + line.text.length;
-        if (line.text === '---' || line.text === '...') {
-          cx.nextLine();
-          break;
-        }
-      }
-      cx.addElement(cx.elt('FrontMatter', 0, end));
-      return true;
-    },
-  }],
-};
+export { frontMatter } from './markdown-front-matter.js';
 
 const rawBlocks = new Set(['FrontMatter', 'Table', 'FencedCode', 'CodeBlock', 'HTMLBlock']);
 const blocks = /^(Paragraph|ATXHeading[1-6]|SetextHeading[12]|ListItem|Blockquote)$/;

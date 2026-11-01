@@ -479,3 +479,21 @@ def test_wiki_parent_permission_error_is_actionable_and_preserves_disk(reader, w
     response = save(reader, '# Edited\n', base)
     assert response.status_code == 503 and response.json()['reason_code'] == 'wiki_write_denied'
     assert (wiki / 'note.md').read_text() == '# Original\n'
+
+
+def test_math_source_drift_uses_existing_explicit_recovery_without_silent_rewrite(reader, wiki):
+    original = b"# Original\n"
+    target = wiki / "note.md"
+    target.write_bytes(original)
+    draft = "# Math\n\nInline \\(\\verb|a  b|\\).\n"
+    failed = save(reader, draft, revision(original))
+    assert failed.status_code == 422
+    data = failed.json()
+    assert data["source"] == draft
+    assert any(item["code"] == "format-math-source" for item in data["diagnostics"])
+    assert data["recovery_token"]
+    assert target.read_bytes() == original
+    recovered = save(reader, draft, revision(original), mode="source_recovery", token=data["recovery_token"])
+    assert recovered.status_code == 200
+    assert recovered.json()["state"] == "saved_source"
+    assert target.read_bytes() == draft.encode()

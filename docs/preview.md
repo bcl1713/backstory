@@ -1,7 +1,8 @@
 # Preview and attachments
 
 Preview renders CommonMark with GFM tables, strikethrough, autolinks and disabled
-task checkboxes. Raw HTML is displayed as text. A separate nh3 allowlist sanitizes
+task checkboxes. Raw HTML syntax is structurally recognized only to emit escaped
+literal text tokens (including raw blocks and tag attributes), never raw HTML. A separate nh3 allowlist sanitizes
 the generated fragment; the application CSP permits only local scripts, styles
 and images. External links remain ordinary navigation. External embedded images
 show a placeholder without fetching their URL. Missing, excluded and non-raster
@@ -104,3 +105,113 @@ browser refreshes the date across midnight or a timezone change. **Recently
 modified** lists up to five eligible existing notes by indexed modification time,
 with index readiness shown; opening one always reads current disk content. This
 is index-backed navigation, not per-user visit tracking.
+
+## Local images in the live editor
+
+Inactive lines display ordinary Markdown images (`![description](photos/a.png)`)
+and full, collapsed or shortcut reference images. Destinations are decoded with
+Markdown escape/entity rules and passed to the existing authenticated resolver
+as source-relative Markdown URLs, including percent-encoded filenames and
+within-root parent-relative paths. Only resolved `/attachments/` raster targets
+become image sources. No image destination is loaded directly. External,
+scheme-relative, data and active URLs are blocked; missing, excluded, non-raster
+and failed image loads show a safe text fallback and an **Edit image source**
+button. No rendering action writes, formats or saves the note.
+
+Images are lazy-loaded, constrained to the note width and viewport height, and
+retain the source description as alternative text. **Enlarge image** opens a
+local modal with a labeled close button; Escape closes it and restores button
+focus without moving the editor selection. **Edit image source**, moving the
+caret onto the line, or a selection intersecting the line reveals the original
+Markdown. Arrow and Vim vertical motions reveal nearby image source before
+navigation uses its geometry. Raw source and plain-text presentations always
+retain the authoritative source and its existing undo history.
+
+This first stage intentionally leaves images inside table cells, images nested
+inside a Markdown link, and image syntax spanning multiple lines as editable
+literal source in live mode. Code, escaped images, HTML and front matter are not
+reinterpreted. `![[wiki embeds]]` are not supported image syntax. The independent
+server preview retains its existing Markdown image support, including table and
+multiline contexts, but does not provide the live editor's enlargement modal.
+Reference lookup and display are bounded to 200 definitions/images and 100,000
+visited syntax nodes; excess or unresolved syntax stays literal source. At most
+four image resolver requests run concurrently, with duplicate destinations
+shared. Stale results cannot reintroduce removed image syntax; refresh on return
+rechecks resolution. Attachment authentication, exclusions, MIME rules, byte caps
+and application CSP are unchanged. Browser decoding still relies on the existing
+attachment byte limits, not an image-pixel/dimension validator.
+
+## Explicit mathematical notation
+
+Live preview and the separate preview page share a locally bundled **KaTeX
+0.19.1** renderer. Inline math uses `\(x^2\)` on one source line. Display math
+uses standalone, column-zero `\[...\]` or `$$...$$` lines, or matching standalone
+opening/closing lines around a paragraph-like formula. For example:
+
+```text
+\[
+\frac{a}{b} + \sqrt{x}
+\]
+```
+
+Bare dollars are never inline delimiters: `$5`, `$10` and `$x$` stay ordinary
+text. Incomplete syntax and escaped delimiters stay source. Code spans/fences,
+indented code, front matter, raw HTML, link/image labels and destinations, and
+table cells are not math-enhanced. Inline math works in list/blockquote text;
+display math inside nested blocks, display blocks containing internal blank
+lines or interrupting Markdown block syntax, and indented/trailing-space display
+delimiters are intentionally unsupported in this first stage. The editor and
+server share delimiter/context fixtures. YAML front matter is presented as
+escaped code in the separate preview, never interpreted as math.
+
+The renderer uses supported direct DOM `render()` with `output: 'mathml'`.
+Native MathML supplies semantic fractions, superscripts, radicals, accents,
+matrices and aligned equations without a KaTeX stylesheet, downloaded fonts,
+serialized HTML injection, or a CSP exception. Typography depends on native
+browser MathML support; unsupported TeX, output requiring non-MathML styling,
+and rendering/loading failures retain escaped source plus a fixed diagnostic.
+This is mathematical notation, not a full TeX engine: packages, files, graphics,
+links, HTML extensions and executable commands are not enabled. No note-selected
+URL is loaded by math rendering.
+
+Application-owned options always set `trust: false`, `strict: 'error'`,
+`throwOnError: true`, `maxExpand: 200`, `maxSize: 20`, `globalGroup: false` and a
+fresh macro object for every formula. A detached result must pass a positive
+MathML namespace/element/attribute policy before mounting; links, images,
+`mglyph`, SVG, style elements/attributes, event handlers and foreign namespaces
+are rejected. Errors never expose KaTeX exception messages. Formula input is
+limited to 2,048 characters, 512 lexical tokens, brace depth 32 and 64 array
+separators. Generated output is limited to 4,096 nodes, depth 64 and 65,536 text
+characters, with finite geometry. These are finite work budgets, not a promise
+that synchronous library rendering can be forcibly timed out.
+
+Each note enhances at most 100 formulas with at most 100 queued jobs, rendered
+one per event-loop task; CodeMirror virtualization avoids mounting offscreen
+widgets. Model extraction visits at most 100,000 syntax nodes. The renderer is a
+separate lazy local ESM asset, not included in the editor's initial IIFE. No
+formula DOM or macro state is cached across notes. Disposed, changed or selected
+widgets cannot receive late results. **Edit math source**, selection, and normal
+arrow/Vim source-line navigation reveal the original notation; rendering never
+calls save/format or changes source/undo history. Automatic block-exit formatting
+skips blocks containing explicit math; the full-note formatter compares exact
+parser-recognized math source before/after its passes and returns the original
+source with `format-math-source` if a tool would rewrite it (including meaningful
+spaces in `\verb`/`\text`). Ordinary surrounding Markdown may still format when
+math is unchanged; configured line-ending conversion remains supported. Unlike
+the 100-widget display limit, formatter signatures cover every recognized
+formula; if the complete 100,000-visit verification budget is exhausted,
+formatting refuses rather than comparing partial signatures. If a
+formatted Save would rewrite TeX, the existing format-failure/recovery flow is
+used: disk source is unchanged until the owner explicitly chooses **Save source
+without formatting**. No save/recovery policy is bypassed. Wide/tall results scroll inside
+the available width/height rather than expanding the page.
+
+Server GET and draft-POST previews emit only application-generated, escaped,
+inert math placeholders through the existing ordinary Markdown sanitizer. GET
+loads the same local enhancer; without JavaScript, source and an explanatory
+message remain visible. POST is a fragment API, not a rendered MathML response:
+a consumer that mounts the sanitized fragment may call
+`window.backstoryMathPreview.hydrate(container)` on a preview page to use the same
+bounded enhancer. The ordinary sanitizer still admits no MathML/SVG/raw HTML;
+attachment policy, authentication, source bytes, draft/formatter semantics and
+application response policy remain unchanged.

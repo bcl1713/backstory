@@ -9,6 +9,18 @@ export function markdownBlock(state, position) {
   let node = tree.resolveInner(position, 1);
   if (node.name === 'Document') node = tree.resolveInner(position, -1);
   while (node.parent && node.parent.name !== 'Document') node = node.parent;
+  // Prettier treats explicit TeX as ordinary Markdown and may collapse spaces
+  // in \verb/\text. Do not queue automatic formatting of a math-owned block.
+  // A conservative traversal cap also avoids unbounded per-selection work.
+  if (eligible.has(node.name)) {
+    const cursor = node.cursor();
+    for (let visited = 0; visited < 10000; visited++) {
+      if (cursor.from < node.from || cursor.to > node.to) break;
+      if (cursor.name === 'MathInline' || cursor.name === 'MathBlock') return null;
+      if (!cursor.next()) break;
+      if (visited === 9999) return null;
+    }
+  }
   return eligible.has(node.name) && node.from <= position && position <= node.to
     ? { from: node.from, to: node.to, type: node.name } : null;
 }
