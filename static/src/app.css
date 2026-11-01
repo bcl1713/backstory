@@ -219,6 +219,8 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 
 /* Mermaid SVG remains inside its opaque frame; parent owns source and controls. */
 .lp-diagram { display: block; box-sizing: border-box; max-width: 100%; margin: .75rem 0; padding: .5rem; border: 1px solid var(--border, currentColor); white-space: normal; }
+/* CodeMirror measures widget boxes without margins, as for .lp-table above. */
+.cm-editor .lp-diagram { margin: 0; padding-block: 1.25rem; }
 .lp-diagram iframe { display: block; width: 100%; max-width: 100%; height: 12rem; border: 0; background: #fff; }
 .lp-diagram-source { display: block; max-height: 22rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .lp-diagram-source[hidden], .lp-diagram button[hidden] { display: none; }
