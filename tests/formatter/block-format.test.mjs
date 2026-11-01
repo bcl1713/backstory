@@ -49,3 +49,27 @@ test('neighboring heading indentation and previous prose trailing spaces are not
   const current = markdownBlock(state(previous), previous.indexOf('Current'));
   assert.equal(blockFormattingChanges(previous, previous.replace('Previous.   ', 'Previous.').replace('Current   text.', 'Current text.'), current), null);
 });
+
+test('automatic block formatting does not reinterpret explicit TeX as ordinary Markdown', async () => {
+  const { mathSyntax } = await import('../../static/src/math-preview.js');
+  for (const source of ['Before\n\nInline \\(\\verb|a  b|\\).', 'Before\n\n- Inline \\(\\text{a  b}\\).\n- Other']) {
+    const doc = EditorState.create({ doc: source, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks, mathSyntax] })] });
+    assert.equal(markdownBlock(doc, source.indexOf('Inline')), null);
+    assert.equal(doc.doc.toString(), source);
+  }
+});
+
+test('math source guard is scoped to the exited block rather than later sibling paragraphs', async () => {
+  const { mathSyntax } = await import('../../static/src/math-syntax.js');
+  const source = 'Before\n\n\\(x\\)\n\nAfter';
+  const doc = EditorState.create({ doc: source, extensions: [markdown({ base: markdownLanguage, extensions: [mathSyntax] })] });
+  assert.equal(markdownBlock(doc, 0)?.type, 'Paragraph');
+  assert.equal(markdownBlock(doc, source.indexOf('After'))?.type, 'Paragraph');
+  assert.equal(markdownBlock(doc, source.indexOf('\\(')), null);
+});
+
+test('automatic list formatting does not reinterpret an embedded Mermaid source fence',()=>{
+ const source='Before\n\n- Item\n\n  ```mermaid\n  flowchart TD\n  A[keep  two  spaces]\n  ```\n';
+ assert.equal(markdownBlock(state(source),source.indexOf('Item')),null);
+ assert.equal(state(source).doc.toString(),source);
+});

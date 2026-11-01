@@ -5,6 +5,8 @@ import path from 'node:path';
 import * as prettier from 'prettier';
 import { main as markdownlint } from 'markdownlint-cli2';
 import { LIMITS, ConfigError, relativePath, resolveConfiguration } from './config.mjs';
+import { diagramSources } from '../static/src/diagram-syntax.js';
+import { mathSources } from '../static/src/math-syntax.js';
 
 export class FormatError extends Error {
   constructor(code,message,line,column) { super(message); Object.assign(this,{code,line,column}); }
@@ -94,6 +96,10 @@ export async function formatRequest(request, {scratchDirectory} = {}) {
       if (logFailed || code > 1) throw new FormatError('format-lint','markdownlint could not safely process the staged note.');
       return diagnostics;
     }
+    const originalMath = mathSources(original);
+    if (originalMath === null) throw new FormatError('format-math-source', 'Formatting could not verify all mathematical source within the safety budget. Original source retained.');
+    const originalDiagrams = diagramSources(original);
+    if (originalDiagrams === null) throw new FormatError('format-mermaid-source', 'Formatting could not verify all Mermaid source within the safety budget. Original source retained.');
     const result = await requireFixedPoint(original, async source => {
       let formatted = await prettierPass(source);
       await writeFile(staged,formatted,{encoding:'utf8',mode:0o600});
@@ -109,6 +115,11 @@ export async function formatRequest(request, {scratchDirectory} = {}) {
       const diagnostics = config.lintSkipped ? [] : await lintPass(false);
       return {source:formatted,diagnostics:[...skipped,...diagnostics]};
     });
+    const candidateMath = mathSources(result.source);
+    if (candidateMath === null) throw new FormatError('format-math-source', 'Formatting could not verify all mathematical source within the safety budget. Original source retained.');
+    if (JSON.stringify(candidateMath) !== JSON.stringify(originalMath)) throw new FormatError('format-math-source', 'Formatting would change mathematical source. Original source retained; format the surrounding blocks instead.');
+    const candidateDiagrams = diagramSources(result.source);
+    if (candidateDiagrams === null || JSON.stringify(candidateDiagrams) !== JSON.stringify(originalDiagrams)) throw new FormatError('format-mermaid-source', 'Formatting would change Mermaid source or could not verify it within the safety budget. Original source retained.');
     return {...result,outcome:'ok'};
   } catch (error) {
     return {source:original,diagnostics:[diagnostic(error)],outcome:'failed'};

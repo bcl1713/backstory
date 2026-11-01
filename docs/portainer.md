@@ -98,6 +98,7 @@ The complete starting file is `portainer.env.example`. Change these entries:
 | `BACKSTORY_ALLOWED_HOSTS` | Exact public hostname, e.g. `wiki.example.com` |
 | `BACKSTORY_PROXY_MODE` | `trusted` |
 | `BACKSTORY_CSRF_TRUSTED_ORIGINS` | Exact origin, e.g. `https://wiki.example.com` |
+| `BACKSTORY_MERMAID_PARENT_ORIGIN` | Optional; leave empty for source-only diagrams. Deliberate opt-in uses one exact browser origin, not the CSRF list; see [renderer configuration](mermaid-frame.md). |
 | `BACKSTORY_BIND_ADDRESS` | Private interface IP on the Docker endpoint reachable by the proxy |
 | `BACKSTORY_PORT` | Available private origin port, normally `8000` |
 | `BACKSTORY_TRUSTED_PROXY_IPS` | Actual origin-side connector/proxy peer IP with `/32` (IPv6 `/128`) |

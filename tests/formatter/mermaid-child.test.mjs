@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+const path=new URL('../../static/src/mermaid-frame-protocol.js',import.meta.url);
+const api=existsSync(path)?await import(path):{};
+test('child accepts one exact-parent-origin channel and rejects source before draw',async()=>{
+ assert.equal(typeof api.installFrameProtocol,'function','child protocol missing');
+ const messages=[], replies=[], listeners=new Set(), calls=[];
+ const parent={postMessage:(...v)=>messages.push(v)};
+ const win={parent,addEventListener:(t,f)=>listeners.add(f),removeEventListener:(t,f)=>listeners.delete(f)};
+ const port={postMessage:v=>replies.push(v),start(){},close(){}};
+ api.installFrameProtocol(win,'http://localhost:8765',async source=>{calls.push(source);return{width:400,height:200};});
+ assert.deepEqual(messages,[[{version:1,type:'hello'},'http://localhost:8765']]);
+ const token='a'.repeat(64), data={version:1,type:'init',token};
+ for(const event of [{source:{},origin:'http://localhost:8765'},{source:parent,origin:'http://evil.invalid'}]) for(const f of listeners)f({...event,data,ports:[port]});
+ assert.equal(port.onmessage,undefined);
+ for(const f of listeners)f({source:parent,origin:'http://localhost:8765',data,ports:[port]});
+ assert.equal(listeners.size,0); assert.equal(replies[0].type,'ready');
+ const receive=port.onmessage;
+ await receive({data:{version:1,type:'render',token,source:'flowchart TD\nA[<img src=/private>]'}});
+ assert.equal(calls.length,0); assert.equal(replies[1].status,'unsupported');
+ await receive({data:{version:1,type:'render',token,source:'flowchart TD\nA-->B'}});
+ assert.equal(calls.length,0);
+});
+test('child sends only fixed dimensions/status, canonical source to trusted draw and never binds functions',async()=>{
+ assert.equal(typeof api.installFrameProtocol,'function','child protocol missing');
+ let listener;const replies=[],calls=[],parent={postMessage(){}};
+ const win={parent,addEventListener:(t,f)=>listener=f,removeEventListener(){}};
+ const port={postMessage:v=>replies.push(v),start(){},close(){}};
+ api.installFrameProtocol(win,'http://localhost:8765',async source=>{calls.push(source);return{width:500,height:300};});
+ const token='b'.repeat(64);listener({source:parent,origin:'http://localhost:8765',data:{version:1,type:'init',token},ports:[port]});
+ await port.onmessage({data:{version:1,type:'render',token,source:'flowchart TD\nA[Hi]-->B'} });
+ assert.match(calls[0],/n0\["Hi"\]/);
+ assert.deepEqual(replies[1],{version:1,type:'result',token,status:'ok',width:500,height:300});
+});

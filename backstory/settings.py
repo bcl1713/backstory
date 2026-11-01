@@ -7,7 +7,7 @@ import tempfile
 from django.core.exceptions import ImproperlyConfigured
 from backstory.configuration import positive_integer, positive_seconds, PROXY_REMEDIES
 from backstory.checks import (
-    exact_host, exact_https_origin, host_source_configuration_errors,
+    exact_host, exact_https_origin, exact_renderer_origin, host_source_configuration_errors,
     proxy_configuration_errors, safe_origin_bind,
 )
 
@@ -64,6 +64,12 @@ if not ALLOWED_HOSTS or not all(exact_host(host) for host in ALLOWED_HOSTS):
     raise ImproperlyConfigured("BACKSTORY_ALLOWED_HOSTS must contain exact hostnames or IPs without schemes, ports or wildcards")
 if _local and any(host not in {"localhost", "127.0.0.1", "[::1]", "testserver"} for host in ALLOWED_HOSTS):
     raise ImproperlyConfigured("BACKSTORY_ALLOWED_HOSTS must contain only loopback hosts in BACKSTORY_COOKIE_MODE=localhost")
+
+# Disabled by default; this setting changes only the approved renderer shell.
+BACKSTORY_MERMAID_PARENT_ORIGIN = os.environ.get('BACKSTORY_MERMAID_PARENT_ORIGIN', '')
+if BACKSTORY_MERMAID_PARENT_ORIGIN and not exact_renderer_origin(
+        BACKSTORY_MERMAID_PARENT_ORIGIN, ALLOWED_HOSTS, BACKSTORY_COOKIE_MODE):
+    raise ImproperlyConfigured('BACKSTORY_MERMAID_PARENT_ORIGIN must be one exact canonical application origin')
 
 # Trust is explicit and applies only to the actual TCP peer. Never use Django's
 # independent forwarding switches: the middleware validates before setting HTTPS.
@@ -144,7 +150,7 @@ MIDDLEWARE = [
 ]
 ROOT_URLCONF = "backstory.urls"
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "DIRS": [BASE_DIR / "templates"], "APP_DIRS": True,
-              "OPTIONS": {"context_processors": ["django.template.context_processors.request", "django.contrib.auth.context_processors.auth"]}}]
+              "OPTIONS": {"context_processors": ["django.template.context_processors.request", "django.contrib.auth.context_processors.auth", "backstory.renderers.renderer_context"]}}]
 WSGI_APPLICATION = "backstory.wsgi.application"
 DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BACKSTORY_DATA_DIR / "backstory.sqlite3", "OPTIONS": {"timeout": 10}}}
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.Argon2PasswordHasher"]

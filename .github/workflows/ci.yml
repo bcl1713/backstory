@@ -144,6 +144,16 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: rich-rendering-${{ matrix.shard }}
+          path: |
+            /tmp/backstory-release-one/browser-runtime/reports/images-*.png
+            /tmp/backstory-release-one/browser-runtime/reports/math-*.png
+            /tmp/backstory-release-one/browser-runtime/reports/mermaid-*.png
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: failure()
         with:
           name: browser-failure-${{ matrix.shard }}
