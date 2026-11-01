@@ -7,7 +7,7 @@ RUN --mount=type=secret,id=proxy_ca \
     npm ci --strict-ssl=true
 COPY assets ./assets
 COPY static/src ./static/src
-COPY scripts/build-assets.mjs scripts/build-mermaid-frame.mjs ./scripts/
+COPY scripts/build-assets.mjs scripts/build-mermaid-frame.mjs scripts/build-graphviz-frame.mjs ./scripts/
 RUN npm run build && npm prune --omit=dev --ignore-scripts --no-audit --no-fund && mkdir /node-libs && cp /usr/lib/*-linux-gnu/libstdc++.so.6 /node-libs/
 
 FROM ghcr.io/astral-sh/uv:0.12.19 AS uv

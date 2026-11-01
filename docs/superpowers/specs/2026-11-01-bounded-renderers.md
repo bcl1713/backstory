@@ -1,7 +1,7 @@
 # Backstory renderer checkpoint — 2026-11-01
 
 Baseline: fresh origin/dev b1dc978166fbae631e9f6ed51eed60a7531d1739.
-Issues #73 (Graphviz), #74 (Vega-Lite), and #75 (uploads) were created after a single authorized retry with newly supplied explicit publication authority. Renderer policy/dependency changes remain paused; independent bounded parser work proceeds on feat/73-graphviz.
+Issues #73 (Graphviz), #74 (Vega-Lite), and #75 (uploads) were created after a single authorized retry with newly supplied explicit publication authority. Specific route-only renderer exceptions were approved on 2026-11-01 at05:02:53 UTC. Implementation proceeds on feat/73-graphviz; no production values or deployment are authorized.
 
 ## Independent review refinements for the approval decision
 
@@ -13,7 +13,7 @@ Concurrency is aggregate across the two new engines: one worker executing and tw
 
 Vega input JSON depth at most 8, field names ASCII identifiers at most 32 units remapped to owned names (no field-path interpretation), 8 fields/256 records, 32 categorical values per channel, absolute numeric values at most 1e9, strings at most 80 units, source at most 65536 UTF-8 bytes. Initial mark bar/line/point with x/y nominal or quantitative and optional nominal color only; no supplied transforms/expressions. Compiler-generated internal expressions must use interpreter ASTs. Output bounds match Graphviz: 250000 units, 4000 elements, 20000 attributes, 16000 text units, finite viewport at most 1600x1200. Check output before worker transfer and again before child DOM reconstruction. Hostile inputs, compiler output and CSP inheritance still require empirical browser gates.
 
-## Graphviz: proposed design requiring explicit policy approval
+## Graphviz: approved scoped design
 
 Maintained candidate: @viz-js/viz (official https://viz-js.com/api/). It compiles Graphviz to WebAssembly. Pin a stable registry release after approval, not repository development version. Existing renderer CSP prohibits compilation and workers.
 

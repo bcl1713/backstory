@@ -1,6 +1,6 @@
 import { DIAGRAM_LIMITS, parseFlowchart } from './mermaid-model.js';
 const exact=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
-export function installFrameProtocol(win, origin, render) {
+export function installFrameProtocol(win, origin, render, {parse=parseFlowchart}={}) {
   if (win.parent === win) return; // Direct visits never accept note source.
   function handshake(event) {
     const data=event.data;
@@ -14,7 +14,7 @@ export function installFrameProtocol(win, origin, render) {
       let status='unsupported',width=1,height=1;
       try {
         if(!exact(message,['version','type','token','source'])||message.version!==1||message.type!=='render'||message.token!==token) throw new Error('unsupported_diagram');
-        const model=parseFlowchart(message.source);
+        const model=parse(message.source);
         status='error';
         const size=await render(model.canonical);
         if(!Number.isFinite(size.width)||!Number.isFinite(size.height)||size.width<=0||size.height<=0) throw new Error('unsafe_output');

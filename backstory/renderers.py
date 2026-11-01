@@ -54,4 +54,8 @@ def successful_mermaid_shell(request, response):
 
 def renderer_context(request):
     """A request-specific UI boolean, never note source or an origin fallback."""
-    return {'mermaid_enabled': renderer_origin(request) is not None}
+    from .isolated_renderers import graphviz_origin
+    mermaid_enabled = renderer_origin(request) is not None
+    graphviz_enabled = graphviz_origin(request) is not None
+    return {'mermaid_enabled': mermaid_enabled, 'graphviz_enabled': graphviz_enabled,
+            'diagrams_enabled': mermaid_enabled or graphviz_enabled}

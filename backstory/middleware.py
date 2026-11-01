@@ -39,6 +39,19 @@ class ResponsePolicyMiddleware:
             )
             response['Referrer-Policy'] = 'no-referrer'
             response['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
+        from .isolated_renderers import successful_graphviz_shell, graphviz_origin
+        if successful_graphviz_shell(request, response):
+            del response['X-Frame-Options']
+            response['Content-Security-Policy'] = (
+                "default-src 'none'; "
+                f"script-src 'nonce-{request.csp_script_nonce}' 'wasm-unsafe-eval'; "
+                "style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; "
+                "font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; "
+                "worker-src blob:; base-uri 'none'; form-action 'none'; "
+                f"frame-ancestors {graphviz_origin(request)}; sandbox allow-scripts"
+            )
+            response['Referrer-Policy'] = 'no-referrer'
+            response['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
         return response
 
 

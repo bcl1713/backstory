@@ -277,3 +277,6 @@ worst-case responsiveness must pass CI before release. Screenshot tests require
 actual visual inspection; authored tests alone do not establish a visual pass.
 CI retains image, math, direct-edit and Mermaid PNGs from the shared browser
 runtime's `reports` directory.
+## Graphviz diagrams
+
+Explicit `graphviz` and `dot` fences support bounded networks and dependency graphs after the separate Graphviz origin opt-in. Click/tap a rendered graph or use its keyboard source control to edit; leaving the source renders it again. Unsupported or failed graphs remain source. See [supported DOT syntax, limits and isolated worker policy](graphviz-frame.md). This is not full DOT compatibility.
