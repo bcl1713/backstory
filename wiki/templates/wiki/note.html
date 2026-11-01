@@ -10,7 +10,7 @@
 <button type="button" data-editor-mode="source" aria-pressed="false">Raw source</button>
 <button type="button" data-editor-mode="plain" data-plain-fallback aria-pressed="false" aria-describedby="complete-source-help">Plain text fallback</button>
 </div>
-<div class="editor-controls" role="group" aria-label="Advanced editing"><button type="button" data-format hidden>Format</button><button type="button" data-vim-toggle hidden aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space" title="Vim bindings (Ctrl/⌘ Shift Space in editor)" aria-pressed="false" aria-describedby="vim-help">Vim bindings</button></div>
+<div class="editor-controls" role="group" aria-label="Advanced editing"><button type="button" data-image-upload hidden>Upload image</button><button type="button" data-format hidden>Format</button><button type="button" data-vim-toggle hidden aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space" title="Vim bindings (Ctrl/⌘ Shift Space in editor)" aria-pressed="false" aria-describedby="vim-help">Vim bindings</button></div>
 <p id="complete-source-help" class="editor-help">For complete document source, choose Plain text fallback.</p>
 <p id="link-completion-help" class="editor-help">Type [[ for existing-note suggestions. Use arrows and Enter to choose, Escape to dismiss. Tab leaves the editor. Ctrl/⌘ Space requests suggestions at the caret. In Vim, use Insert mode.</p>
 <p id="vim-help" class="editor-help">Vim bindings are optional. Ctrl/⌘ Shift Space toggles them while the enhanced editor is focused. Desktop starts in Normal; phones start with Vim off. Manual choices are remembered in this browser. In Normal, gf follows the caret link and gh goes home; press i to type and Escape for Normal. Tab leaves the editor. Disable Vim bindings at any time. Plain text fallback suspends them.</p>
@@ -24,6 +24,15 @@
 <form class="zen-chrome" data-link-discovery {% if is_new %}hidden{% endif %} aria-label="Link discovery"><label for="link-target">Link target</label><input id="link-target" name="target" maxlength="4096" placeholder="Note path, ID or alias" required><label for="link-kind">Link syntax</label><select id="link-kind" name="kind"><option value="wiki">Wikilink</option><option value="markdown">Markdown relative link</option></select><button type="submit">Resolve link</button><p data-link-result role="status" aria-live="polite"></p></form>
 {% endblock %}
 {% block content %}
+<dialog data-image-upload-dialog aria-labelledby="image-upload-title" class="image-upload-dialog">
+<h2 id="image-upload-title">Upload image</h2>
+<p>PNG, JPEG or static WebP; up to 8 MiB and 4096 pixels per side. Images stay in assets even if you do not insert them.</p>
+<label for="image-upload-file">Image file</label><input id="image-upload-file" type="file" accept="image/png,image/jpeg,image/webp">
+<p role="status" aria-live="polite"></p>
+<label for="image-upload-markdown">Image Markdown</label><textarea id="image-upload-markdown" readonly rows="3"></textarea>
+<div class="editor-controls"><button type="button" data-image-upload-send>Upload</button><button type="button" data-image-upload-insert disabled>Insert into draft</button><button type="button" data-image-upload-close>Close</button></div>
+</dialog>
+
 <div class="persistent-actions"><a data-navigation-fallback href="/?folder=" title="Browse wiki (navigation controls are still loading)">Menu</a><button type="button" data-zen-toggle hidden aria-label="Navigation and controls" aria-expanded="false" aria-controls="site-navigation editor-tools" aria-keyshortcuts="Control+Shift+. Meta+Shift+." title="Navigation and controls (Ctrl/⌘ Shift .)">Menu</button><button type="button" data-save hidden>{% if is_new %}Create note{% else %}Save{% endif %}</button><span data-vim-mode hidden role="status" aria-live="polite" aria-atomic="true">Vim · Off</span><p role="status" aria-live="polite" data-editor-status>{% if recovered_draft %}Recovered draft. Compare with the current disk version before explicitly saving.{% else %}Unchanged{% endif %}</p></div>
 {% if is_new %}<p>Folder: <strong>{{ folder|default:'Wiki root' }}</strong>. The folder must already exist.</p><label for="note-filename">Note filename</label><input id="note-filename" value="{{ filename|default:'' }}" maxlength="255" placeholder="New note.md" autocomplete="off">{% endif %}
 <p data-editor-readiness role="status" aria-live="polite">Loading enhanced editor…</p>

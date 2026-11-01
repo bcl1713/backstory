@@ -1,7 +1,8 @@
 from django.urls import path
-from . import tool_views
+from . import tool_views, image_uploads
 
 urlpatterns = [
+    path('images/', image_uploads.upload_image, name='tool-images'),
     path('read-many/', tool_views.read_many, name='tool-read-many'),
     path('status/', tool_views.status, name='tool-status'),
     path('create-folder/', tool_views.create_folder, name='tool-create-folder'),

@@ -150,6 +150,7 @@ jobs:
           path: |
             /tmp/backstory-release-one/browser-runtime/reports/images-*.png
             /tmp/backstory-release-one/browser-runtime/reports/math-*.png
+            /tmp/backstory-release-one/browser-runtime/reports/image-upload-*.png
             /tmp/backstory-release-one/browser-runtime/reports/mermaid-*.png
             /tmp/backstory-release-one/browser-runtime/reports/graphviz-*.png
             /tmp/backstory-release-one/browser-runtime/reports/vega-lite-*.png

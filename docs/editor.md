@@ -265,3 +265,10 @@ them. Wider Vim mappings are likewise not a promise of Neovim parity: `gf` and
 `gh` provide note navigation, while `:w` remains unconnected to Backstory saves.
 Use Save or the documented save shortcut rather than assuming a Vim command
 has persisted your draft.
+
+## Upload an image
+
+Open Menu → Upload image to place a validated raster in the existing assets folder.
+Uploading does not change your note; choose Insert into draft to append its Markdown,
+then the usual Save and idle-autosave behavior applies. See
+[formats, limits and safe retries](image-uploads.md).

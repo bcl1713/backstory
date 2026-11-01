@@ -237,3 +237,10 @@ Do not confuse a not-started rejection with `uncertain` after a request may have
 reached the server. Cancellation, transport loss and malformed acknowledgements
 can occur after publication. Read before deciding what to do; never blindly
 retry a write or interpret a client error as proof that nothing changed.
+
+## Raster image uploads
+
+The authenticated [image upload dialog and raw-body API](image-uploads.md) write
+validated raster images into the existing assets directory. Uploads are explicit,
+never overwrite existing files and never save or silently edit a note. This binary
+file flow is separate from the JSON WebMCP note tools above.
