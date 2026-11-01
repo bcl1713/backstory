@@ -1,3 +1,4 @@
+import { mountImageUpload } from './image-upload.js';
 import { createLinkFollower, activateLink } from './follow-link.js';
 import { initialVimEnabled, rememberVimEnabled, shouldFocusEditor } from './editor-preferences.js';
 import { isVimToggleShortcut } from './editor-shortcuts.js';
@@ -265,6 +266,7 @@ function attachNoteEditor() {
   };
   onChange = mountNoteActions({ editor, initialSource, isNew: parent.dataset.isNew === 'true', bom: parent.dataset.bom === 'true' });
   if (source !== initialSource) onChange(source);
+  mountImageUpload({ editor, getPath: () => JSON.parse(document.querySelector('#note-path').textContent) });
   const reveal = () => {
     stage?.dispatchEvent(new Event('editor-ready'));
     // Independent of the small network-failure guard successfully loading.
