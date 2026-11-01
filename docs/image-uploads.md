@@ -1,6 +1,6 @@
 # Image uploads
 
-Open **Menu → Upload image** on an existing note. Choose a PNG, JPEG or static
+Choose **Upload image**, beside Menu and Save, on an existing note. Choose a PNG, JPEG or static
 WebP, then Upload. Uploading creates an asset, but never edits or saves a note.
 Copy the returned Markdown or choose **Insert into draft** to append it to the
 unchanged draft. After insertion, the editor’s existing Save and idle-autosave

@@ -93,7 +93,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await page.keyboard.press('Control+End');
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeInViewport();
     await expect(toggle).toBeInViewport();
-    await expect(page.locator('.persistent-actions button')).toHaveText(['Menu', 'Save']);
+    await expect(page.locator('.persistent-actions button')).toHaveText(['Menu', 'Save', 'Upload image']);
     await expect(page.getByRole('button', { name: 'Format', exact: true })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Vim bindings', exact: true })).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

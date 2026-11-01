@@ -16,7 +16,7 @@ def test_note_toolbar_has_no_link_button_but_keeps_completion_help(reader, wiki)
 
 
 @pytest.mark.django_db
-def test_only_menu_and_save_are_persistent_buttons(reader, wiki):
+def test_menu_save_and_upload_are_persistent_buttons(reader, wiki):
     from html.parser import HTMLParser
     class Toolbar(HTMLParser):
         def __init__(self):
@@ -36,9 +36,11 @@ def test_only_menu_and_save_are_persistent_buttons(reader, wiki):
     response = reader.get('/notes/note.md')
     toolbar = Toolbar()
     toolbar.feed(response.content.decode())
-    assert len(toolbar.buttons) == 2
+    assert len(toolbar.buttons) == 3
     assert 'data-zen-toggle' in toolbar.buttons[0]
     assert 'data-save' in toolbar.buttons[1]
+    assert 'data-image-upload' in toolbar.buttons[2]
+    assert response.content.count(b'data-image-upload hidden') == 1
     # Advanced controls stay available through Menu, not deleted.
     assert b'data-format' in response.content
     assert b'data-vim-toggle' in response.content
