@@ -25,3 +25,5 @@ await copyFile('node_modules/katex/LICENSE', 'static/licenses/katex.txt');
 await copyFile('node_modules/@lezer/markdown/LICENSE', 'static/licenses/lezer-markdown.txt');
 // Separate public classic bundle; source only crosses the private frame port.
 await import('./build-mermaid-frame.mjs');
+await import('./build-graphviz-frame.mjs');
+await import('./build-vega-lite-frame.mjs');

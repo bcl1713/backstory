@@ -67,6 +67,14 @@ if _local and any(host not in {"localhost", "127.0.0.1", "[::1]", "testserver"} 
 
 # Disabled by default; this setting changes only the approved renderer shell.
 BACKSTORY_MERMAID_PARENT_ORIGIN = os.environ.get('BACKSTORY_MERMAID_PARENT_ORIGIN', '')
+BACKSTORY_GRAPHVIZ_PARENT_ORIGIN = os.environ.get('BACKSTORY_GRAPHVIZ_PARENT_ORIGIN', '')
+if BACKSTORY_GRAPHVIZ_PARENT_ORIGIN and not exact_renderer_origin(
+        BACKSTORY_GRAPHVIZ_PARENT_ORIGIN, ALLOWED_HOSTS, BACKSTORY_COOKIE_MODE):
+    raise ImproperlyConfigured('BACKSTORY_GRAPHVIZ_PARENT_ORIGIN must be one exact canonical application origin')
+BACKSTORY_VEGA_LITE_PARENT_ORIGIN = os.environ.get('BACKSTORY_VEGA_LITE_PARENT_ORIGIN', '')
+if BACKSTORY_VEGA_LITE_PARENT_ORIGIN and not exact_renderer_origin(
+        BACKSTORY_VEGA_LITE_PARENT_ORIGIN, ALLOWED_HOSTS, BACKSTORY_COOKIE_MODE):
+    raise ImproperlyConfigured('BACKSTORY_VEGA_LITE_PARENT_ORIGIN must be one exact canonical application origin')
 if BACKSTORY_MERMAID_PARENT_ORIGIN and not exact_renderer_origin(
         BACKSTORY_MERMAID_PARENT_ORIGIN, ALLOWED_HOSTS, BACKSTORY_COOKIE_MODE):
     raise ImproperlyConfigured('BACKSTORY_MERMAID_PARENT_ORIGIN must be one exact canonical application origin')

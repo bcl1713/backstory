@@ -10,7 +10,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
 import { tablePreview } from './table-preview.js';
-import { diagramPreview } from './diagram-preview.js';
+import { diagramPreview, diagramEngines } from './diagram-preview.js';
 import { mathPreview, mathSyntax } from './math-preview.js';
 import { createImagePreviewExtension } from './image-preview.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
@@ -22,7 +22,7 @@ import { closeCompletion } from '@codemirror/autocomplete';
 import { sourceChanges } from './source-merge.js';
 import { blockExitExtension, blockIsInactive } from './block-format.js';
 
-export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onBlockExit = () => {}, onFailure = () => {}, onVimModeChange = () => {}, onCompletionStatus = () => {}, nonce = '', mermaidEnabled = false, getPath = () => '' }) {
+export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onBlockExit = () => {}, onFailure = () => {}, onVimModeChange = () => {}, onCompletionStatus = () => {}, nonce = '', mermaidEnabled = false, graphvizEnabled = false, vegaLiteEnabled = false, getPath = () => '' }) {
   const presentation = new Compartment();
   let normalMode = false;
   let destroyed = false;
@@ -44,7 +44,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
     follow: () => followLink(linkAtCaret(view), getPath(), { doc: view.state.doc, selection: view.state.selection, path: getPath() }),
     home: () => { followLink.cancel(); activateLink('/'); },
   });
-  const liveExtensions = () => [tablePreview, mathPreview, ...(mermaidEnabled ? [diagramPreview] : []), createLivePreviewExtension(), createLiveLinksExtension({ getPath }), createImagePreviewExtension({ getPath })];
+  const liveExtensions = () => [tablePreview, mathPreview, ...((mermaidEnabled || graphvizEnabled || vegaLiteEnabled) ? [diagramEngines.of([...(mermaidEnabled?['mermaid']:[]),...(graphvizEnabled?['graphviz']:[]),...(vegaLiteEnabled?['vega-lite']:[])]),diagramPreview] : []), createLivePreviewExtension(), createLiveLinksExtension({ getPath }), createImagePreviewExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
   const uniformEndings = new Map(['\n', '\r\n', '\r'].map(value => [value, { separator: value }]));
   const endingsFrom = (text, preferred) => {
@@ -208,7 +208,7 @@ function attachNoteEditor() {
   };
   const showFallback = () => setPresentation('plain');
   try {
-    api = mountMarkdownEditor({ parent, source, newline, mermaidEnabled: parent.dataset.mermaidEnabled === 'true', getPath: () => JSON.parse(document.querySelector('#note-path').textContent), nonce: parent.dataset.styleNonce || '', onChange: changed,
+    api = mountMarkdownEditor({ parent, source, newline, mermaidEnabled: parent.dataset.mermaidEnabled === 'true', graphvizEnabled: parent.dataset.graphvizEnabled === 'true', vegaLiteEnabled: parent.dataset.vegaLiteEnabled === 'true', getPath: () => JSON.parse(document.querySelector('#note-path').textContent), nonce: parent.dataset.styleNonce || '', onChange: changed,
       onBlockExit: block => onBlockExit(block),
       onVimModeChange: mode => { vimMode = mode; showVimMode(); },
       onCompletionStatus: showCompletionStatus,

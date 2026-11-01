@@ -56,3 +56,29 @@ def test_preview_fence_transport_budget_matches_javascript_utf16_and_full_fence_
 def test_unicode_line_separator_in_prose_does_not_change_fence_source_line_mapping():
     from wiki.markdown import render_preview
     assert 'data-mermaid-source' in render_preview('Before\u2028still same Markdown line\n\n'+FENCE,'note.md').html
+
+def test_graphviz_placeholders_are_inert_and_complete_only():
+    from wiki.markdown import render_preview
+    for language in ['graphviz','dot']:
+        source=f'```{language}\ndigraph {{a->b}}\n```'
+        result=render_preview(source,'note.md')
+        assert 'data-graphviz-source="digraph {a-&gt;b}' in result.html
+        assert '<iframe' not in result.html and '<svg' not in result.html
+        assert 'data-graphviz-source' not in render_preview(source[:-3],'note.md').html
+
+def test_graphviz_placeholders_do_not_consume_existing_mermaid_budget():
+    from wiki.markdown import render_preview
+    graphs=('```graphviz\ndigraph {a->b}\n```\n\n')*33
+    result=render_preview(graphs+FENCE,'note.md')
+    assert result.html.count('data-graphviz-source=')==32
+    assert result.html.count('data-mermaid-source=')==1
+    assert 'preview_graphviz_limit' in result.diagnostics
+    assert 'preview_mermaid_limit' not in result.diagnostics
+
+def test_vega_lite_inert_placeholders_keep_independent_source_budget():
+    from wiki.markdown import render_preview
+    source='```vega-lite\n{"data":{"values":[]},"mark":"bar"}\n```'
+    result=render_preview((source+'\n\n')*33+FENCE,'note.md')
+    assert result.html.count('data-vega-lite-source=')==32
+    assert result.html.count('data-mermaid-source=')==1
+    assert '<iframe' not in result.html and '<svg' not in result.html

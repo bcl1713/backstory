@@ -272,3 +272,8 @@ Migration from earlier releases:
 - Exact HTTPS hosts/origins are now checked while loading settings, consistent
   with deployment checks. Schemes/ports belong in origins as documented, never
   in the host allowlist. There is no wildcard fallback or automatic proxy trust.
+## Optional Graphviz rendering
+
+`BACKSTORY_GRAPHVIZ_PARENT_ORIGIN` independently enables the approved Graphviz frame for one exact canonical browser-facing application origin. It defaults empty in all distributed manifests and environment examples. It follows the same canonical-origin rules as Mermaid but never inherits Mermaid's opt-in. See [Graphviz containment and resource limits](graphviz-frame.md). This source change does not configure or deploy a running service.
+
+`BACKSTORY_VEGA_LITE_PARENT_ORIGIN` separately enables static inline-data charts for one exact canonical application origin, with empty defaults in every distributed manifest. Graphviz and Mermaid settings do not enable it. See [accepted chart syntax and interpreter containment](vega-lite-frame.md). This change supplies no production value or deployment.
