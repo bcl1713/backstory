@@ -81,7 +81,7 @@ test('source buttons do not occupy prose but are keyboard reachable with visible
     await expect(edit).toBeFocused();
     expect(await edit.evaluate(el => getComputedStyle(el).outlineStyle)).not.toBe('none');
     expect((await edit.boundingBox()).height).toBeLessThanOrEqual(48);
-    if (item.name === 'inline math' || item.name === 'diagram') await page.screenshot({ path: `${runtime}/reports/direct-edit-focus-${item.name.replace(' ', '-')}.png` });
+    if (item.name === 'inline math' || item.name === 'diagram') await page.screenshot({ path: `${runtime}/reports/math-direct-edit-focus-${item.name.replace(' ', '-')}.png` });
     await page.keyboard.press(item.name === 'image' ? 'Space' : 'Enter');
     await expect(surface).toHaveCount(0);
     expect(await read(page)).toBe(source);
@@ -113,7 +113,7 @@ for (const width of [390, 1180]) test(`direct rendering screenshot at ${width}px
   await page.setViewportSize({ width, height: 1000 });
   await open(page);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: `${runtime}/reports/direct-edit-${width}.png` });
+  await page.screenshot({ path: `${runtime}/reports/math-direct-edit-${width}.png` });
 });
 
 test('compact enlargement is separate from editing and restores focus', async ({ page }) => {
