@@ -3,7 +3,8 @@
 Open **Menu → Upload image** on an existing note. Choose a PNG, JPEG or static
 WebP, then Upload. Uploading creates an asset, but never edits or saves a note.
 Copy the returned Markdown or choose **Insert into draft** to append it to the
-unchanged draft; Save remains a separate action. If the draft changed during the
+unchanged draft. After insertion, the editor’s existing Save and idle-autosave
+behavior applies. Uploading alone never schedules a note save. If the draft changed during the
 upload, insertion is refused and the Markdown stays available to copy. Plain
 text fallback works too. Save a new note before uploading for it.
 

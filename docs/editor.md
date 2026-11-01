@@ -270,4 +270,5 @@ has persisted your draft.
 
 Open Menu → Upload image to place a validated raster in the existing assets folder.
 Uploading does not change your note; choose Insert into draft to append its Markdown,
-then save separately. See [formats, limits and safe retries](image-uploads.md).
+then the usual Save and idle-autosave behavior applies. See
+[formats, limits and safe retries](image-uploads.md).
