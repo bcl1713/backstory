@@ -46,17 +46,25 @@ for(const vim of [false,true])for(const direction of ['down','up'])test(`${vim?'
  expect(await host(page).evaluate(el=>{const s=el.markdownEditor.view.state;return s.doc.lineAt(s.selection.main.head).number;})).toBe(direction==='down'?3:motion.split('\n').length-2);
  await expect(host(page).locator('iframe')).toHaveCount(0);expect(await read(page)).toBe(motion);
 });
-test('third visible diagram can replace oldest frame; scrolling out and in frees and remounts at most two',async({page})=>{
- await page.setViewportSize({width:1180,height:1800});await open(page,'DiagramMany');
- await expect.poll(()=>host(page).locator('iframe').count()).toBe(2);
- const third=host(page).locator('.lp-diagram').nth(2);await third.scrollIntoViewIfNeeded();
- await third.getByRole('button',{name:'Show Mermaid diagram',exact:true}).click();await expect(third.getByText('Mermaid flowchart.',{exact:true})).toBeVisible();
- expect(await host(page).locator('iframe').count()).toBeLessThanOrEqual(2);await expect(host(page).getByText('Diagram paused; source retained.',{exact:false}).first()).toBeVisible();
+test('capacity fallback replaces an active frame regardless of intersection order; scrolling remounts at most two',async({page})=>{
+ await page.setViewportSize({width:1180,height:2600});await open(page,'DiagramMany');
+ const diagrams=host(page).locator('.lp-diagram'),ready=host(page).getByText('Mermaid flowchart.',{exact:true});
+ const capacity=diagrams.filter({has:page.getByText('Two diagrams are already active. Show diagram to replace the oldest preview.',{exact:true})});
+ await expect(ready).toHaveCount(2);await expect(capacity).toHaveCount(3);await expect(host(page).locator('iframe')).toHaveCount(2);
+ // IntersectionObserver delivery need not allocate frames in source order (#68).
+ // Keep a source-stable target after its capacity status/Show button disappear.
+ const original=await read(page),targetSource=await capacity.first().locator('.lp-diagram-source').textContent();
+ const target=diagrams.filter({has:page.locator('.lp-diagram-source').filter({hasText:targetSource})});
+ await expect(target).toHaveCount(1);await target.scrollIntoViewIfNeeded();
+ const initialFrames=await host(page).locator('iframe').elementHandles();
+ await target.getByRole('button',{name:'Show Mermaid diagram',exact:true}).click();await expect(target.getByText('Mermaid flowchart.',{exact:true})).toBeVisible();
+ await expect(host(page).locator('iframe')).toHaveCount(2);await expect(ready).toHaveCount(2);await expect(host(page).getByText('Diagram paused; source retained.',{exact:false})).toHaveCount(1);
+ await expect.poll(async()=>{let connected=0;for(const frame of initialFrames)if(await frame.evaluate(el=>el.isConnected))connected++;return connected;}).toBe(1);
  for(let i=0;i<3;i++){
   await page.evaluate(()=>scrollTo(0,document.body.scrollHeight));await expect(host(page).locator('iframe')).toHaveCount(0);await page.evaluate(()=>scrollTo(0,0));
-  await expect.poll(()=>host(page).locator('iframe').count()).toBeLessThanOrEqual(2);
+  await expect(host(page).locator('iframe')).toHaveCount(2);await expect(ready).toHaveCount(2);
  }
- expect(await read(page)).toContain('Diagram 4');
+ expect(await read(page)).toBe(original);
 });
 test('GET and draft preview hydrate inert placeholders; showing source releases a frame',async({page})=>{
  await open(page,'DiagramMotion');await page.goto('/preview/DiagramMotion.md');const preview=page.locator('[aria-label="Markdown preview"]');await expect(preview.getByText('Mermaid flowchart.',{exact:true})).toBeVisible();
