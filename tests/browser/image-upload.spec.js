@@ -17,7 +17,6 @@ async function open(page) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.goto('/notes/Upload.md');
   await expect(page.locator('[data-editor-stage]')).toHaveAttribute('data-editor-state', 'ready');
-  await page.getByRole('button', { name: 'Navigation and controls', exact: true }).click();
   await page.getByRole('button', { name: 'Upload image', exact: true }).click();
 }
 for (const width of [390, 1180]) test(`image upload is explicit and preserves draft at ${width}px`, async ({ page }) => {
@@ -66,6 +65,7 @@ test('unknown network outcome permits same-file retry without changing source', 
 test('plain text fallback inserts only after explicit action and retains draft', async ({ page }) => {
   await open(page);
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.getByRole('button', { name: 'Navigation and controls', exact: true }).click();
   await page.getByRole('button', { name: 'Plain text fallback', exact: true }).click();
   await page.locator('#source').fill('Plain unsaved draft');
   await page.getByRole('button', { name: 'Upload image', exact: true }).click();

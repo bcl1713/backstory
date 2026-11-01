@@ -256,7 +256,7 @@ index results are identified; refine the query or use the file tree if needed.
 A failed lookup is not a statement that the wiki has no matching files.
 Custom browser extensions or OS shortcuts may intercept Ctrl+Alt+O; the Menu
 entry remains available, including on phones. Browser bookmark shortcuts are
-not replaced, and the always-visible Zen toolbar remains Menu and Save.
+not replaced, and the always-visible Zen toolbar contains Menu, Save and Upload image.
 
 This deliberately completes a narrow keyboard-discovery increment. Wikilink
 completion already supports existing paths, titles and aliases; heading, tag,
@@ -268,7 +268,7 @@ has persisted your draft.
 
 ## Upload an image
 
-Open Menu → Upload image to place a validated raster in the existing assets folder.
+Choose **Upload image**, beside Menu and Save, to place a validated raster in the existing assets folder.
 Uploading does not change your note; choose Insert into draft to append its Markdown,
 then the usual Save and idle-autosave behavior applies. See
 [formats, limits and safe retries](image-uploads.md).
