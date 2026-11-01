@@ -27,6 +27,16 @@ canonical application origin, **not** a CSRF allowlist or a host wildcard:
   origin. Invalid configured values fail startup; absent/mismatched values give
   an ordinary denied 404. No production value is supplied by this change.
 
+The base `compose.yaml`, standalone `compose.portainer.yaml` and self-contained
+`compose.cloudflare.yaml` explicitly pass this variable into the web process with
+an empty default. The host-data overlay inherits the base environment; Cloudflare
+does **not** inherit it and carries its own mapping. All three distributed env
+examples leave the optional value empty. To opt in, put the exact browser-facing
+origin in the intended private Compose `.env` or Portainer's saved stack variables,
+then use the normal approved stack-recreation/update process. Do not use the
+internal service URL, copy the CSRF list, or change unrelated proxy/host trust.
+See the [configuration reference](configuration.md#optional-mermaid-diagram-rendering).
+
 Only a successful authenticated, active-session GET of the exact named view and
 fixed response type receives the alternate headers. Query strings, non-GETs,
 redirects, missing/revoked/expired/inactive sessions, invalid hosts/proxies,

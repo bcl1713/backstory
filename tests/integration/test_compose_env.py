@@ -12,7 +12,7 @@ REPO = Path(__file__).resolve().parents[2]
 KEYS = (
     'COMPOSE_FILE', 'COMPOSE_PROJECT_NAME', 'BACKSTORY_UID', 'BACKSTORY_GID',
     'BACKSTORY_IMAGE', 'BACKSTORY_PORT', 'BACKSTORY_WIKI_ROOT',
-    'BACKSTORY_IDENTITY_PATH', 'BACKSTORY_WIKI_TIMEZONE',
+    'BACKSTORY_IDENTITY_PATH', 'BACKSTORY_WIKI_TIMEZONE', 'BACKSTORY_MERMAID_PARENT_ORIGIN',
     'BACKSTORY_DATA_HOST_PATH', 'BACKSTORY_WIKI_READ_ONLY',
     'BACKSTORY_EXCLUSIONS', 'BACKSTORY_REVISION_QUOTA_BYTES',
     'BACKSTORY_BIND_ADDRESS', 'BACKSTORY_COOKIE_MODE', 'BACKSTORY_ALLOWED_HOSTS',
@@ -261,3 +261,29 @@ def test_minimal_example_renders_and_loads_settings_without_host_storage_access(
     started = load(tmp_path, settings_env)
     assert started.returncode == 0, started.stderr
     assert not (tmp_path / 'wiki').exists()
+
+@pytest.mark.parametrize('files', ['compose.yaml', 'compose.yaml:compose.host-data.yaml', 'compose.portainer.yaml'])
+@pytest.mark.parametrize('origin', [None, '', 'http://127.0.0.1:8000'])
+def test_renderer_origin_transport_is_empty_by_default_and_exact_when_explicit(tmp_path, files, origin):
+    web = web_config(config(tmp_path, files=files, BACKSTORY_IMAGE='backstory:fixture',
+        BACKSTORY_DATA_HOST_PATH=str(tmp_path / 'data'), BACKSTORY_MERMAID_PARENT_ORIGIN=origin))
+    environment = web['environment']
+    assert environment['BACKSTORY_MERMAID_PARENT_ORIGIN'] == (origin or '')
+    assert environment['BACKSTORY_COOKIE_MODE'] == 'localhost'
+    assert environment['BACKSTORY_CSRF_TRUSTED_ORIGINS'] == ''
+    assert environment['BACKSTORY_ALLOWED_HOSTS'] == 'localhost,127.0.0.1'
+    assert environment['BACKSTORY_PROXY_MODE'] == 'off'
+
+
+@pytest.mark.parametrize('files', ['compose.yaml:compose.host-data.yaml', 'compose.portainer.yaml'])
+def test_renderer_origin_does_not_copy_csrf_origins_or_change_proxy_contract(tmp_path, files):
+    web = web_config(config(tmp_path, files=files, BACKSTORY_IMAGE='backstory:fixture',
+        BACKSTORY_DATA_HOST_PATH=str(tmp_path / 'data'), BACKSTORY_COOKIE_MODE='https',
+        BACKSTORY_ALLOWED_HOSTS='wiki.example.test', BACKSTORY_PROXY_MODE='trusted',
+        BACKSTORY_TRUSTED_PROXY_IPS='192.0.2.20/32',
+        BACKSTORY_CSRF_TRUSTED_ORIGINS='https://wiki.example.test:8443',
+        BACKSTORY_MERMAID_PARENT_ORIGIN='https://wiki.example.test'))
+    assert web['environment']['BACKSTORY_MERMAID_PARENT_ORIGIN'] == 'https://wiki.example.test'
+    assert web['environment']['BACKSTORY_CSRF_TRUSTED_ORIGINS'] == 'https://wiki.example.test:8443'
+    assert web['environment']['BACKSTORY_PROXY_MODE'] == 'trusted'
+    assert web['environment']['BACKSTORY_TRUSTED_PROXY_IPS'] == '192.0.2.20/32'

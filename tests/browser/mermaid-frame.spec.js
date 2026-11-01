@@ -2,6 +2,7 @@ import {test,expect} from '@playwright/test';
 import {readFileSync} from 'node:fs';
 import {browserOrigin,runtime} from './support/server.js';
 import {expireSession} from './support/session.js';
+import {installMermaidDiagnostics} from './support/mermaid-diagnostics.js';
 const manifest=JSON.parse(readFileSync(new URL('../../static/renderers/manifest.json',import.meta.url)));
 async function login(page){
  await page.goto('/accounts/login/');await page.getByLabel('Username').fill('slice');await page.getByLabel('Password').fill('synthetic-slice-browser-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.goto('/health/');
@@ -21,8 +22,14 @@ test('authenticated opaque frame renders fixed classic bundle, frame-local SVG a
  await page.exposeFunction('recordRendererViolation',v=>violations.push(v));
  await page.addInitScript(()=>addEventListener('securitypolicyviolation',e=>window.recordRendererViolation?.({directive:e.effectiveDirective,blocked:e.blockedURI})));
  page.on('request',r=>requests.push(r.url()));
+ // CI-only evidence from this synthetic fixture. No application logging or
+ // exception disclosure is added, and the production policy remains enforced.
+ const diagnostics=[];
+ await page.exposeFunction('recordMermaidDiagnostic',value=>{if(diagnostics.length<8)diagnostics.push(value);});
+ await page.addInitScript(installMermaidDiagnostics);
  await render(page,'flowchart LR\nA[Start] --> B{Ready?}\nB -->|Yes| C((Done))\nB -.-> D(Retry)');
- await expect.poll(()=>page.evaluate(()=>window.diagramStatus)).toBe('ok');
+ try{await expect.poll(()=>page.evaluate(()=>window.diagramStatus)).toBe('ok');}
+ finally{await test.info().attach('mermaid-renderer-diagnostic.json',{body:JSON.stringify(diagnostics,null,2),contentType:'application/json'});}
  const frame=page.frameLocator('iframe');await expect(frame.locator('svg')).toBeVisible();await expect(page.locator('svg')).toHaveCount(0);
  await expect(page.locator('iframe')).toHaveAttribute('sandbox','allow-scripts');
  const child=page.frames().find(f=>f.url().endsWith('/renderers/mermaid-frame/'));
