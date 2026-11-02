@@ -4,8 +4,9 @@ import {runtime} from './support/server.js';
 const mermaid='flowchart TD\n'+Array.from({length:18},(_,i)=>`N${i}[Stage ${i+1}]`).join('\n')+'\n'+Array.from({length:17},(_,i)=>`N${i} --> N${i+1}`).join('\n');
 const graphviz='digraph { '+Array.from({length:18},(_,i)=>`n${i}[label="Stage ${i+1}"];`).join(' ')+Array.from({length:17},(_,i)=>`n${i}->n${i+1};`).join(' ')+' }';
 const chart=JSON.stringify({data:{values:[{category:'A',value:2},{category:'B',value:4}]},mark:'bar',encoding:{x:{field:'category',type:'nominal'},y:{field:'value',type:'quantitative'}}});
-const fixtures=[['mermaid',mermaid,'Mermaid flowchart.'],['graphviz',graphviz,'Graphviz diagram.'],['vega-lite',chart,'Vega-Lite chart.']];
-test.beforeAll(async()=>{await mkdir(`${runtime}/reports`,{recursive:true});for(const [engine,body]of fixtures)await writeFile(`${runtime}/wiki/Browser-${engine}.md`,'Before\n\n```'+engine+'\n'+body+'\n```\n\nFollowing paragraph.\n');});
+const branching='flowchart TD\nA[Review the synthetic service maintenance plan] --> B{Are the test prerequisites complete?}\nB -->|Yes| C[Continue with the scheduled maintenance procedure]\nB -->|No| D[Keep the current synthetic configuration unchanged]\nC --> E{Did the synthetic verification complete?}\nE -->|Yes| F[Update the demonstration record]\nE -->|No| G[Keep the previous demonstration record]';
+const fixtures=[['mermaid',mermaid,'Mermaid flowchart.'],['mermaid-branching',branching,'Mermaid flowchart.'],['graphviz',graphviz,'Graphviz diagram.'],['vega-lite',chart,'Vega-Lite chart.']];
+test.beforeAll(async()=>{await mkdir(`${runtime}/reports`,{recursive:true});for(const [engine,body]of fixtures)await writeFile(`${runtime}/wiki/Browser-${engine}.md`,'Before\n\n```'+(engine==='mermaid-branching'?'mermaid':engine)+'\n'+body+'\n```\n\nFollowing paragraph.\n');});
 for(const [engine,,ready]of fixtures)test(`${engine} renders through isolated browser protocol`,async({page,browserName},info)=>{
  const logs=[];page.on('console',m=>logs.push({type:m.type(),text:m.text()}));page.on('pageerror',e=>logs.push({error:e.message}));
  await page.addInitScript(()=>{

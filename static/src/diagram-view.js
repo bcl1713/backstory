@@ -15,7 +15,7 @@ export function diagramView(wrapper,model,{valid,onSource,measured=()=>{}}){
   else wrapper.appendChild(edit);
   function state(value){
     if(disposed)return;
-    if(!['ok','loading'].includes(value)){frameObserver?.disconnect();frameObserver=null;}
+    if(!['ok','loading'].includes(value)){frameObserver?.disconnect();frameObserver=null;wrapper.style.removeProperty('--diagram-width');wrapper.style.minHeight='';}
     source.hidden=value==='ok';status.textContent=value==='ok'?`${name} ${name==='Mermaid'?'flowchart':name==='Vega-Lite'?'chart':'diagram'}.`:(messages[value]||messages.error).replaceAll('Mermaid',name).replace('Only bounded plain flowcharts are supported.',name==='Mermaid'?'Only bounded plain flowcharts are supported.':name==='Graphviz'?'Only bounded DOT graphs are supported.':'Only bounded inline-data bar, line and point charts are supported.');
     show.hidden=!model.supported||!['pending','capacity','paused'].includes(value);measured();
   }
@@ -24,6 +24,7 @@ export function diagramView(wrapper,model,{valid,onSource,measured=()=>{}}){
   state(model.supported?'pending':'unsupported');
   if(model.supported)registration=mountDiagram(wrapper,model,current,{state,frame:frame=>{if(onSource)frame.tabIndex=-1;},dispose:()=>{frameObserver?.disconnect();frameObserver=null;},size:({width,height})=>{
     if(!current())return;const frame=wrapper.querySelector('iframe');if(!frame)return;
+    wrapper.style.setProperty('--diagram-width',`${width}px`);
     frame.style.width=`${width}px`;frame.style.maxWidth='100%';frame.style.height='auto';frame.style.aspectRatio=`${width} / ${height}`;
     const measure=()=>{if(!current()||!frame.isConnected)return;const actual=frame.getBoundingClientRect().height;if(Number.isFinite(actual)&&actual>0&&actual<=1201){const minimum=`${Math.ceil(actual)+48}px`;if(wrapper.style.minHeight!==minimum)wrapper.style.minHeight=minimum;}measured();};
     measure();frameObserver?.disconnect();if(typeof ResizeObserver==='function'){frameObserver=new ResizeObserver(measure);frameObserver.observe(frame);}
