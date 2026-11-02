@@ -13,7 +13,7 @@ installFrameProtocol(window, document.body.dataset.parentOrigin, async (canonica
     const result=await mermaid.render('diagram-svg',canonical,staging);
     // No bindFunctions, DOM import, or SVG transfer across the frame boundary.
     stage('sanitize');
-    const svg=safeSvg(result.svg,document);
+    const svg=safeSvg(result.svg,document,stage);
     stage('mount-size');
     main.replaceChildren(svg);
     document.body.style.margin='0';main.style.overflow='auto';main.style.maxHeight=`${DIAGRAM_LIMITS.height}px`;

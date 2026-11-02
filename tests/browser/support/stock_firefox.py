@@ -1,6 +1,7 @@
 """Synthetic stock-Firefox regression probe; never reads real wiki content."""
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -57,37 +58,97 @@ try:
             time.sleep(.1)
     for engine, source, _ in FIXTURES:
         (RUNTIME / 'wiki' / f'Stock-{engine}.md').write_text(f'Before\n\n```{engine}\n{source}\n```\n\nAfter\n')
-    driver = webdriver.Firefox(service=service, options=options)
-    version = driver.capabilities['browserVersion']
-    assert version == '155.0.1', version
-    driver.script.add_preload_script(function_declaration='''()=>{
-      window.rendererStages=[];
-      const record=v=>window.rendererStages.push(v);
-      addEventListener('securitypolicyviolation',e=>record({csp:e.violatedDirective}));
-      addEventListener('message',e=>record({type:e.data?.type,opaque:e.origin==='null'}));
-      const descriptor=Object.getOwnPropertyDescriptor(MessagePort.prototype,'onmessage');
-      Object.defineProperty(MessagePort.prototype,'onmessage',{...descriptor,set(handler){descriptor.set.call(this,handler&&function(e){record({port:e.data?.type,status:e.data?.status});return handler.call(this,e);});}});
-    }''')
-    driver.set_window_size(1180, 1000)
-    driver.get(ORIGIN + '/accounts/login/')
-    driver.find_element(By.NAME, 'username').send_keys('slice')
-    driver.find_element(By.NAME, 'password').send_keys('synthetic-slice-browser-only')
-    driver.find_element(By.CSS_SELECTOR, 'button[type=submit]').click()
-    WebDriverWait(driver, 10).until(lambda d: '/accounts/login/' not in d.current_url)
     results = []
-    for engine, _, ready in FIXTURES:
-        driver.get(ORIGIN + f'/notes/Stock-{engine}.md')
-        WebDriverWait(driver, 20).until(lambda d: d.execute_script("return /flowchart\\.|diagram\\.|chart\\.|unavailable|Unsupported/.test(document.querySelector('.lp-diagram-status')?.textContent||'')"))
-        row = driver.execute_script("return {status:document.querySelector('.lp-diagram-status').textContent,stages:window.rendererStages}")
-        row.update(browser=version, engine=engine)
-        print(json.dumps(row), flush=True)
-        results.append(row)
-        (REPORTS / 'stock-firefox.json').write_text(json.dumps(results, indent=2))
-        driver.save_screenshot(str(REPORTS / f'{engine}-stock-firefox.png'))
-        assert row['status'] == ready, row
-        frame = driver.find_element(By.CSS_SELECTOR, '.lp-diagram iframe')
-        assert frame.get_attribute('sandbox') == 'allow-scripts'
-    print('3 stock Firefox 155.0.1 renderer cases passed', flush=True)
+    failures = []
+    # Synthetic rendering probes, not assumptions about the reporter's settings.
+    # The scale preferences exercise browser device-pixel geometry; they are not
+    # CSS zoom or a claim to reproduce the user's page-zoom setting.
+    profiles = [('default', {}, [390, 1180, 2000]),
+                ('scale125', {'layout.css.devPixelsPerPx': '1.25'}, [1180]),
+                ('scale150', {'layout.css.devPixelsPerPx': '1.5'}, [1180, 2000]),
+                ('scale200', {'layout.css.devPixelsPerPx': '2.0'}, [1180]),
+                ('document-fonts-off', {'browser.display.use_document_fonts': 0}, [1180])]
+    diagnostics = (ROOT / 'tests/browser/support/mermaid-diagnostics.js').read_text()
+    diagnostics = diagnostics.replace('export function ', 'function ', 1)
+    for profile, preferences, widths in profiles:
+        options = webdriver.FirefoxOptions()
+        options.binary_location = os.environ['STOCK_FIREFOX_BINARY']
+        options.add_argument('-headless')
+        options.enable_bidi = True
+        for key, value in preferences.items():
+            options.set_preference(key, value)
+        service = Service(os.environ['GECKODRIVER_BINARY'], log_output=str(REPORTS / f'geckodriver-{profile}.log'))
+        driver = webdriver.Firefox(service=service, options=options)
+        version = driver.capabilities['browserVersion']
+        assert version == '155.0.1', version
+        driver.script.add_preload_script(function_declaration="""()=>{
+          window.rendererStages=[];
+          const record=v=>{if(window.rendererStages.length<16)window.rendererStages.push(v);};
+          addEventListener('securitypolicyviolation',e=>record({csp:e.violatedDirective}));
+          addEventListener('message',e=>{record({type:e.data?.type,opaque:e.origin==='null'});if(e.data?.type==='synthetic-zoom'&&typeof e.data.zoom==='number'&&Number.isFinite(e.data.zoom)&&e.data.zoom>=.1&&e.data.zoom<=2)record({child_css_zoom:e.data.zoom});});
+          const descriptor=Object.getOwnPropertyDescriptor(MessagePort.prototype,'onmessage');
+          Object.defineProperty(MessagePort.prototype,'onmessage',{...descriptor,set(handler){descriptor.set.call(this,handler&&function(e){record({port:e.data?.type,status:e.data?.status,stage:e.data?.stage});return handler.call(this,e);});}});
+        }""")
+        # This helper records bounded schema/coordinates only for synthetic CI
+        # fixtures. It is never installed in the application or a live wiki.
+        driver.script.add_preload_script(function_declaration="()=>{window.svgDiagnostics=[];addEventListener('message',e=>{if(e.data?.type==='synthetic-svg-schema'&&window.svgDiagnostics.length<8)window.svgDiagnostics.push(e.data.schema);});window.recordMermaidDiagnostic=v=>{if(window!==top)top.postMessage({type:'synthetic-svg-schema',schema:v},'*');};" + diagnostics + ';installMermaidDiagnostics();}')
+        driver.set_window_size(1180, 1000)
+        driver.get(ORIGIN + '/accounts/login/')
+        driver.find_element(By.NAME, 'username').send_keys('slice')
+        driver.find_element(By.NAME, 'password').send_keys('synthetic-slice-browser-only')
+        driver.find_element(By.CSS_SELECTOR, 'button[type=submit]').click()
+        WebDriverWait(driver, 10).until(lambda d: '/accounts/login/' not in d.current_url)
+        for width in widths:
+            driver.set_window_size(width, 1000)
+            for css_zoom in [1, .9, .8, .7]:
+                # WebDriver content key events cannot operate Firefox chrome
+                # zoom. Exercise explicitly labeled CSS effective zoom instead;
+                # do not enable privileged browser/system access to emulate it.
+                zoom_script = driver.script.add_preload_script(function_declaration='()=>{if(window===top)return;' +
+                    f'const zoom={json.dumps(str(css_zoom))};' +
+                    'const apply=()=>{if(!document.documentElement)return false;document.documentElement.style.zoom=zoom;top.postMessage({type:"synthetic-zoom",zoom:Number(getComputedStyle(document.documentElement).zoom)},"*");return true;};' +
+                    'if(!apply()){const observer=new MutationObserver(()=>{if(apply())observer.disconnect();});observer.observe(document,{childList:true});}}')
+                fixtures = FIXTURES if profile == 'default' and width == 1180 and css_zoom == 1 else FIXTURES[:1]
+                for engine, _, ready in fixtures:
+                    driver.get(ORIGIN + f'/notes/Stock-{engine}.md')
+                    WebDriverWait(driver, 20).until(lambda d: d.execute_script("return /flowchart\\.|diagram\\.|chart\\.|unavailable|Unsupported/.test(document.querySelector('.lp-diagram-status')?.textContent||'')"))
+                    row = driver.execute_script("return {status:document.querySelector('.lp-diagram-status').textContent,stages:window.rendererStages,viewport:innerWidth,scale:devicePixelRatio,css_zoom:getComputedStyle(document.documentElement).zoom}")
+                    assert abs(float(row['css_zoom']) - 1) < .001, 'parent CSS zoom must stay unmodified'
+                    child_zooms = [stage['child_css_zoom'] for stage in row['stages'] if 'child_css_zoom' in stage]
+                    assert child_zooms and all(abs(value - css_zoom) < .001 for value in child_zooms), 'renderer CSS zoom was not applied'
+                    row.update(browser=version, engine=engine, profile=profile, window_width=width, requested_child_css_zoom=css_zoom, browser_page_zoom='default-unmodified')
+                    print(json.dumps(row), flush=True)
+                    results.append(row)
+                    (REPORTS / 'stock-firefox.json').write_text(json.dumps(results, indent=2))
+                    driver.save_screenshot(str(REPORTS / f'{engine}-{profile}-{width}-css{css_zoom}-stock-firefox.png'))
+                    frame = driver.find_elements(By.CSS_SELECTOR, '.lp-diagram iframe')
+                    schema = driver.execute_script('return window.svgDiagnostics || []')
+                    (REPORTS / f'{engine}-{profile}-{width}-css{css_zoom}-schema.json').write_text(json.dumps(schema, indent=2))
+                    if row['status'] != ready:
+                        # Only numeric spellings from synthetic generated geometry,
+                        # never text, arbitrary attribute names, or SVG/source bytes.
+                        geometry = []
+                        for record in schema:
+                            for element in record.get('elements', []):
+                                for name, value, _ in element.get('attributes', []):
+                                    if name not in ('viewBox', 'transform'):
+                                        continue
+                                    numbers = re.sub(r'\b(?:translate|scale|rotate|matrix)\b', '', value)
+                                    if len(value) <= 256 and re.fullmatch(r'[-+0-9eE., ()]+', numbers) and (name == 'viewBox' or re.search('[eE]', numbers)):
+                                        item = {'attribute': name, 'numeric_geometry': value}
+                                        if item not in geometry and len(geometry) < 12:
+                                            geometry.append(item)
+                        print(json.dumps({'synthetic_geometry': geometry, 'profile': profile, 'child_css_zoom': css_zoom}), flush=True)
+                        failures.append(row)
+                    if frame:
+                        assert frame[0].get_attribute('sandbox') == 'allow-scripts'
+                driver.script.remove_preload_script(zoom_script['script'])
+        driver.quit()
+        driver = None
+        service.stop()
+    assert not failures, failures
+    print(f'{len(results)} stock Firefox 155.0.1 renderer cases passed', flush=True)
+
 finally:
     original_failure = sys.exc_info()[0] is not None
     cleanup_errors = []
