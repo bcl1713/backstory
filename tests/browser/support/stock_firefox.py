@@ -127,7 +127,7 @@ try:
                         failures.append(row)
                     if frame:
                         assert frame[0].get_attribute('sandbox') == 'allow-scripts'
-                driver.script.remove_preload_script(zoom_script)
+                driver.script.remove_preload_script(zoom_script['script'])
         driver.quit()
         driver = None
         service.stop()
