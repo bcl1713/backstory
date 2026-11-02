@@ -9,6 +9,7 @@ import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects 
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
+import { codePreview, codeHighlighting, codeLanguage } from './code-preview.js';
 import { tablePreview } from './table-preview.js';
 import { diagramPreview, diagramEngines } from './diagram-preview.js';
 import { mathPreview, mathSyntax } from './math-preview.js';
@@ -44,7 +45,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
     follow: () => followLink(linkAtCaret(view), getPath(), { doc: view.state.doc, selection: view.state.selection, path: getPath() }),
     home: () => { followLink.cancel(); activateLink('/'); },
   });
-  const liveExtensions = () => [tablePreview, mathPreview, ...((mermaidEnabled || graphvizEnabled || vegaLiteEnabled) ? [diagramEngines.of([...(mermaidEnabled?['mermaid']:[]),...(graphvizEnabled?['graphviz']:[]),...(vegaLiteEnabled?['vega-lite']:[])]),diagramPreview] : []), createLivePreviewExtension(), createLiveLinksExtension({ getPath }), createImagePreviewExtension({ getPath })];
+  const liveExtensions = () => [codePreview, codeHighlighting, tablePreview, mathPreview, ...((mermaidEnabled || graphvizEnabled || vegaLiteEnabled) ? [diagramEngines.of([...(mermaidEnabled?['mermaid']:[]),...(graphvizEnabled?['graphviz']:[]),...(vegaLiteEnabled?['vega-lite']:[])]),diagramPreview] : []), createLivePreviewExtension(), createLiveLinksExtension({ getPath }), createImagePreviewExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
   const uniformEndings = new Map(['\n', '\r\n', '\r'].map(value => [value, { separator: value }]));
   const endingsFrom = (text, preferred) => {
@@ -83,7 +84,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         bindings.extension,
         createLinkCompletionExtension({ onStatus: onCompletionStatus }),
         history(), keymap.of([...defaultKeymap, ...historyKeymap]), drawSelection(),
-        markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks, mathSyntax], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
+        markdown({ base: markdownLanguage, codeLanguages: codeLanguage, extensions: [frontMatter, wikiLinks, mathSyntax], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
         EditorView.lineWrapping,
         stickyEditorScroll,
         EditorView.theme({}, { dark: true }),
