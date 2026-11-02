@@ -35,7 +35,7 @@ def bundle():
     pr = dict(number=53, merged=True, merge_commit_sha=release, state='closed',
               author_association='OWNER', base={'sha': base, 'ref': 'dev', 'repo': {'full_name': repo}},
               head={'sha': head, 'repo': {'full_name': repo, 'fork': False}})
-    job_names = ['branch-policy', 'python', 'formatter', 'container', 'correctness'] + [
+    job_names = ['branch-policy', 'python', 'formatter', 'container', 'firefox', 'correctness'] + [
         f'browser ({i})' for i in range(1, 5)]
     jobs = [dict(id=i, name=name, run_id=12, run_attempt=1, status='completed',
                  conclusion='success', steps=[
@@ -153,6 +153,10 @@ def test_workflow_keeps_pr_full_and_container_unconditional():
     assert inputs['reuse_application']['default'] is False
     for name in ['python', 'formatter', 'browser']:
         assert ci['jobs'][name]['if'] == '${{ !inputs.reuse_application }}'
+    names = set(ci['jobs']) - {'browser'}
+    names.update(f'browser ({i})' for i in ci['jobs']['browser']['strategy']['matrix']['shard'])
+    assert module().EXPECTED_JOBS == names
+    assert 'if' not in ci['jobs']['firefox']
     assert 'if' not in ci['jobs']['container']
     assert 'if' not in ci['jobs']['branch-policy']
     release = yaml.safe_load((root / '.github/workflows/release.yml').read_text())
@@ -180,7 +184,7 @@ def verifier_setup(bundle, monkeypatch, tmp_path):
         'pulls/53': bundle['pr'], 'actions/workflows/ci.yml': bundle['workflow'],
         f"actions/workflows/ci.yml/runs?event=pull_request&head_sha={bundle['parents'][1]}&per_page=100": {
             'total_count': 1, 'workflow_runs': [bundle['run']]},
-        'actions/runs/12/attempts/1/jobs?per_page=100': {'total_count': 9, 'jobs': bundle['jobs']},
+        'actions/runs/12/attempts/1/jobs?per_page=100': {'total_count': len(bundle['jobs']), 'jobs': bundle['jobs']},
         'actions/runs/12': bundle['run'],
     }
     artifacts = []
@@ -220,7 +224,7 @@ def test_verifier_checks_real_bundle_and_artifact_digests(verifier_setup):
     lambda r: r['actions/runs/12/artifacts?per_page=100']['artifacts'][0]['workflow_run'].update(head_sha='wrong'),
     lambda r: r['actions/runs/12/artifacts?per_page=100']['artifacts'][0]['workflow_run'].update(head_repository_id=2),
     lambda r: r['actions/runs/12/artifacts?per_page=100'].update(total_count=101),
-    lambda r: r['actions/runs/12/attempts/1/jobs?per_page=100'].update(total_count=10),
+    lambda r: r['actions/runs/12/attempts/1/jobs?per_page=100'].update(total_count=101),
     lambda r: r.update({'actions/artifacts/1/zip': b'corrupt'}),
 ])
 def test_verifier_rejects_invalid_external_metadata(verifier_setup, mutation):
@@ -241,7 +245,7 @@ def test_aggregate_only_accepts_skips_for_verified_release(monkeypatch):
     import yaml
     ci = yaml.safe_load((PATH.parents[1] / '.github/workflows/ci.yml').read_text())
     shell = ci['jobs']['correctness']['steps'][0]['run']
-    good = {name: {'result': 'success'} for name in ['branch-policy', 'container']}
+    good = {name: {'result': 'success'} for name in ['branch-policy', 'container', 'firefox']}
     good.update({name: {'result': 'skipped'} for name in ['python', 'formatter', 'browser']})
     import os
     env = {**os.environ, 'RESULTS': json.dumps(good), 'REUSE': 'true', 'EVIDENCE_RUN': '12',
@@ -249,6 +253,8 @@ def test_aggregate_only_accepts_skips_for_verified_release(monkeypatch):
     assert subprocess.run(['bash', '-e', '-c', shell], env=env, capture_output=True).returncode == 0
     for change in [{'GITHUB_EVENT_NAME': 'pull_request'}, {'REUSE': 'false'}, {'EVIDENCE_RUN': ''},
                    {'RESULTS': json.dumps({**good, 'container': {'result': 'skipped'}})},
+                   {'RESULTS': json.dumps({**good, 'firefox': {'result': 'skipped'}})},
+                   {'RESULTS': json.dumps({**good, 'firefox': {'result': 'failure'}})},
                    {'RESULTS': json.dumps({**good, 'python': {'result': 'failure'}})}]:
         assert subprocess.run(['bash', '-e', '-c', shell], env={**env, **change},
                               capture_output=True).returncode != 0

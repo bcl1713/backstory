@@ -19,7 +19,7 @@ MAX_ARCHIVE = 131072
 MAX_AGE_SECONDS = 24 * 60 * 60
 PROFILES = {'python': 'python', 'formatter': 'formatter', **{
     f'browser-{i}': 'browser' for i in range(1, 5)}}
-EXPECTED_JOBS = {'branch-policy', 'python', 'formatter', 'container', 'correctness', *{
+EXPECTED_JOBS = {'branch-policy', 'python', 'formatter', 'container', 'firefox', 'correctness', *{
     f'browser ({i})' for i in range(1, 5)}}
 POLICY_PATHS = ('.github', 'scripts/ci_evidence.py')
 SHA = re.compile(r'[0-9a-f]{40}\Z')
