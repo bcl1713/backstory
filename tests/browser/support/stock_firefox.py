@@ -105,7 +105,7 @@ try:
                 # do not enable privileged browser/system access to emulate it.
                 zoom_script = driver.script.add_preload_script(function_declaration='()=>{if(window===top)return;' +
                     f'const zoom={json.dumps(str(css_zoom))};' +
-                    'const apply=()=>{if(!document.documentElement)return false;document.documentElement.style.zoom=zoom;top.postMessage({type:'synthetic-zoom',zoom:Number(getComputedStyle(document.documentElement).zoom)},'*');return true;};' +
+                    'const apply=()=>{if(!document.documentElement)return false;document.documentElement.style.zoom=zoom;top.postMessage({type:"synthetic-zoom",zoom:Number(getComputedStyle(document.documentElement).zoom)},"*");return true;};' +
                     'if(!apply()){const observer=new MutationObserver(()=>{if(apply())observer.disconnect();});observer.observe(document,{childList:true});}}')
                 fixtures = FIXTURES if profile == 'default' and width == 1180 and css_zoom == 1 else FIXTURES[:1]
                 for engine, _, ready in fixtures:
