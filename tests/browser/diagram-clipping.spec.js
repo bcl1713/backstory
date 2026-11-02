@@ -30,9 +30,10 @@ for(const [engine,,status] of fixtures)for(const mode of ['notes','preview'])tes
   }
   expect(await identity.evaluate(el=>el===document.querySelector('.lp-diagram iframe'))).toBe(true);
   await expect(iframe).toHaveAttribute('sandbox','allow-scripts');
-  const fit=await iframe.evaluate(el=>{const host=el.closest('.lp-diagram'),box=host.getBoundingClientRect(),frame=el.getBoundingClientRect(),parent=host.parentElement,available=parent.getBoundingClientRect(),style=getComputedStyle(parent),h=getComputedStyle(host);return{gap:box.width-frame.width,trim:parseFloat(h.paddingLeft)+parseFloat(h.paddingRight)+parseFloat(h.borderLeftWidth)+parseFloat(h.borderRightWidth),center:Math.abs((box.left+box.right)-(available.left+parseFloat(style.paddingLeft)+available.right-parseFloat(style.paddingRight)))/2};});
+  const fit=await iframe.evaluate(el=>{const host=el.closest('.lp-diagram'),box=host.getBoundingClientRect(),frame=el.getBoundingClientRect(),parent=host.parentElement,available=parent.getBoundingClientRect(),style=getComputedStyle(parent),h=getComputedStyle(host);return{gap:box.width-frame.width,verticalMargin:parseFloat(h.marginTop)+parseFloat(h.marginBottom),trim:parseFloat(h.paddingLeft)+parseFloat(h.paddingRight)+parseFloat(h.borderLeftWidth)+parseFloat(h.borderRightWidth),center:Math.abs((box.left+box.right)-(available.left+parseFloat(style.paddingLeft)+available.right-parseFloat(style.paddingRight)))/2};});
   expect.soft(fit.gap).toBeLessThanOrEqual(fit.trim+2);
   expect.soft(fit.center).toBeLessThanOrEqual(2);
+  if(mode==='notes')expect(fit.verticalMargin).toBe(0);
   // Capture the reachable bottom in the real viewport: full-page capture can
   // temporarily resize/recycle CodeMirror widgets and opaque-frame surfaces.
   await iframe.evaluate(el=>window.scrollBy(0,el.getBoundingClientRect().bottom-innerHeight+60));
