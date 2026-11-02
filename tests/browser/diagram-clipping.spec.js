@@ -6,7 +6,7 @@ const dot='digraph { '+Array.from({length:18},(_,i)=>`n${i}[label="Stage ${i+1}"
 const chart=JSON.stringify({data:{values:[{category:'A',value:2},{category:'B',value:4}]},mark:'bar',encoding:{x:{field:'category',type:'nominal'},y:{field:'value',type:'quantitative'}}});
 const fixtures=[['mermaid',mermaid,'Mermaid flowchart.'],['graphviz',dot,'Graphviz diagram.'],['vega-lite',chart,'Vega-Lite chart.']];
 test.beforeAll(async()=>{await mkdir(`${runtime}/reports`,{recursive:true});for(const [engine,body] of fixtures)await writeFile(`${runtime}/wiki/Clipping-${engine}.md`,'Before\n\n```'+engine+'\n'+body+'\n```\n\n# Following section\n\nAfter.\n');});
-for(const [engine,,status] of fixtures)for(const mode of ['notes','preview'])test(`${engine} complete viewport without nested clipping in ${mode}`,async({page},info)=>{
+for(const [engine,,status] of fixtures)for(const mode of ['notes','preview'])test(`${engine} complete viewport without nested clipping in ${mode}`,async({page,browserName},info)=>{
  await page.goto('/accounts/login/');await page.getByLabel('Username').fill('slice');await page.getByLabel('Password').fill('synthetic-slice-browser-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.setViewportSize({width:390,height:900});await page.goto(`/${mode}/Clipping-${engine}.md`);
  await expect(page.getByText(status,{exact:true})).toBeVisible();
@@ -30,6 +30,10 @@ for(const [engine,,status] of fixtures)for(const mode of ['notes','preview'])tes
   }
   expect(await identity.evaluate(el=>el===document.querySelector('.lp-diagram iframe'))).toBe(true);
   await expect(iframe).toHaveAttribute('sandbox','allow-scripts');
+  const fit=await iframe.evaluate(el=>{const host=el.closest('.lp-diagram'),box=host.getBoundingClientRect(),frame=el.getBoundingClientRect(),parent=host.parentElement,available=parent.getBoundingClientRect(),style=getComputedStyle(parent),h=getComputedStyle(host);return{gap:box.width-frame.width,verticalMargin:parseFloat(h.marginTop)+parseFloat(h.marginBottom),trim:parseFloat(h.paddingLeft)+parseFloat(h.paddingRight)+parseFloat(h.borderLeftWidth)+parseFloat(h.borderRightWidth),center:Math.abs((box.left+box.right)-(available.left+parseFloat(style.paddingLeft)+available.right-parseFloat(style.paddingRight)))/2};});
+  expect.soft(fit.gap).toBeLessThanOrEqual(fit.trim+2);
+  expect.soft(fit.center).toBeLessThanOrEqual(2);
+  if(mode==='notes')expect(fit.verticalMargin).toBe(0);
   // Capture the reachable bottom in the real viewport: full-page capture can
   // temporarily resize/recycle CodeMirror widgets and opaque-frame surfaces.
   await iframe.evaluate(el=>window.scrollBy(0,el.getBoundingClientRect().bottom-innerHeight+60));
@@ -38,7 +42,7 @@ for(const [engine,,status] of fixtures)for(const mode of ['notes','preview'])tes
  }
  if(mode==='notes'){
   const box=await iframe.boundingBox();
-  await page.touchscreen.tap(box.x+box.width/2,box.y+box.height-20);
+  if(browserName==='firefox')await page.mouse.click(box.x+box.width/2,box.y+box.height-20);else await page.touchscreen.tap(box.x+box.width/2,box.y+box.height-20);
   await expect(iframe).toHaveCount(0);
   expect(await page.locator('[data-markdown-editor]').evaluate(el=>el.markdownEditor.getSource())).toBe(original);
  }
