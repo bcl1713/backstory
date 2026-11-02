@@ -40,7 +40,9 @@ test('unknown, tilde and unfinished fences remain literal safe code', async ({ p
   await expect(page.locator('.lp-code-line')).not.toHaveCount(0);
   await expect(page.locator('.cm-content')).toContainText('<script>window.codeRan = true</script>');
   expect(await page.evaluate(() => window.codeRan)).toBeUndefined();
-  expect(await editor(page).locator('script,img').count()).toBe(0);
+  // CodeMirror uses inert, src-less IMG buffers around replacement decorations.
+  expect(await editor(page).locator('script,img:not(.cm-widgetBuffer)').count()).toBe(0);
+  expect(await editor(page).locator('img.cm-widgetBuffer[src]').count()).toBe(0);
   expect(external).toEqual([]);
   await select(page, text.length);
   await expect(page.locator('.cm-content')).toContainText('```python');
@@ -92,6 +94,6 @@ test('pointer entry and a tall block remain editable on a phone', async ({ page 
   await page.locator('.lp-code-line').filter({ hasText: 'print(0)' }).click();
   await expect(page.locator('.cm-content')).toContainText('```python');
   await page.keyboard.press('Control+End');
-  await expect(page.locator('.cm-line').filter({ hasText: /^After$/ })).toBeVisible();
+  await expect(page.locator('.cm-line').filter({ hasText: /^After$/ })).toBeInViewport();
   expect(await readSource(page)).toBe(text);
 });
