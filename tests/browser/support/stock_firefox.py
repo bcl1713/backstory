@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
 import urllib.request
 
@@ -88,13 +89,28 @@ try:
         assert frame.get_attribute('sandbox') == 'allow-scripts'
     print('3 stock Firefox 155.0.1 renderer cases passed', flush=True)
 finally:
-    if driver is not None:
-        driver.quit()
-    service.stop()
-    os.killpg(server.pid, signal.SIGTERM)
-    try:
-        server.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        os.killpg(server.pid, signal.SIGKILL)
-        server.wait(timeout=5)
-    server_log.close()
+    original_failure = sys.exc_info()[0] is not None
+    cleanup_errors = []
+
+    def stop_server():
+        try:
+            os.killpg(server.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            server.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(server.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            server.wait(timeout=5)
+
+    actions = ([driver.quit] if driver is not None else []) + [service.stop, stop_server, server_log.close]
+    for action in actions:
+        try:
+            action()
+        except Exception as error:
+            cleanup_errors.append(error)
+    if cleanup_errors and not original_failure:
+        raise RuntimeError('stock Firefox probe cleanup failed') from cleanup_errors[0]

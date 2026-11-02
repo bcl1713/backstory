@@ -1,3 +1,4 @@
+import {childStage} from './diagram-diagnostics.js';
 import { DIAGRAM_LIMITS, parseFlowchart } from './mermaid-model.js';
 const exact=(value,keys)=>value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(',');
 export function installFrameProtocol(win, origin, render, {parse=parseFlowchart}={}) {
@@ -11,15 +12,17 @@ export function installFrameProtocol(win, origin, render, {parse=parseFlowchart}
       if(used) return;
       // The first message consumes this session even if malformed; no retries.
       used=true;
-      let status='unsupported',width=1,height=1;
+      let status='unsupported',width=1,height=1,stage='parse';
       try {
         if(!exact(message,['version','type','token','source'])||message.version!==1||message.type!=='render'||message.token!==token) throw new Error('unsupported_diagram');
         const model=parse(message.source);
-        status='error';
-        const size=await render(model.canonical);
+        status='error';stage='render';
+        const size=await render(model.canonical,value=>{if(childStage(value))stage=value;});
+        stage='mount-size';
         if(!Number.isFinite(size.width)||!Number.isFinite(size.height)||size.width<=0||size.height<=0) throw new Error('unsafe_output');
         width=Math.min(DIAGRAM_LIMITS.width,size.width); height=Math.min(DIAGRAM_LIMITS.height,size.height);status='ok';
       } catch { /* Never send source, exception text, SVG, HTML or URLs to parent. */ }
+      if(status==='error')port.postMessage({version:1,type:'diagnostic',token,stage});
       port.postMessage({version:1,type:'result',token,status,width,height});
       port.onmessage=null; port.close();
     };

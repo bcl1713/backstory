@@ -1,3 +1,4 @@
+import {diagnosticCode} from './diagram-diagnostics.js';
 import { createMermaidFrame } from './mermaid-frame-parent.js';
 import {createGraphvizFrame,createVegaLiteFrame} from './bounded-frame-parent.js';
 function observeViewport(element,change){
@@ -8,7 +9,7 @@ function observeViewport(element,change){
 export function createDiagramScheduler({createFrame=createMermaidFrame,observe=observeViewport}={}){
   const jobs=new Set(),active=new Set(),failures=new Map();let queued=false,sequence=0;
   const current=job=>!job.disposed&&job.element.isConnected&&job.valid();
-  function state(job,value){if(current(job))job.callbacks.state?.(value);}
+  function state(job,value,detail){if(current(job))job.callbacks.state?.(value,diagnosticCode(detail));}
   function stop(job){if(job.handle){job.handle.destroy();job.handle=null;active.delete(job);}}
   function dispose(job){if(job.disposed)return;stop(job);job.disposed=true;job.unobserve?.();job.callbacks.dispose?.();jobs.delete(job);schedule();}
   function prune(){
@@ -20,18 +21,18 @@ export function createDiagramScheduler({createFrame=createMermaidFrame,observe=o
     }
   }
   function schedule(){if(queued)return;queued=true;queueMicrotask(()=>{queued=false;pump();});}
-  function fail(job,status){stop(job);failures.set(job.source,status);if(failures.size>32)failures.delete(failures.keys().next().value);state(job,status);schedule();}
+  function fail(job,status,detail){stop(job);detail=diagnosticCode(detail);failures.set(job.source,{status,detail});if(failures.size>32)failures.delete(failures.keys().next().value);state(job,status,detail);schedule();}
   function pump(){
     prune();
     const ready=[...jobs].filter(job=>current(job)&&job.visible&&!job.paused&&!job.handle).sort((a,b)=>b.priority-a.priority);
     for(const job of ready){
-      if(failures.has(job.source)){state(job,failures.get(job.source));continue;}
+      if(failures.has(job.source)){const failure=failures.get(job.source);state(job,failure.status,failure.detail);continue;}
       if(active.size>=2){state(job,'capacity');continue;}
       state(job,'loading');active.add(job);job.order=++sequence;
       try{job.handle=createFrame(job.element,job.source,{
-        onStatus:status=>{if(!current(job)||!job.visible){dispose(job);return;}if(status==='ok')state(job,'ok');else fail(job,status);},
+        onStatus:(status,detail)=>{if(!current(job)||!job.visible){dispose(job);return;}if(status==='ok')state(job,'ok');else fail(job,status,detail);},
         onSize:size=>{if(current(job)&&job.visible)job.callbacks.size?.(size);},
-      });job.callbacks.frame?.(job.handle.frame);}catch{active.delete(job);fail(job,'error');}
+      });job.callbacks.frame?.(job.handle.frame);}catch{active.delete(job);fail(job,'error','setup');}
     }
   }
   function mount(element,source,valid,callbacks={}){
