@@ -1,6 +1,7 @@
 """Synthetic stock-Firefox regression probe; never reads real wiki content."""
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
@@ -124,6 +125,20 @@ try:
                     schema = driver.execute_script('return window.svgDiagnostics || []')
                     (REPORTS / f'{engine}-{profile}-{width}-css{css_zoom}-schema.json').write_text(json.dumps(schema, indent=2))
                     if row['status'] != ready:
+                        # Only numeric spellings from synthetic generated geometry,
+                        # never text, arbitrary attribute names, or SVG/source bytes.
+                        geometry = []
+                        for record in schema:
+                            for element in record.get('elements', []):
+                                for name, value, _ in element.get('attributes', []):
+                                    if name not in ('viewBox', 'transform'):
+                                        continue
+                                    numbers = re.sub(r'\b(?:translate|scale|rotate|matrix)\b', '', value)
+                                    if len(value) <= 256 and re.fullmatch(r'[-+0-9eE., ()]+', numbers) and (name == 'viewBox' or re.search('[eE]', numbers)):
+                                        item = {'attribute': name, 'numeric_geometry': value}
+                                        if item not in geometry and len(geometry) < 12:
+                                            geometry.append(item)
+                        print(json.dumps({'synthetic_geometry': geometry, 'profile': profile, 'child_css_zoom': css_zoom}), flush=True)
                         failures.append(row)
                     if frame:
                         assert frame[0].get_attribute('sandbox') == 'allow-scripts'
