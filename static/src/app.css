@@ -238,3 +238,15 @@ input[type=checkbox] { display: inline-block; min-height: auto; }
 .image-upload-dialog { max-width: min(34rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; box-sizing: border-box; }
 .image-upload-dialog input, .image-upload-dialog textarea { box-sizing: border-box; width: 100%; max-width: 100%; }
 .image-upload-dialog::backdrop { background: #0009; }
+
+/* Source-backed code stays in the native editor: no nested scrolling surface. */
+.cm-editor .cm-line.lp-code-line { background: var(--surface); padding-inline: .75rem; overflow-wrap: anywhere; }
+.cm-editor .cm-line.lp-code-start { border-radius: .35rem .35rem 0 0; }
+.cm-editor .cm-line.lp-code-end { border-radius: 0 0 .35rem .35rem; }
+.lp-code-keyword { color: var(--heading-1); }
+.lp-code-string { color: var(--heading-4); }
+.lp-code-number { color: var(--heading-5); }
+.lp-code-comment { color: var(--muted); }
+.lp-code-name { color: var(--heading-3); }
+.cm-editor .cm-line.lp-code-line::selection,
+.cm-editor .cm-line.lp-code-line ::selection { background: var(--selection) !important; color: var(--selection-text); }

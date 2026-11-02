@@ -32,6 +32,16 @@ textarea. The selected button and readiness label identify the visible
 presentation. Edits made while the enhanced editor loads are retained. All
 presentations share the same draft, and switching never saves or formats it.
 
+### Code blocks
+
+Live preview gives ordinary fenced and indented code a shaded background. Common
+languages (JavaScript, TypeScript, JSON, Python, shell, YAML, CSS, HTML/XML and SQL)
+are syntax-highlighted; unknown languages stay plain, readable code. Moving the
+caret or selection into a fenced block reveals its Markdown fences for editing.
+Arrow keys and Vim movement stay in the normal editor, and long lines wrap on
+small screens. The text is never executed. Mermaid, Graphviz and Vega-Lite keep
+their separate diagram previews.
+
 **Vim bindings** under **Menu** enables optional modal editing for
 the current editor. **Ctrl/⌘ Shift Space** toggles them while the enhanced editor is focused.
 The Menu control remains available on touch devices or when the browser/OS captures

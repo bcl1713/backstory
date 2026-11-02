@@ -134,6 +134,12 @@ jobs:
           retention-days: 2
       # Each runner owns its server, SQLite database and synthetic wiki.
       - run: npm run test:browser -- --shard=${{ matrix.shard }}/4
+      - name: Install Firefox for focused code-block coverage
+        if: matrix.shard == 1
+        run: npx playwright install --with-deps firefox
+      - name: Verify code blocks in Firefox
+        if: matrix.shard == 1
+        run: npx playwright test --config=playwright.code.config.js
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

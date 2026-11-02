@@ -1,5 +1,6 @@
 import { Decoration, ViewPlugin } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
+import { ordinaryCodeBlock } from './code-preview.js';
 
 export { frontMatter } from './markdown-front-matter.js';
 
@@ -20,6 +21,7 @@ function buildDecorations(view) {
     }
   };
   syntaxTree(state).iterate({ enter(node) {
+    if (ordinaryCodeBlock(node.node, state)) return false;
     if (rawBlocks.has(node.name)) {
       for (let n = state.doc.lineAt(node.from).number; n <= state.doc.lineAt(node.to).number; n++) {
         ranges.push(Decoration.line({ class: 'lp-source-region' }).range(state.doc.line(n).from));
