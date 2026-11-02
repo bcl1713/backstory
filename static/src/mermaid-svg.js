@@ -38,6 +38,17 @@ function numericList(value,min,max){
   const parts=value.trim().split(/[ ,]+/);if(parts.length<min||parts.length>max)return null;
   const numbers=parts.map(part=>scalar(part,false));return numbers.some(number=>number===null)?null:numbers.join(' ');
 }
+// Transform arguments historically allow trailing decimal points and longer
+// zero-padded tokens than scalar geometry. Retain those forms inside the
+// existing 160-character argument bound; scalar limits remain independent.
+function transformNumber(value){
+  if(typeof value!=='string'||value.length>160)return null;
+  const match=/^(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE]([+-]?\d{1,3}))?)$/.exec(value);
+  if(!match||(match[2]!==undefined&&Math.abs(Number(match[2]))>308))return null;
+  const number=Number(match[1]);if(!Number.isFinite(number)||Math.abs(number)>1000000)return null;
+  const rounded=number.toFixed(8).replace(/\.?0+$/,'');
+  return rounded==='-0'?'0':rounded;
+}
 // Consume the entire transform list. Exponents are numeric tokens, not an
 // expanded character whitelist. Keep the existing function set and bounds.
 function canonicalTransform(value){
@@ -48,7 +59,7 @@ function canonicalTransform(value){
     const parts=match[2].trim().split(/\s*,\s*|\s+/);
     const arities=match[1]==='matrix'?[6]:match[1]==='rotate'?[1,3]:[1,2];
     if(!arities.includes(parts.length)||(count+=parts.length)>8000)return null;
-    const numbers=parts.map(part=>scalar(part,false));
+    const numbers=parts.map(transformNumber);
     if(numbers.some(number=>number===null))return null;
     result.push(`${match[1]}(${numbers.join(' ')})`);end=functions.lastIndex;
   }
