@@ -15,7 +15,7 @@ test('actual CI fractional geometry is finite data and canonicalized rather than
  assert.equal(clean.querySelectorAll('*').find(node=>node.localName==='circle').getAttribute('r'),fixture.canonicalRadius);
  const canonical=withParsedSvg(root([new Element('circle',{r:'0.3333333333333333333333333333'})]),()=>safeSvg('<svg/>',document));
  assert.equal(canonical.querySelectorAll('*').find(node=>node.localName==='circle').getAttribute('r'),'0.33333333');
- for(const value of ['Infinity','NaN','1e2','1e999','1000001','url(/private)','1'.repeat(65)])assert.equal(safeSvgAttribute('circle','r',value,new Set()),false,value);
+ for(const value of ['Infinity','NaN','1e999','1000001','url(/private)','1'.repeat(65)])assert.equal(safeSvgAttribute('circle','r',value,new Set()),false,value);
 });
 test('only pinned decorative drop shadows are omitted; final SVG still admits no filter/resource machinery',()=>{
  const parsed=root([new Element('circle',{r:'20'}),...fixture.filters.map(item=>new Element('defs',{},[shadow(item)]))],'0 0 100 100');

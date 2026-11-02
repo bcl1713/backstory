@@ -26,19 +26,36 @@ function elementFailure(name){
 const unsafeOutput=()=>{throw new Error('unsafe_output');};
 function scalar(value,units=true){
   // Validate spelling/length before Number conversion. Library IEEE-754 decimals
-  // are accepted, then serialized at stable pixel-subprecision (eight places).
+  // and bounded exponent forms are serialized at stable pixel-subprecision.
   if(typeof value!=='string'||value.length>64)return null;
-  const match=/^(-?(?:\d{1,7}(?:\.\d{1,32})?|\.\d{1,32}))(px|em|%)?$/.exec(value);
-  if(!match||(!units&&match[2]))return null;
+  const match=/^(-?(?:\d{1,7}(?:\.\d{1,32})?|\.\d{1,32})(?:[eE]([+-]?\d{1,3}))?)(px|em|%)?$/.exec(value);
+  if(!match||(!units&&match[3])||(match[2]!==undefined&&Math.abs(Number(match[2]))>308))return null;
   const number=Number(match[1]);if(!Number.isFinite(number)||Math.abs(number)>1000000)return null;
   const rounded=number.toFixed(8).replace(/\.?0+$/,'');
-  return (rounded==='-0'?'0':rounded)+(match[2]||'');
+  return (rounded==='-0'?'0':rounded)+(match[3]||'');
 }
 function numericList(value,min,max){
   const parts=value.trim().split(/[ ,]+/);if(parts.length<min||parts.length>max)return null;
   const numbers=parts.map(part=>scalar(part,false));return numbers.some(number=>number===null)?null:numbers.join(' ');
 }
+// Consume the entire transform list. Exponents are numeric tokens, not an
+// expanded character whitelist. Keep the existing function set and bounds.
+function canonicalTransform(value){
+  if(typeof value!=='string'||value.length>40000)return null;
+  const functions=/(translate|scale|rotate|matrix)\(([^)]{1,160})\)\s*/gy;
+  const result=[];let end=0,count=0,match;
+  while((match=functions.exec(value))){
+    const parts=match[2].trim().split(/\s*,\s*|\s+/);
+    const arities=match[1]==='matrix'?[6]:match[1]==='rotate'?[1,3]:[1,2];
+    if(!arities.includes(parts.length)||(count+=parts.length)>8000)return null;
+    const numbers=parts.map(part=>scalar(part,false));
+    if(numbers.some(number=>number===null))return null;
+    result.push(`${match[1]}(${numbers.join(' ')})`);end=functions.lastIndex;
+  }
+  return end===value.length&&result.length?result.join(' '):null;
+}
 function canonicalGeometry(name,value){
+  if(name==='transform')return canonicalTransform(value);
   if(name==='viewBox')return numericList(value,4,4);
   if(name==='stroke-dasharray')return numericList(value,2,8);
   if(GEOMETRY.has(name)||name==='orient')return scalar(value);
@@ -59,7 +76,7 @@ export function safeSvgAttribute(tag,name,value,ids) {
   if(name==='font-style') return value==='normal'||value==='italic';
   if(name==='stroke-linecap') return ['butt','round','square'].includes(value);
   if(name==='stroke-linejoin') return ['miter','round','bevel'].includes(value);
-  if(name==='transform') return /^(?:(?:translate|scale|rotate|matrix)\([-0-9., ]{1,160}\)\s*)+$/.test(value) && boundedNumbers(value);
+  if(name==='transform') return canonicalTransform(value)!==null;
   if(name==='marker-start'||name==='marker-end'||name==='clip-path') { const m=/^url\(#([A-Za-z][A-Za-z0-9_-]{0,100})\)$/.exec(value); return !!m&&ids.has(m[1]); }
   if(name==='fill'||name==='stroke') return /^(?:none|currentColor|#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,20})$/.test(value);
   if(name==='text-anchor') return ['start','middle','end'].includes(value);
