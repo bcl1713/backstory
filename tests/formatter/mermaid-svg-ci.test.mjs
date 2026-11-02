@@ -47,5 +47,6 @@ test('frame sizing uses the bounded natural viewport, not a mobile-first measure
  const clean=withParsedSvg(root(),()=>safeSvg('<svg/>',document));
  assert.deepEqual(api.svgViewport(clean),{width:615.109375,height:193.71286011});
  const wide=withParsedSvg(root([],'0 0 5000 500'),()=>safeSvg('<svg/>',document));assert.deepEqual(api.svgViewport(wide),{width:1600,height:162});
- const tall=withParsedSvg(root([],'0 0 200 5000'),()=>safeSvg('<svg/>',document));assert.deepEqual(api.svgViewport(tall),{width:200,height:1200});
+ const tall=withParsedSvg(root([],'0 0 200 5000'),()=>safeSvg('<svg/>',document));assert.deepEqual(api.svgViewport(tall),{width:47.92,height:1200});
+ const both=withParsedSvg(root([],'0 0 5000 5000'),()=>safeSvg('<svg/>',document));assert.deepEqual(api.svgViewport(both),{width:1198,height:1200});
 });

@@ -75,8 +75,9 @@ Returned natural viewport dimensions are finite and bounded to 1,600 x 1,200 pix
 Application-owned node-text centering and natural SVG/frame widths prevent
 upscaling. Widths shrink to the available viewport; the frame aspect ratio and
 resize measurement preserve fit when changing between desktop and mobile,
-without rerendering or resending source. Wide diagrams scale down; over-height
-diagrams retain bounded internal scrolling.
+without rerendering or resending source. Wide and tall diagrams scale down proportionally within both bounds, keeping
+the complete artwork visible without requiring an inner scrollbar. Very tall
+diagrams consequently have smaller labels; split large graphs for readability.
 Unsupported input fails before allocating a parent frame and again before draw
 inside the child. There is no blacklist fallback to general Mermaid parsing.
 Other engines, subgraphs, init directives/YAML, HTML/Markdown/resource labels,

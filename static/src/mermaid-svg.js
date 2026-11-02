@@ -72,9 +72,10 @@ function naturalViewport(svg){
   return{width:viewport[2],height:viewport[3]};
 }
 export function svgViewport(svg){
-  const natural=naturalViewport(svg),scale=Math.min(1,DIAGRAM_LIMITS.width/natural.width);
-  // Two pixels accommodate fractional layout/viewport rounding; wide/tall
-  // diagrams still keep the existing finite width/height scrolling limits.
+  const natural=naturalViewport(svg),scale=Math.min(1,DIAGRAM_LIMITS.width/natural.width,(DIAGRAM_LIMITS.height-2)/natural.height);
+  // Fit both axes with one scale. Capping height alone clips the artwork and
+  // creates an unreachable inner scrollbar beneath the editor edit surface.
+  // Reserve two pixels for fractional layout/viewport rounding.
   return{width:Math.max(1,natural.width*scale),height:Math.max(1,Math.min(DIAGRAM_LIMITS.height,natural.height*scale+2))};
 }
 export function safeSvg(svg, document) {
