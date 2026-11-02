@@ -84,7 +84,7 @@ try:
           window.rendererStages=[];
           const record=v=>{if(window.rendererStages.length<16)window.rendererStages.push(v);};
           addEventListener('securitypolicyviolation',e=>record({csp:e.violatedDirective}));
-          addEventListener('message',e=>record({type:e.data?.type,opaque:e.origin==='null'}));
+          addEventListener('message',e=>{record({type:e.data?.type,opaque:e.origin==='null'});if(e.data?.type==='synthetic-zoom'&&typeof e.data.zoom==='number'&&Number.isFinite(e.data.zoom)&&e.data.zoom>=.1&&e.data.zoom<=2)record({child_css_zoom:e.data.zoom});});
           const descriptor=Object.getOwnPropertyDescriptor(MessagePort.prototype,'onmessage');
           Object.defineProperty(MessagePort.prototype,'onmessage',{...descriptor,set(handler){descriptor.set.call(this,handler&&function(e){record({port:e.data?.type,status:e.data?.status,stage:e.data?.stage});return handler.call(this,e);});}});
         }""")
@@ -103,17 +103,19 @@ try:
                 # WebDriver content key events cannot operate Firefox chrome
                 # zoom. Exercise explicitly labeled CSS effective zoom instead;
                 # do not enable privileged browser/system access to emulate it.
-                zoom_script = driver.script.add_preload_script(function_declaration='()=>{' +
+                zoom_script = driver.script.add_preload_script(function_declaration='()=>{if(window===top)return;' +
                     f'const zoom={json.dumps(str(css_zoom))};' +
-                    'const apply=()=>{if(!document.documentElement)return false;document.documentElement.style.zoom=zoom;return true;};' +
+                    'const apply=()=>{if(!document.documentElement)return false;document.documentElement.style.zoom=zoom;top.postMessage({type:'synthetic-zoom',zoom:Number(getComputedStyle(document.documentElement).zoom)},'*');return true;};' +
                     'if(!apply()){const observer=new MutationObserver(()=>{if(apply())observer.disconnect();});observer.observe(document,{childList:true});}}')
                 fixtures = FIXTURES if profile == 'default' and width == 1180 and css_zoom == 1 else FIXTURES[:1]
                 for engine, _, ready in fixtures:
                     driver.get(ORIGIN + f'/notes/Stock-{engine}.md')
                     WebDriverWait(driver, 20).until(lambda d: d.execute_script("return /flowchart\\.|diagram\\.|chart\\.|unavailable|Unsupported/.test(document.querySelector('.lp-diagram-status')?.textContent||'')"))
                     row = driver.execute_script("return {status:document.querySelector('.lp-diagram-status').textContent,stages:window.rendererStages,viewport:innerWidth,scale:devicePixelRatio,css_zoom:getComputedStyle(document.documentElement).zoom}")
-                    assert abs(float(row['css_zoom']) - css_zoom) < .001, 'CSS zoom was not applied'
-                    row.update(browser=version, engine=engine, profile=profile, window_width=width, requested_css_zoom=css_zoom, browser_page_zoom='default-unmodified')
+                    assert abs(float(row['css_zoom']) - 1) < .001, 'parent CSS zoom must stay unmodified'
+                    child_zooms = [stage['child_css_zoom'] for stage in row['stages'] if 'child_css_zoom' in stage]
+                    assert child_zooms and all(abs(value - css_zoom) < .001 for value in child_zooms), 'renderer CSS zoom was not applied'
+                    row.update(browser=version, engine=engine, profile=profile, window_width=width, requested_child_css_zoom=css_zoom, browser_page_zoom='default-unmodified')
                     print(json.dumps(row), flush=True)
                     results.append(row)
                     (REPORTS / 'stock-firefox.json').write_text(json.dumps(results, indent=2))
