@@ -9,6 +9,8 @@ import sys
 import time
 import urllib.request
 
+from stock_firefox_measurement import renderer_css_zoom
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.service import Service
@@ -85,7 +87,7 @@ try:
           window.rendererStages=[];
           const record=v=>{if(window.rendererStages.length<16)window.rendererStages.push(v);};
           addEventListener('securitypolicyviolation',e=>record({csp:e.violatedDirective}));
-          addEventListener('message',e=>{record({type:e.data?.type,opaque:e.origin==='null'});if(e.data?.type==='synthetic-zoom'&&typeof e.data.zoom==='number'&&Number.isFinite(e.data.zoom)&&e.data.zoom>=.1&&e.data.zoom<=2)record({child_css_zoom:e.data.zoom});});
+          addEventListener('message',e=>{record({type:e.data?.type,opaque:e.origin==='null'});});
           const descriptor=Object.getOwnPropertyDescriptor(MessagePort.prototype,'onmessage');
           Object.defineProperty(MessagePort.prototype,'onmessage',{...descriptor,set(handler){descriptor.set.call(this,handler&&function(e){record({port:e.data?.type,status:e.data?.status,stage:e.data?.stage});return handler.call(this,e);});}});
         }""")
@@ -106,7 +108,7 @@ try:
                 # do not enable privileged browser/system access to emulate it.
                 zoom_script = driver.script.add_preload_script(function_declaration='()=>{if(window===top)return;' +
                     f'const zoom={json.dumps(str(css_zoom))};' +
-                    'const apply=()=>{if(!document.documentElement)return false;document.documentElement.style.zoom=zoom;top.postMessage({type:"synthetic-zoom",zoom:Number(getComputedStyle(document.documentElement).zoom)},"*");return true;};' +
+                    'const apply=()=>{if(!document.documentElement)return false;document.documentElement.style.zoom=zoom;return true;};' +
                     'if(!apply()){const observer=new MutationObserver(()=>{if(apply())observer.disconnect();});observer.observe(document,{childList:true});}}')
                 fixtures = FIXTURES if profile == 'default' and width == 1180 and css_zoom == 1 else FIXTURES[:1]
                 for engine, _, ready in fixtures:
@@ -114,14 +116,16 @@ try:
                     WebDriverWait(driver, 20).until(lambda d: d.execute_script("return /flowchart\\.|diagram\\.|chart\\.|unavailable|Unsupported/.test(document.querySelector('.lp-diagram-status')?.textContent||'')"))
                     row = driver.execute_script("return {status:document.querySelector('.lp-diagram-status').textContent,stages:window.rendererStages,viewport:innerWidth,scale:devicePixelRatio,css_zoom:getComputedStyle(document.documentElement).zoom}")
                     assert abs(float(row['css_zoom']) - 1) < .001, 'parent CSS zoom must stay unmodified'
-                    child_zooms = [stage['child_css_zoom'] for stage in row['stages'] if 'child_css_zoom' in stage]
-                    assert child_zooms and all(abs(value - css_zoom) < .001 for value in child_zooms), 'renderer CSS zoom was not applied'
                     row.update(browser=version, engine=engine, profile=profile, window_width=width, requested_child_css_zoom=css_zoom, browser_page_zoom='default-unmodified')
+                    frame = driver.find_elements(By.CSS_SELECTOR, '.lp-diagram iframe')
+                    if row['status'] == ready:
+                        assert len(frame) == 1, row
+                        row['measured_child_css_zoom'] = renderer_css_zoom(driver, frame[0])
+                        assert abs(row['measured_child_css_zoom'] - css_zoom) < .001, row
                     print(json.dumps(row), flush=True)
                     results.append(row)
                     (REPORTS / 'stock-firefox.json').write_text(json.dumps(results, indent=2))
                     driver.save_screenshot(str(REPORTS / f'{engine}-{profile}-{width}-css{css_zoom}-stock-firefox.png'))
-                    frame = driver.find_elements(By.CSS_SELECTOR, '.lp-diagram iframe')
                     schema = driver.execute_script('return window.svgDiagnostics || []')
                     (REPORTS / f'{engine}-{profile}-{width}-css{css_zoom}-schema.json').write_text(json.dumps(schema, indent=2))
                     if row['status'] != ready:
