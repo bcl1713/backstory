@@ -282,3 +282,24 @@ Choose **Upload image**, beside Menu and Save, to place a validated raster in th
 Uploading does not change your note; choose Insert into draft to append its Markdown,
 then the usual Save and idle-autosave behavior applies. See
 [formats, limits and safe retries](image-uploads.md).
+
+## Diagram failure details
+
+If a rendered diagram cannot be shown, its source stays available. The fallback
+includes a fixed diagnostic code and a short explanation. Report that code with
+the application and browser versions; the note source is not needed for this
+first diagnostic step. These details stay in the page: they are not logged or
+sent as telemetry, and never include exception text, source, tokens, or URLs.
+
+- `setup`, `load`, `frame`, `reload`: frame creation or loading did not complete normally.
+- `hello`, `ready`: the renderer or its private channel did not become ready in time.
+- `queue`, `result`: the renderer did not start or return a result within the existing deadline.
+- `protocol`: the response did not pass the bounded protocol checks.
+- `render`, `sanitize`, `mount-size`: generation, output validation, or display/measurement failed.
+- `child`: an older renderer reported failure without a stage hint.
+
+The code describes the observed stage, not its cause. For example, `hello` does
+not prove that a security policy blocked a script. Reloading retries rendering;
+entering source and moving away retains the original failure detail without
+silently retrying. Source editing, renderer isolation, and resource deadlines
+are unchanged.

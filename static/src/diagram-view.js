@@ -1,3 +1,4 @@
+import {diagnosticText} from './diagram-diagnostics.js';
 import { mountDiagram } from './diagram-loading.js';
 import { bindSourceEdit } from './preview-source-edit.js';
 const messages={pending:'Diagram source; waiting until visible.',loading:'Loading local Mermaid diagram; source retained.',capacity:'Two diagrams are already active. Show diagram to replace the oldest preview.',paused:'Diagram paused; source retained. Show diagram to render again.',unsupported:'Unsupported Mermaid syntax; source retained. Only bounded plain flowcharts are supported.',error:'Diagram unavailable; source retained. Edit the source or reload to retry.'};
@@ -13,10 +14,11 @@ export function diagramView(wrapper,model,{valid,onSource,measured=()=>{}}){
   const current=()=>!disposed&&wrapper.isConnected&&valid();
   if(onSource)bindSourceEdit(wrapper,{label:`Edit ${name} source`,valid:current,activate:onSource});
   else wrapper.appendChild(edit);
-  function state(value){
+  function state(value,detail){
     if(disposed)return;
     if(!['ok','loading'].includes(value)){frameObserver?.disconnect();frameObserver=null;wrapper.style.removeProperty('--diagram-width');wrapper.style.minHeight='';}
     source.hidden=value==='ok';status.textContent=value==='ok'?`${name} ${name==='Mermaid'?'flowchart':name==='Vega-Lite'?'chart':'diagram'}.`:(messages[value]||messages.error).replaceAll('Mermaid',name).replace('Only bounded plain flowcharts are supported.',name==='Mermaid'?'Only bounded plain flowcharts are supported.':name==='Graphviz'?'Only bounded DOT graphs are supported.':'Only bounded inline-data bar, line and point charts are supported.');
+    if(value==='error'||value==='unsupported')status.textContent+=diagnosticText(detail);
     show.hidden=!model.supported||!['pending','capacity','paused'].includes(value);measured();
   }
   show.addEventListener('click',()=>registration?.activate());

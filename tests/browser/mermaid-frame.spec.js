@@ -39,7 +39,7 @@ test('authenticated opaque frame renders fixed classic bundle, frame-local SVG a
  const bootstrap=frame.locator('script');await expect(bootstrap).toHaveCount(1);
  await expect(bootstrap).toHaveAttribute('src',`/static/renderers/${manifest.frame}`);
  const bootstrapNonce=await bootstrap.evaluate(script=>script.nonce);expect(bootstrapNonce).toMatch(/^[\w-]+$/);
- const allowed=new Set(['/static/src/mermaid-frame-parent.js','/static/src/mermaid-model.js','/renderers/mermaid-frame/',`/static/renderers/${manifest.frame}`]);
+ const allowed=new Set(['/static/src/diagram-diagnostics.js','/static/src/mermaid-frame-parent.js','/static/src/mermaid-model.js','/renderers/mermaid-frame/',`/static/renderers/${manifest.frame}`]);
  expect(requests.filter(url=>{const parsed=new URL(url);return parsed.origin!==browserOrigin||parsed.search||!allowed.has(parsed.pathname);})).toEqual([]);
  const receipts=readFileSync(`${runtime}/request-receipts.jsonl`,'utf8').slice(receiptStart).trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
  expect(receipts.filter(r=>r.method!=='GET'||!allowed.has(r.path))).toEqual([]);
@@ -61,7 +61,8 @@ test('unsupported source chooses no network destination and allocates no child',
   await expect(render(page,source)).rejects.toThrow('unsupported_diagram');
  }
  await expect(page.locator('iframe')).toHaveCount(0);
- expect(requests.every(url=>new URL(url).pathname.startsWith('/static/src/mermaid-'))).toBe(true);
+ const modules=new Set(['/static/src/mermaid-frame-parent.js','/static/src/mermaid-model.js','/static/src/diagram-diagnostics.js']);
+ expect(requests.every(url=>{const parsed=new URL(url);return parsed.origin===browserOrigin&&!parsed.search&&modules.has(parsed.pathname);})).toBe(true);
 });
 test('unexpected second navigation destroys frame without resending source',async({page})=>{
  await login(page);await render(page,'flowchart TD\nA-->B');await expect.poll(()=>page.evaluate(()=>window.diagramStatus)).toBe('ok');
