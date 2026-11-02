@@ -214,10 +214,39 @@ jobs:
             docker compose down --volumes
           fi
 
+  # Always verify Firefox, including releases that reuse Chromium evidence.
+  firefox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps firefox
+      - run: npx playwright test --config playwright.firefox.config.js
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: firefox-renderers
+          path: |
+            /tmp/backstory-release-one/reports/browser-artifacts
+            /tmp/backstory-release-one/browser-runtime/reports/*-browser-firefox.png
+          retention-days: 7
+
   # Keep one required check for branch protection and release workflow callers.
   correctness:
     if: always()
-    needs: [branch-policy, python, formatter, browser, container]
+    needs: [branch-policy, python, formatter, browser, container, firefox]
     runs-on: ubuntu-latest
     steps:
       - name: Require every correctness job
