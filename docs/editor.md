@@ -296,6 +296,10 @@ sent as telemetry, and never include exception text, source, tokens, or URLs.
 - `queue`, `result`: the renderer did not start or return a result within the existing deadline.
 - `protocol`: the response did not pass the bounded protocol checks.
 - `render`, `sanitize`, `mount-size`: generation, output validation, or display/measurement failed.
+- `sanitize-*`: Mermaid validation rejected a fixed category, such as `scalar`,
+  `transform`, `points`, `path`, `viewbox`, XML, a namespace, an element or
+  attribute class, or a resource limit. These codes contain no input names or
+  values and do not change which SVG is accepted.
 - `child`: an older renderer reported failure without a stage hint.
 
 The code describes the observed stage, not its cause. For example, `hello` does

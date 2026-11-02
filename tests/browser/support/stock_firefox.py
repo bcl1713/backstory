@@ -10,7 +10,6 @@ import urllib.request
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -98,38 +97,35 @@ try:
         driver.find_element(By.NAME, 'password').send_keys('synthetic-slice-browser-only')
         driver.find_element(By.CSS_SELECTOR, 'button[type=submit]').click()
         WebDriverWait(driver, 10).until(lambda d: '/accounts/login/' not in d.current_url)
-        unzoomed_scale = driver.execute_script('return devicePixelRatio')
         for width in widths:
             driver.set_window_size(width, 1000)
-            driver.get(ORIGIN + '/health/')
-            body = driver.find_element(By.TAG_NAME, 'body')
-            body.send_keys(Keys.CONTROL, '0', Keys.NULL)
-            WebDriverWait(driver, 5).until(lambda d: abs(d.execute_script('return devicePixelRatio') - unzoomed_scale) < .001)
-            baseline_scale = driver.execute_script('return devicePixelRatio')
-            for zoom_steps in range(4):
-                if zoom_steps:
-                    driver.get(ORIGIN + '/health/')
-                    driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.CONTROL, '-', Keys.NULL)
-                    WebDriverWait(driver, 5).until(lambda d: d.execute_script('return devicePixelRatio') < prior_scale)
-                prior_scale = driver.execute_script('return devicePixelRatio')
-                fixtures = FIXTURES if profile == 'default' and width == 1180 and zoom_steps == 0 else FIXTURES[:1]
+            for css_zoom in [1, .9, .8, .7]:
+                # WebDriver content key events cannot operate Firefox chrome
+                # zoom. Exercise explicitly labeled CSS effective zoom instead;
+                # do not enable privileged browser/system access to emulate it.
+                zoom_script = driver.script.add_preload_script(function_declaration='()=>{' +
+                    f'const zoom={json.dumps(str(css_zoom))};' +
+                    'const apply=()=>{if(!document.documentElement)return false;document.documentElement.style.zoom=zoom;return true;};' +
+                    'if(!apply()){const observer=new MutationObserver(()=>{if(apply())observer.disconnect();});observer.observe(document,{childList:true});}}')
+                fixtures = FIXTURES if profile == 'default' and width == 1180 and css_zoom == 1 else FIXTURES[:1]
                 for engine, _, ready in fixtures:
                     driver.get(ORIGIN + f'/notes/Stock-{engine}.md')
                     WebDriverWait(driver, 20).until(lambda d: d.execute_script("return /flowchart\\.|diagram\\.|chart\\.|unavailable|Unsupported/.test(document.querySelector('.lp-diagram-status')?.textContent||'')"))
-                    row = driver.execute_script("return {status:document.querySelector('.lp-diagram-status').textContent,stages:window.rendererStages,viewport:innerWidth,scale:devicePixelRatio}")
-                    assert abs(row['scale'] - prior_scale) < .001, 'page zoom changed on navigation'
-                    row.update(browser=version, engine=engine, profile=profile, window_width=width, zoom_steps_out=zoom_steps, baseline_scale=baseline_scale, zoom_ratio=row['scale'] / baseline_scale)
+                    row = driver.execute_script("return {status:document.querySelector('.lp-diagram-status').textContent,stages:window.rendererStages,viewport:innerWidth,scale:devicePixelRatio,css_zoom:getComputedStyle(document.documentElement).zoom}")
+                    assert abs(float(row['css_zoom']) - css_zoom) < .001, 'CSS zoom was not applied'
+                    row.update(browser=version, engine=engine, profile=profile, window_width=width, requested_css_zoom=css_zoom, browser_page_zoom='default-unmodified')
                     print(json.dumps(row), flush=True)
                     results.append(row)
                     (REPORTS / 'stock-firefox.json').write_text(json.dumps(results, indent=2))
-                    driver.save_screenshot(str(REPORTS / f'{engine}-{profile}-{width}-zoom{zoom_steps}-stock-firefox.png'))
+                    driver.save_screenshot(str(REPORTS / f'{engine}-{profile}-{width}-css{css_zoom}-stock-firefox.png'))
                     frame = driver.find_elements(By.CSS_SELECTOR, '.lp-diagram iframe')
                     schema = driver.execute_script('return window.svgDiagnostics || []')
-                    (REPORTS / f'{engine}-{profile}-{width}-zoom{zoom_steps}-schema.json').write_text(json.dumps(schema, indent=2))
+                    (REPORTS / f'{engine}-{profile}-{width}-css{css_zoom}-schema.json').write_text(json.dumps(schema, indent=2))
                     if row['status'] != ready:
                         failures.append(row)
                     if frame:
                         assert frame[0].get_attribute('sandbox') == 'allow-scripts'
+                driver.script.remove_preload_script(zoom_script)
         driver.quit()
         driver = None
         service.stop()
