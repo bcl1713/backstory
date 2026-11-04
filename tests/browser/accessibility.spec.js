@@ -97,11 +97,11 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await expect(page.getByRole('button', { name: 'Format', exact: true })).toBeHidden();
     await expect(page.getByRole('button', { name: 'Vim bindings', exact: true })).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: `/tmp/backstory-release-one/reports/task11-${viewport.width}.png`, fullPage: true });
+    await page.screenshot({ path: `${runtime}/reports/task11-${viewport.width}.png`, fullPage: true });
     await revealChrome(page);
     await expect(page.getByRole('button', { name: 'Format', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Vim bindings', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Raw source', exact: true }).click();
-    await page.screenshot({ path: `/tmp/backstory-release-one/reports/task11-${viewport.width}-source.png`, fullPage: true });
+    await page.screenshot({ path: `${runtime}/reports/task11-${viewport.width}-source.png`, fullPage: true });
   });
 }

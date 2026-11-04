@@ -62,21 +62,22 @@ Browser tests own `/tmp/backstory-release-one/browser-runtime`, bind only
 wiki. Python tests create and clean their own temporary roots. Formatter tests
 invoke the real packaged helper. There are no latency gates or benchmarks.
 
-CI runs four browser shards on separate runners, each with its own server. To
-run one shard locally use `npm run test:browser -- --shard=1/4`. Run local shards
-one at a time: they share the runtime directory and port. Keep Playwright's
-worker count at one. CI installs Chromium with `--only-shell` to reduce download
-time and retains failure traces/screenshots as artifacts.
+The [local CI runner](ci/README.md) runs the full Chromium suite sequentially
+with a unique runtime directory, followed by the Firefox gates. Keep Playwright's
+worker count at one. The runner installs Chromium with `--only-shell` and retains
+failure traces/screenshots beside the local receipt. A single optional debugging
+shard (`npm run test:browser -- --shard=1/4`) is not a full acceptance gate.
 
 Concurrent checkouts can isolate browser tests with both
 `BACKSTORY_BROWSER_RUNTIME=/tmp/backstory-my-task` and
 `BACKSTORY_BROWSER_PORT=8868`. Use a distinct disposable root and loopback port
 for each run; tests within a run still share one worker and synthetic wiki.
 
-Open ordinary PRs against `dev`; successful dev merges publish a prerelease and
-`:dev` image. Promote through a `dev` → `main` merge PR for stable publication.
-See [release automation](releases.md) for branch protection, versioning and
-separate test/production stacks.
+Open ordinary PRs against `dev`. After review and complete local acceptance,
+merge and test the resulting commit before explicitly publishing its prerelease
+and `:dev` image. Promote through a `dev` → `main` merge PR for stable publication.
+Merging no longer starts a hosted job or publishes automatically. See
+[local releases](releases.md) for versioning and separate test/production stacks.
 
 Default production configuration is HTTPS with Secure cookies, HSTS and explicit
 hosts/origins. Local fixtures explicitly select localhost mode and proxy mode

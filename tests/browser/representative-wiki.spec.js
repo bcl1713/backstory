@@ -16,7 +16,7 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   test.setTimeout(120000);
   // The generated source collection has exactly 1000 notes, 299 dailies and
   // 699000-byte Large.md. Browser-only slice notes remain additional fixtures.
-  await python("import pathlib,tempfile; from tests.fixtures.generate import generate_fixture; from shutil import copytree; p=pathlib.Path(tempfile.mkdtemp(prefix='task11-corpus-',dir='/tmp/backstory-release-one')); f=generate_fixture(p/'fixture','representative'); copytree(f.wiki_root,pathlib.Path('" + runtime + "/wiki'),dirs_exist_ok=True)");
+  await python("import pathlib,tempfile; from tests.fixtures.generate import generate_fixture; from shutil import copytree; p=pathlib.Path(tempfile.mkdtemp(prefix='task11-corpus-',dir=pathlib.Path(" + JSON.stringify(runtime) + ").parent)); f=generate_fixture(p/'fixture','representative'); copytree(f.wiki_root,pathlib.Path('" + runtime + "/wiki'),dirs_exist_ok=True)");
   await python("import django; django.setup(); from indexing.queue import request_scan; from indexing.worker import run_batch; request_scan('rebuild'); run_batch()");
   const external = [];
   await context.route('**/*', route => {

@@ -114,7 +114,7 @@ test('inverse selections remain readable over raw block backgrounds', async ({ p
     return [style.backgroundColor, style.color];
   });
   expect(rawSelection).toEqual(['rgb(32, 32, 32)', 'rgb(255, 255, 255)']);
-  await page.screenshot({ path: '/tmp/backstory-release-one/reports/theme-light-selection.png', fullPage: true });
+  await page.screenshot({ path: `${runtime}/reports/theme-light-selection.png`, fullPage: true });
 });
 
 test('corrupt browser preferences fall back safely without applying untrusted CSS', async ({ page }) => {

@@ -77,7 +77,7 @@ for (const width of [1440, 390]) test(`Zen keeps the shared font grid and fits t
   expect(metrics.foreground).toBe('rgb(192, 202, 245)');
   if (width === 1440) expect(Math.abs(metrics.contentWidth - metrics.eighty)).toBeLessThan(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: `/tmp/backstory-release-one/reports/zen-${width}.png`, fullPage: true });
+  await page.screenshot({ path: `${runtime}/reports/zen-${width}.png`, fullPage: true });
   await page.getByRole('button', { name: 'Navigation and controls', exact: true }).click();
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
   expect(await read(page)).toBe(source);
@@ -94,5 +94,5 @@ test('Zen retains visible save conflict, failure diagnostics and recovery action
   await expect(page.locator('[data-editor-status]')).toContainText('Revision conflict');
   expect(await read(page)).toBe('# Unsaved Zen draft\n');
   await expect(page.getByRole('button', { name: 'Navigation and controls', exact: true })).toHaveAttribute('aria-expanded', 'false');
-  await page.screenshot({ path: '/tmp/backstory-release-one/reports/zen-conflict.png', fullPage: true });
+  await page.screenshot({ path: `${runtime}/reports/zen-conflict.png`, fullPage: true });
 });

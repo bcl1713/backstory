@@ -41,7 +41,7 @@ test('explicit link discovery complements inline resolution and preserves the ed
 
 test('representative search reports partial state, then opens current disk content after indexing', async ({ page }) => {
   test.setTimeout(120000);
-  await python("import pathlib,tempfile; from tests.fixtures.generate import generate_fixture; from shutil import copytree; p=pathlib.Path(tempfile.mkdtemp(prefix='search-corpus-',dir='/tmp/backstory-release-one')); f=generate_fixture(p/'fixture','representative'); copytree(f.wiki_root,pathlib.Path('" + runtime + "/wiki'),dirs_exist_ok=True)");
+  await python("import pathlib,tempfile; from tests.fixtures.generate import generate_fixture; from shutil import copytree; p=pathlib.Path(tempfile.mkdtemp(prefix='search-corpus-',dir=pathlib.Path(" + JSON.stringify(runtime) + ").parent)); f=generate_fixture(p/'fixture','representative'); copytree(f.wiki_root,pathlib.Path('" + runtime + "/wiki'),dirs_exist_ok=True)");
   await writeFile(`${runtime}/wiki/Search observer.md`, '# Search observer\n\nobserverneedleunique\n');
   await python("import django; django.setup(); from indexing.models import IndexGeneration,IndexJob,ScanState; IndexGeneration.objects.all().delete(); IndexJob.objects.all().delete(); ScanState.objects.all().delete(); from indexing.queue import request_scan; from indexing.worker import run_batch; request_scan('rebuild'); run_batch()");
   await login(page);

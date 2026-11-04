@@ -30,10 +30,10 @@ test('opening, selection and repeated modes preserve exact source, bytes, revisi
   await revealChrome(page);
   await expect(page.getByRole('button', { name: 'Live preview', exact: true })).toHaveAttribute('aria-pressed', 'true');
   expect(await readSource(page)).toBe(source);
-  await page.screenshot({ path: '/tmp/backstory-release-one/reports/live-preview-live.png', fullPage: true });
+  await page.screenshot({ path: `${runtime}/reports/live-preview-live.png`, fullPage: true });
   await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
-  await page.screenshot({ path: '/tmp/backstory-release-one/reports/live-preview-source.png', fullPage: true });
+  await page.screenshot({ path: `${runtime}/reports/live-preview-source.png`, fullPage: true });
   await revealChrome(page);
   await page.getByRole('button', { name: 'Live preview', exact: true }).click();
   await select(page, 12);
