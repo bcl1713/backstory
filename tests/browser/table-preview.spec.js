@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 import { source, runtime } from './support/server.js';
 
 const host = page => page.locator('[data-markdown-editor]');
@@ -10,6 +11,7 @@ async function open(page) {
   await page.getByLabel('Password').fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.goto('/notes/Slice.md');
+  await waitForEnhancedEditor(page);
 }
 
 test('inactive table renders; caret and crossing selection reveal source without modifying bytes', async ({ page }) => {

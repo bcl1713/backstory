@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { runtime } from './support/server.js';
 import { revealChrome } from './support/chrome.js';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 
 test.setTimeout(90000);
 
@@ -45,7 +46,7 @@ test('unsaved note draft blocks its move entry point without discarding editor h
   await login(page);
   await page.goto(`/notes/${root}/Active/Project.md`);
   const editor = page.locator('[data-markdown-editor]');
-  await expect.poll(() => editor.evaluate(el => Boolean(el.markdownEditor))).toBe(true);
+  await waitForEnhancedEditor(page);
   await editor.evaluate(el => el.markdownEditor.setSource('# My unsaved draft\n'));
   await revealChrome(page);
   let dialogs = 0;
@@ -67,7 +68,7 @@ test('an open editor retains unsaved source and cannot recreate the old path aft
   await login(page);
   await page.goto(`/notes/${root}/Active/Project.md`);
   const editor = page.locator('[data-markdown-editor]');
-  await expect.poll(() => editor.evaluate(el => Boolean(el.markdownEditor))).toBe(true);
+  await waitForEnhancedEditor(page);
   // Keep this regression's draft unsaved while the separate move review runs.
   const now = new Date('2026-10-26T15:00:00Z');
   await page.clock.install({ time: now });

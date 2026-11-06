@@ -1,4 +1,5 @@
 import { revealChrome } from './support/chrome.js';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -36,7 +37,7 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   const requests = [];
   page.on('request', r => requests.push(new URL(r.url()).pathname));
   await page.goto('/notes/reference/Large.md');
-  await page.waitForFunction(() => document.querySelector('[data-markdown-editor]')?.markdownEditor);
+  await waitForEnhancedEditor(page);
   expect(Buffer.byteLength(await source(page))).toBe(699000);
   await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();

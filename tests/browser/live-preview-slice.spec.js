@@ -1,14 +1,17 @@
 import { revealChrome } from './support/chrome.js';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { readFile, stat } from 'node:fs/promises';
 import { bytes, source, runtime } from './support/server.js';
 
-async function open(page) {
+async function open(page, enhanced = true) {
   await page.goto('/accounts/login/');
   await page.getByLabel('Username').fill('slice');
   await page.getByLabel('Password').fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  return page.goto('/notes/Slice.md');
+  const response = await page.goto('/notes/Slice.md');
+  if (enhanced) await waitForEnhancedEditor(page);
+  return response;
 }
 const editor = page => page.locator('[data-markdown-editor]');
 const readSource = page => editor(page).evaluate(el => el.markdownEditor.getSource());
@@ -129,7 +132,7 @@ test('HTML and external images are inert; source lines and plain fallback remain
 test('JavaScript unavailable leaves a labeled editable source fallback', async ({ browser }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
-  await open(page);
+  await open(page, false);
   const fallback = page.getByRole('textbox', { name: 'Markdown source (plain text fallback)' });
   await expect(fallback).toBeVisible();
   await expect(fallback).toBeEditable();

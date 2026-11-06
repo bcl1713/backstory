@@ -1,4 +1,5 @@
 import { revealChrome } from './support/chrome.js';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -21,6 +22,7 @@ test('explicit link discovery complements inline resolution and preserves the ed
   const requests = [];
   page.on('request', request => { if (/\/(resolve|index|search)\//.test(request.url())) requests.push(request.url()); });
   await page.goto('/notes/Slice.md');
+  await waitForEnhancedEditor(page);
   const source = await page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource());
   await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
@@ -85,6 +87,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: direct and
   const expected = source.indexOf('# **Café**', source.indexOf('# **Café**') + 1);
   await login(page);
   await page.goto('/notes/Heading.md#preview-caf%C3%A9-heading-1');
+  await waitForEnhancedEditor(page);
   const editor = page.locator('[data-markdown-editor]');
   await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
   await revealChrome(page);
@@ -103,7 +106,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: direct and
   await page.getByLabel('Link target', { exact: true }).fill('Heading#Café heading-1|Second heading');
   await page.getByRole('button', { name: 'Resolve link', exact: true }).click();
   await page.locator('[data-link-result] a').click();
-  await page.waitForFunction(() => document.querySelector('[data-markdown-editor]')?.markdownEditor);
+  await waitForEnhancedEditor(page);
   await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(source);
   expect(await readFile(path, 'utf8')).toBe(source);
@@ -122,6 +125,7 @@ test('current-document heading slugs match safe preview for markup, entities, co
   const slugs = [...html.matchAll(/id="(preview-[^"]+)"/g)].map(match => match[1]);
   expect(slugs).toHaveLength(headings.length);
   await page.goto('/notes/Slug%20cases.md');
+  await waitForEnhancedEditor(page);
   let expected = 0;
   for (let n = 0; n < headings.length; n++) {
     await page.evaluate(hash => { location.hash = '#' + encodeURIComponent(hash); }, slugs[n]);
@@ -138,6 +142,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: resolved r
   const expected = source.indexOf('# [Label]');
   await login(page);
   await page.goto('/notes/References.md');
+  await waitForEnhancedEditor(page);
   const editor = page.locator('[data-markdown-editor]');
   await revealChrome(page);
   await page.getByRole('button', { name: presentation === 'source' ? 'Raw source' : 'Live preview', exact: true }).click();
@@ -157,7 +162,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: resolved r
   await page.getByLabel('Link target', { exact: true }).fill('References#Label|Reference heading');
   await page.getByRole('button', { name: 'Resolve link', exact: true }).click();
   await page.locator('[data-link-result] a').click();
-  await page.waitForFunction(() => document.querySelector('[data-markdown-editor]')?.markdownEditor);
+  await waitForEnhancedEditor(page);
   await expect.poll(() => editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(expected);
   await revealChrome(page);
   await page.getByRole('button', { name: presentation === 'source' ? 'Raw source' : 'Live preview', exact: true }).click();
