@@ -139,7 +139,7 @@ test('late resolver responses cannot revive an old image or shift source selecti
   await host(page).evaluate(el => el.markdownEditor.setSource('New note\n\nNo image.'));
   await select(page, 3);
   release();
-  await page.waitForTimeout(150);
+  await page.unrouteAll({ behavior: 'wait' });
   await expect(host(page).locator('.lp-image')).toHaveCount(0);
   expect(await host(page).evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(3);
   expect(await read(page)).toBe('New note\n\nNo image.');
