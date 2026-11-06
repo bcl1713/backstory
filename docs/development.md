@@ -74,9 +74,9 @@ Concurrent checkouts can isolate browser tests with both
 for each run; tests within a run still share one worker and synthetic wiki.
 
 Open ordinary PRs against `dev`. After review and complete local acceptance,
-merge and test the resulting commit before explicitly publishing its prerelease
-and `:dev` image. Promote through a `dev` → `main` merge PR for stable publication.
-Merging no longer starts a hosted job or publishes automatically. See
+merge; the local publisher on forge tests the resulting commit and automatically
+publishes its prerelease and `:dev` image. Promote through a `dev` → `main` merge
+PR for automatic stable publication after its own full gate. See
 [local releases](releases.md) for versioning and separate test/production stacks.
 
 Default production configuration is HTTPS with Secure cookies, HSTS and explicit

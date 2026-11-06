@@ -55,15 +55,87 @@ for changed UI flows before merging; automated passes do not replace UI review.
 All browser screenshots, traces and fixture roots are scoped to this run’s
 configured runtime directory.
 
-## Local release
+## Automatic publication on merge
 
-Merging no longer publishes automatically. Test the exact resulting dev/main
-commit locally, and review its evidence before release. Publication requires
-existing GitHub CLI and GHCR Docker authentication on the intended machine and
-an existing buildx builder supporting linux/amd64 and linux/arm64. The scripts do
-not create credentials, log in, register a runner, expand access or deploy a
-server. Arrange missing authentication separately through the supported secure
-workflow.
+The persistent `backstory-publisher` user service on **forge** watches `dev` and
+`main` every 30 seconds. A merge starts the complete local gate on the resulting
+exact commit, then automatically builds/uploads multiarch images, tags them and
+publishes the matching GitHub release. No post-merge publication command is
+required. Ordinary pushes to these release branches are detected too; PR review
+still happens before merging. GitHub Actions stays disabled.
+
+Dev publishes prerelease version tags and only `:dev`. Main publishes stable
+version tags, minor/major aliases and `:latest`. Every attempt owns a private
+checkout and evidence/assets directories. A newer branch supersedes old work;
+the release runner checks freshness again before moving aliases. A failed gate
+never uploads an image. Failures retain logs and retry after five minutes; a
+new commit starts without waiting for an older failure's retry. Successful
+publication is recorded atomically and skipped across service restarts.
+
+### Publisher setup and status
+
+The controller is a dedicated checkout at
+`~/.local/share/backstory-publisher/controller`; runtime state and attempt logs
+live at `~/.local/state/backstory-publisher`. Keep these separate from personal
+development checkouts. Install the pinned Node under
+`~/.local/share/backstory-publisher/tools` and make uv/Python available in
+`~/.local/bin`. Install Playwright OS dependencies, including `fonts-liberation`
+for Graphviz's Arial-compatible metrics. The included fontconfig template also
+supports private fonts under `~/.local/share/backstory-publisher/fonts`.
+
+The service template is `scripts/systemd/backstory-publisher.service`. Copy it
+to `~/.config/systemd/user/`, and copy `scripts/systemd/fonts.conf` to the fonts
+directory above. Optional machine-specific non-secret selectors can override
+defaults through `~/.config/backstory-publisher/environment`.
+
+Existing `gh` authentication needs repository/release and `write:packages`
+access. Service startup passes that existing token through stdin to GHCR login
+in its private Docker configuration; it never prints or creates a token. Create
+a dedicated multiarch builder using those same selectors before enabling it:
+
+```sh
+export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/docker.sock"
+export DOCKER_CONFIG="$HOME/.local/state/backstory-publisher/docker"
+install -d -m 0700 "$DOCKER_CONFIG"
+docker buildx create --name backstory-publisher --driver docker-container --bootstrap
+```
+
+At initial migration only, baseline the existing historical main revision without
+publishing it. Leave dev unbaselined so the service catches up the current merge:
+
+```sh
+cd "$HOME/.local/share/backstory-publisher/controller"
+python3 scripts/local_publisher.py --state-dir "$HOME/.local/state/backstory-publisher" --baseline-current main
+systemctl --user daemon-reload
+systemctl --user enable --now backstory-publisher.service
+journalctl --user -u backstory-publisher.service -f
+```
+
+Ensure the user manager survives logout/reboot (`loginctl show-user "$USER" -p
+Linger`); an administrator can enable lingering if needed. The baseline is an
+explicit ignored revision, never a claim of successful publication. Later main
+merges publish normally. Baseline initialization refuses an already initialized
+channel.
+
+Inspect the live branch/attempt state without disturbing the running service:
+
+```sh
+python3 scripts/local_publisher.py --state-dir "$HOME/.local/state/backstory-publisher" --status
+systemctl --user status backstory-publisher.service
+```
+
+Stop drains the current attempt, including any upload, before exiting. To update
+the controller itself, stop the service, update its dedicated clean checkout to
+the reviewed dev revision, then restart it. New application commits are fetched
+automatically into attempt checkouts; they do not require controller updates.
+One service lock serializes both channels. Logs and synthetic attempt directories
+are retained for review; remove old completed attempts only when no job uses them.
+
+### Manual recovery
+
+Manual publication remains available for operator recovery. Stop the automatic
+publisher first, use an isolated clean checkout and run the full exact-commit
+gate. The service already performs these steps during ordinary operation:
 
 ```sh
 python3 scripts/local_release.py --receipt /path/to/receipt.json \
@@ -76,7 +148,8 @@ current remote branch. It builds an immutable Git archive of that commit locally
 publishes multi-platform version tags, then checks branch freshness again before
 moving channel aliases. Dev updates only `:dev`; stable updates minor, major and
 `:latest`. Version selection and GitHub release assets follow the prior policy.
-No GitHub-hosted build runs.
+No GitHub-hosted build runs. These low-level scripts do not register a runner,
+expand account access or deploy a server.
 
 Publication is serialized per channel for worktrees sharing one Git common
 directory. Independent clones and different machines do not share that lock;

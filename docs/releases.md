@@ -1,22 +1,25 @@
 # Releases and image publication
 
 All correctness tests and image builds now run locally. GitHub Actions is disabled
-repository-wide, and this branch has no active workflow files. Merging or pushing
-code does not publish an image or redeploy a server.
+repository-wide, and this branch has no active workflow files. The persistent
+publisher on forge detects merges/pushes to `dev` and `main`, runs the complete
+gate and automatically builds, tags and uploads images and GitHub releases.
+Publication does not redeploy a server.
 
 Follow the [local CI and release runbook](ci/README.md) for the complete test gate,
-exact-commit receipt, prerequisite tools, review and explicit publication command.
+exact-commit receipt, prerequisite tools, review and automatic publisher service.
 The former workflow definitions are retained only as inert migration references.
 
 ## Branch and release policy
 
 1. Feature/fix PRs target `dev`. Verify the intended merge tree locally and retain
    the full test record plus code/UI review before merging.
-2. Test the resulting current `dev` commit locally, then explicitly publish its
-   unique prerelease and `ghcr.io/bcl1713/backstory:dev` alias.
+2. The local service tests the resulting current `dev` commit and automatically
+   publishes its unique prerelease and `ghcr.io/bcl1713/backstory:dev` alias.
 3. Promote this repository's `dev` to `main` through a reviewed merge commit,
    preserving Conventional Commit history. Test that resulting commit separately.
-4. Explicitly publish the stable main release and numbered/`:latest` aliases.
+4. The service tests main and automatically publishes its stable release and
+   numbered/`:latest` aliases.
 5. Merge main back into dev after stable publication to retain tag ancestry.
 
 Keep test and production stacks, wiki directories, data directories and ports
@@ -63,9 +66,9 @@ labels, the image digest, the Portainer manifest, a version-pinned environment
 example, deployment guide and checksums.
 
 Dev publishes full prerelease tags and updates only `:dev`. Stable publishes
-version tags, minor and major aliases and `:latest`. The explicit local release
-script requires existing GitHub CLI and GHCR Docker authentication; it never
-creates tokens or changes access. See [Portainer deployment](portainer.md) for
+version tags, minor and major aliases and `:latest`. The local service uses existing
+GitHub authentication for release and GHCR publication; it never creates tokens
+or changes account access. See [Portainer deployment](portainer.md) for
 operator-controlled upgrades and rollback.
 
 ## Failure and recovery
