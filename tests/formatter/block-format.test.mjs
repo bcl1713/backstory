@@ -1,12 +1,12 @@
+import { parsedState } from './support/parsed-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EditorState } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { frontMatter } from '../../static/src/live-preview.js';
 import { wikiLinks } from '../../static/src/live-links.js';
 import { markdownBlock, blockFormattingChanges } from '../../static/src/block-format.js';
 
-const state = source => EditorState.create({ doc: source, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks] })] });
+const state = source => parsedState({ doc: source, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks] })] });
 test('paragraphs, complete nested lists and complete tables are structural blocks', () => {
   const text = '# Heading\n\nFirst paragraph\ncontinued with [[Wiki]].\n\n- first\n  - nested\n\n  continued\n- last\n\n| A | B |\n|---|---|\n| x | y |\n';
   const doc = state(text);
@@ -53,7 +53,7 @@ test('neighboring heading indentation and previous prose trailing spaces are not
 test('automatic block formatting does not reinterpret explicit TeX as ordinary Markdown', async () => {
   const { mathSyntax } = await import('../../static/src/math-preview.js');
   for (const source of ['Before\n\nInline \\(\\verb|a  b|\\).', 'Before\n\n- Inline \\(\\text{a  b}\\).\n- Other']) {
-    const doc = EditorState.create({ doc: source, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks, mathSyntax] })] });
+    const doc = parsedState({ doc: source, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks, mathSyntax] })] });
     assert.equal(markdownBlock(doc, source.indexOf('Inline')), null);
     assert.equal(doc.doc.toString(), source);
   }
@@ -62,7 +62,7 @@ test('automatic block formatting does not reinterpret explicit TeX as ordinary M
 test('math source guard is scoped to the exited block rather than later sibling paragraphs', async () => {
   const { mathSyntax } = await import('../../static/src/math-syntax.js');
   const source = 'Before\n\n\\(x\\)\n\nAfter';
-  const doc = EditorState.create({ doc: source, extensions: [markdown({ base: markdownLanguage, extensions: [mathSyntax] })] });
+  const doc = parsedState({ doc: source, extensions: [markdown({ base: markdownLanguage, extensions: [mathSyntax] })] });
   assert.equal(markdownBlock(doc, 0)?.type, 'Paragraph');
   assert.equal(markdownBlock(doc, source.indexOf('After'))?.type, 'Paragraph');
   assert.equal(markdownBlock(doc, source.indexOf('\\(')), null);

@@ -1,3 +1,4 @@
+import { parsedState } from './support/parsed-state.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorState } from '@codemirror/state';
@@ -6,7 +7,7 @@ import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { frontMatter } from '../../static/src/live-preview.js';
 import { imageModels, imagePresentation, imageTargetState, imageIsActive, imageMotionRange, revealImageMotion } from '../../static/src/image-preview.js';
 
-const state = (doc, selection = { anchor: 0 }, extra = []) => EditorState.create({ doc, selection, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter] }), ...extra] });
+const state = (doc, selection = { anchor: 0 }, extra = []) => parsedState({ doc, selection, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter] }), ...extra] });
 
 test('ordinary images preserve parsed source ranges, decoded labels and relative encoded targets', () => {
   const doc = 'Before\n\n![A &amp; B](<../photos/a%20b.png> "Title") after';
@@ -52,7 +53,7 @@ test('selected image lines and motion paths reveal source without modifying docu
 
 test('large fully parsed documents stop actual cursor visits at the hard node budget', () => {
   const doc = 'Before\n\n![early](a.png)\n\n' + '***\n\n'.repeat(120000) + '![late](b.png)';
-  let s = state(doc);
+  let s = EditorState.create({ doc, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter] })] });
   assert.ok(ensureSyntaxTree(s, doc.length, 10000), 'complete the real Markdown parse');
   s = s.update({}).state;
   const tree = syntaxTree(s);

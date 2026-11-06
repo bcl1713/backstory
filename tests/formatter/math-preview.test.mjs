@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { EditorState } from '@codemirror/state';
+import { syntaxTree } from '@codemirror/language';
+import { parsedState } from './support/parsed-state.mjs';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { frontMatter } from '../../static/src/live-preview.js';
 const math = await import('../../static/src/math-preview.js').catch(() => ({}));
 const fixtures = JSON.parse(readFileSync(new URL('../fixtures/math-delimiters.json', import.meta.url)));
-const state = (doc, selection = { anchor: 0 }, extra = []) => EditorState.create({ doc, selection, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter, math.mathSyntax || {}] }), ...extra] });
+const state = (doc, selection = { anchor: 0 }, extra = []) => parsedState({ doc, selection, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter, math.mathSyntax || {}] }), ...extra] });
 for (const [index, fixture] of fixtures.entries()) test(`explicit math parser fixture ${index}: source-preserving delimiter and context policy`, () => {
   assert.equal(typeof math.mathModels, 'function', 'math model extraction exists');
   const s = state(fixture.source);
@@ -64,4 +66,39 @@ test('formatter signature collection fails closed rather than returning a partia
   const { mathSources } = await import('../../static/src/math-syntax.js');
   const source = 'Before\n\n' + '***\n\n'.repeat(100001) + '\\(\\verb|a  b|\\)';
   assert.equal(mathSources(source), null);
+});
+
+test('headless math fixtures complete parsing after the initial work budget expires', () => {
+  const source = 'Before\n\n- Item \\(list\\)\n\n> Quote \\(quote\\)\n\n$$x+1$$';
+  const originalNow = Date.now;
+  const withSchedulingPauses = callback => {
+    let now = originalNow();
+    Date.now = () => (now += 25);
+    try { return callback(); }
+    finally { Date.now = originalNow; }
+  };
+  const config = { doc: source, selection: { anchor: 3 }, extensions: [markdown({ base: markdownLanguage, extensions: [frontMatter, math.mathSyntax] })] };
+  const partial = withSchedulingPauses(() => EditorState.create(config));
+  assert.ok(syntaxTree(partial).length < source.length, 'exercise a genuinely incomplete initial parse');
+  const complete = withSchedulingPauses(() => state(source, { anchor: 3 }));
+  assert.deepEqual(math.mathModels(complete).map(({ expression, display }) => ({ expression, display })), [
+    { expression: 'list', display: false },
+    { expression: 'quote', display: false },
+    { expression: 'x+1', display: true },
+  ]);
+  assert.deepEqual(math.mathModels(complete).map(({ from, to, source }) => ({ from, to, source })), [
+    { from: 15, to: 23, source: '\\(list\\)' },
+    { from: 33, to: 42, source: '\\(quote\\)' },
+    { from: 44, to: 51, source: '$$x+1$$' },
+  ]);
+  for (const fixture of fixtures) {
+    const parsed = withSchedulingPauses(() => state(fixture.source));
+    assert.deepEqual(math.mathModels(parsed).map(({ expression, display }) => ({ expression, display })), fixture.math);
+    assert.equal(parsed.doc.toString(), fixture.source.replace(/\r\n/g, '\n'));
+  }
+  const preview = withSchedulingPauses(() => state(source, { anchor: 3 }, [math.mathPreview]));
+  assert.equal(preview.field(math.mathPreview).size, 3, 'refresh syntax-dependent state fields');
+  assert.equal(syntaxTree(complete).length, source.length);
+  assert.equal(complete.selection.main.anchor, 3);
+  assert.equal(complete.doc.toString(), source);
 });
