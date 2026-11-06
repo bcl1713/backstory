@@ -1,8 +1,11 @@
 """Local correctness keeps every gate and never grants itself publication."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
+import subprocess
+import sys
 
 import pytest
 
@@ -163,3 +166,45 @@ time.sleep(30)
                 os.kill(int(pid_file.read_text()), signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+def test_container_context_uses_committed_readable_modes_from_private_checkout(tmp_path, monkeypatch):
+    m = module()
+    source, report, binaries = (tmp_path / name for name in ('source', 'report', 'bin'))
+    for directory in (source, report, binaries):
+        directory.mkdir()
+    manage = source / 'manage.py'
+    manage.write_text('print("committed source")\n')
+    subprocess.run(['git', 'init', '-q', str(source)], check=True)
+    subprocess.run(['git', 'add', '.'], cwd=source, check=True)
+    subprocess.run(['git', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                    'commit', '-qm', 'source'], cwd=source, check=True)
+    # Git tracks the same 100644 entry even when a private publisher umask
+    # makes its working copy unreadable to the container's non-root UID.
+    manage.chmod(0o600)
+    capture = tmp_path / 'context.json'
+    scripts = {
+        'uv': '''import pathlib,sys
+if 'tests.fixtures.generate' in sys.argv:
+ p=pathlib.Path(sys.argv[sys.argv.index('tests.fixtures.generate')+1]);p.mkdir();(p/'fixture.env').write_text('BACKSTORY_WIKI_ROOT=/synthetic\\n')
+''',
+        'docker': '''import io,json,os,pathlib,sys,tarfile
+if sys.argv[1]=='build':
+ if sys.argv[-1]=='-':
+  archive=tarfile.open(fileobj=io.BytesIO(sys.stdin.buffer.read()));mode=archive.getmember('manage.py').mode;body=archive.extractfile('manage.py').read().decode()
+ else:
+  path=pathlib.Path('manage.py');mode=path.stat().st_mode;body=path.read_text()
+ pathlib.Path(os.environ['TEST_CONTAINER_CONTEXT']).write_text(json.dumps({'mode':mode,'body':body}))
+''',
+    }
+    for name, body in scripts.items():
+        path = binaries / name
+        path.write_text('#!' + sys.executable + '\n' + body)
+        path.chmod(0o700)
+    monkeypatch.setenv('PATH', str(binaries) + os.pathsep + os.environ['PATH'])
+    monkeypatch.setenv('TEST_CONTAINER_CONTEXT', str(capture))
+    step = next(step for step in m.build_plan(report, 19493) if step['name'] == 'container')
+    m.run_step(step, source, report)
+    context = json.loads(capture.read_text())
+    assert context['body'] == 'print("committed source")\n'
+    assert context['mode'] & 0o004, 'Image code must be readable by its non-root application user'

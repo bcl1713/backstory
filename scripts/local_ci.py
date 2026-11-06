@@ -48,7 +48,8 @@ trap cleanup EXIT
 uv run python manage.py check
 BACKSTORY_COOKIE_MODE=https BACKSTORY_ALLOWED_HOSTS=example.invalid uv run python manage.py check --deploy --fail-level WARNING
 docker compose --env-file "$LOCAL_REPORT/container-fixture/fixture.env" -f compose.yaml config --quiet
-docker build --tag "$BACKSTORY_IMAGE" .
+# Match publication's immutable context and canonical Git file permissions.
+git archive --format=tar HEAD | docker build --tag "$BACKSTORY_IMAGE" -
 docker compose --env-file "$LOCAL_REPORT/container-fixture/fixture.env" -f compose.yaml run --pull never --rm web python manage.py check
 '''
     return [
