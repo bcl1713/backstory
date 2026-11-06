@@ -1,9 +1,10 @@
+import { parsedState } from './support/parsed-state.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EditorState, EditorSelection } from '@codemirror/state';
 import { markdown } from '@codemirror/lang-markdown';
 import { codeDecorations, codeLanguage } from '../../static/src/code-preview.js';
-const state = (doc, anchor = 0, head = anchor) => EditorState.create({ doc, selection: { anchor, head }, extensions: [markdown({ codeLanguages: codeLanguage })] });
+const state = (doc, anchor = 0, head = anchor) => parsedState({ doc, selection: { anchor, head }, extensions: [markdown({ codeLanguages: codeLanguage })] });
 const ranges = value => { const result = []; for (let i = value.iter(); i.value; i.next()) result.push({ from: i.from, to: i.to, spec: i.value.spec }); return result; };
 
 test('inactive fenced code hides only fence text and keeps source lines', () => {
@@ -41,6 +42,6 @@ test('empty and nested fences preserve source and hide only delimiters', () => {
 });
 test('any selection range in a block reveals its source', () => {
   const doc = 'Before\n\n```js\nconst answer = 42;\n```\nAfter';
-  const s = EditorState.create({ doc, selection: EditorSelection.create([EditorSelection.cursor(0), EditorSelection.cursor(doc.indexOf('answer'))]), extensions: [EditorState.allowMultipleSelections.of(true), markdown()] });
+  const s = parsedState({ doc, selection: EditorSelection.create([EditorSelection.cursor(0), EditorSelection.cursor(doc.indexOf('answer'))]), extensions: [EditorState.allowMultipleSelections.of(true), markdown()] });
   assert.equal(ranges(codeDecorations(s)).filter(x => x.to > x.from).length, 0);
 });

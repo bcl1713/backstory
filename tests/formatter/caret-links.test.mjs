@@ -1,9 +1,9 @@
+import { parsedState } from './support/parsed-state.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EditorState } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { wikiLinks, linkAtCaret } from '../../static/src/live-links.js';
-const find = (doc, anchor) => linkAtCaret({ state: EditorState.create({ doc, selection: { anchor }, extensions: [markdown({ base: markdownLanguage, extensions: [wikiLinks] })] }) });
+const find = (doc, anchor) => linkAtCaret({ state: parsedState({ doc, selection: { anchor }, extensions: [markdown({ base: markdownLanguage, extensions: [wikiLinks] })] }) });
 test('caret selects wiki syntax from first through final character, not following space', () => {
   const doc = '[[Other#Details|Alias]] after';
   for (const pos of [0, 3, 17, 22]) assert.equal(find(doc, pos)?.target, 'Other#Details|Alias');

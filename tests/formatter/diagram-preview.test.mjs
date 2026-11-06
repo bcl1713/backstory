@@ -1,12 +1,12 @@
+import { parsedState } from './support/parsed-state.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { EditorState } from '@codemirror/state';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { frontMatter } from '../../static/src/live-preview.js';
 const file=new URL('../../static/src/diagram-preview.js',import.meta.url);
 const api=existsSync(file)?await import(file):{};
-const state=(doc,selection={anchor:0},extra=[])=>EditorState.create({doc,selection,extensions:[markdown({base:markdownLanguage,extensions:[frontMatter]}),...extra]});
+const state=(doc,selection={anchor:0},extra=[])=>parsedState({doc,selection,extensions:[markdown({base:markdownLanguage,extensions:[frontMatter]}),...extra]});
 const fence='```mermaid\nflowchart LR\nA[Start] --> B{Ready?}\n```';
 test('only complete explicit top-level mermaid fences become bounded models',()=>{
  assert.equal(typeof api.diagramModels,'function','diagram models missing');
