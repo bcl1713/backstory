@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { source } from './support/server.js';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
+import { source, runtime } from './support/server.js';
 
 const host = page => page.locator('[data-markdown-editor]');
 const select = (page, anchor, head = anchor) => host(page).evaluate((el, selection) => el.markdownEditor.view.dispatch({ selection }), { anchor, head });
@@ -10,6 +11,7 @@ async function open(page) {
   await page.getByLabel('Password').fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.goto('/notes/Slice.md');
+  await waitForEnhancedEditor(page);
 }
 
 test('inactive table renders; caret and crossing selection reveal source without modifying bytes', async ({ page }) => {
@@ -58,7 +60,7 @@ test('wrapped cells preserve the note width at desktop and phone; HTML and image
     const sizes=await page.locator('.lp-table').evaluate(el=>({width:el.getBoundingClientRect().width,scroll:el.scrollWidth,viewport:document.documentElement.clientWidth,body:document.documentElement.scrollWidth}));
     expect(sizes.scroll).toBeLessThanOrEqual(sizes.width+1);
     expect(sizes.body).toBeLessThanOrEqual(sizes.viewport+1);
-    await page.screenshot({path:`/tmp/backstory-release-one/reports/table-preview-${width}.png`,fullPage:true});
+    await page.screenshot({path:`${runtime}/reports/table-preview-${width}.png`,fullPage:true});
   }
   expect(await read(page)).toBe(longTable);
 });

@@ -1,4 +1,5 @@
 import { revealChrome } from './support/chrome.js';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -16,7 +17,7 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   test.setTimeout(120000);
   // The generated source collection has exactly 1000 notes, 299 dailies and
   // 699000-byte Large.md. Browser-only slice notes remain additional fixtures.
-  await python("import pathlib,tempfile; from tests.fixtures.generate import generate_fixture; from shutil import copytree; p=pathlib.Path(tempfile.mkdtemp(prefix='task11-corpus-',dir='/tmp/backstory-release-one')); f=generate_fixture(p/'fixture','representative'); copytree(f.wiki_root,pathlib.Path('" + runtime + "/wiki'),dirs_exist_ok=True)");
+  await python("import pathlib,tempfile; from tests.fixtures.generate import generate_fixture; from shutil import copytree; p=pathlib.Path(tempfile.mkdtemp(prefix='task11-corpus-',dir=pathlib.Path(" + JSON.stringify(runtime) + ").parent)); f=generate_fixture(p/'fixture','representative'); copytree(f.wiki_root,pathlib.Path('" + runtime + "/wiki'),dirs_exist_ok=True)");
   await python("import django; django.setup(); from indexing.queue import request_scan; from indexing.worker import run_batch; request_scan('rebuild'); run_batch()");
   const external = [];
   await context.route('**/*', route => {
@@ -36,7 +37,7 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   const requests = [];
   page.on('request', r => requests.push(new URL(r.url()).pathname));
   await page.goto('/notes/reference/Large.md');
-  await page.waitForFunction(() => document.querySelector('[data-markdown-editor]')?.markdownEditor);
+  await waitForEnhancedEditor(page);
   expect(Buffer.byteLength(await source(page))).toBe(699000);
   await revealChrome(page);
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();

@@ -1,4 +1,5 @@
 import { revealChrome } from './support/chrome.js';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -14,6 +15,7 @@ async function open(page) {
   await page.getByLabel('Password').fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.goto('/notes/LiveLinks.md');
+  await waitForEnhancedEditor(page);
 }
 
 test.beforeAll(async () => {
@@ -59,6 +61,7 @@ test('pointer and keyboard can follow rendered links without entering source fir
   await expect(page).toHaveURL(/\/notes\/Other.md#preview-details$/);
   await page.goto('/notes/LiveLinks.md');
   const link = page.getByRole('link', { name: 'Markdown label', exact: true });
+  await expect(link).toBeVisible();
   await link.focus();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/notes\/Other.md#preview-details$/);

@@ -44,15 +44,15 @@ Executed integration/unit tests check manifest fields, actual PNG dimensions,
 metadata on sign-in and authenticated pages, and offline advisory transitions.
 Authored browser tests additionally check public asset retrieval, no registered
 service worker, and disconnect/reconnect without a false save or lost in-memory
-edit. Run the browser CI job (all four shards) before accepting a change.
+edit. Run the complete local Chromium gate before accepting a change.
 Existing editor suites provide regression tests for authentication failures,
 conflict handling, protected drafts, navigation guards and failed writes.
 
 The implementation workspace verified Python 3.14.8 integration tests and Node
 22 unit tests. Local browser execution was unavailable because of browser-download
-and socket restrictions; the repository's GitHub Actions browser job supplies
-Chromium Headless Shell 156.0.8078.4 on Linux. Consult the PR checks for the
-current browser-suite result. Desktop/headless verification is not an Android
+and socket restrictions. The [local CI runner](ci/README.md) installs the pinned
+Chromium Headless Shell on Linux; retain its complete browser logs and review
+evidence with the PR. GitHub Actions is disabled. Desktop/headless verification is not an Android
 installation test.
 
 **Real Android installation has not been verified in this cloud workspace.** No

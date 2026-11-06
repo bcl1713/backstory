@@ -47,7 +47,7 @@ for (const width of [1440, 390]) test(`file tree is prominent and expands withou
   await expect(branch.locator(':scope > ul')).toBeHidden();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await disclosure.click();
-  await page.screenshot({ path: `/tmp/backstory-release-one/reports/file-tree-${width}.png` });
+  await page.screenshot({ path: `${runtime}/reports/file-tree-${width}.png` });
 });
 
 test('file tree on folder pages opens nested notes with literal filenames', async ({ page }) => {

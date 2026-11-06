@@ -1,4 +1,5 @@
 import { revealChrome } from './support/chrome.js';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, rename, mkdir, rmdir } from 'node:fs/promises';
 import { runtime } from './support/server.js';
@@ -10,6 +11,7 @@ async function login(page, route='/notes/Recovery.md') {
   await page.getByLabel('Password', {exact:true}).fill('synthetic-slice-browser-only');
   await page.getByRole('button', {name:'Sign in',exact:true}).click();
   await page.goto(route);
+  await waitForEnhancedEditor(page);
 }
 const source = async page => {
   await page.waitForFunction(() => Boolean(document.querySelector('[data-markdown-editor]')?.markdownEditor));
@@ -87,6 +89,7 @@ for (const mode of ['live','source']) test(`${mode}: shared history requires exp
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+a');
   await page.keyboard.insertText('# Changed\n');
+  expect(await source(page)).toBe('# Changed\r\n');
   expect((await action(page,'Save')).status()).toBe(200);
   await page.goto('/history/Recovery.md');
   await page.getByRole('link',{name:'Open original for comparison and explicit restoration'}).first().click();

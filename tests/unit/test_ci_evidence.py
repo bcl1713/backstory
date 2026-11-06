@@ -148,7 +148,7 @@ def test_only_latest_run_is_considered():
 def test_workflow_keeps_pr_full_and_container_unconditional():
     import yaml
     root = PATH.parents[1]
-    ci = yaml.safe_load((root / '.github/workflows/ci.yml').read_text())
+    ci = yaml.safe_load((root / 'docs/ci/retired-workflows/ci.yml').read_text())
     inputs = ci.get('on', ci.get(True))['workflow_call']['inputs']
     assert inputs['reuse_application']['default'] is False
     for name in ['python', 'formatter', 'browser']:
@@ -159,7 +159,7 @@ def test_workflow_keeps_pr_full_and_container_unconditional():
     assert 'if' not in ci['jobs']['firefox']
     assert 'if' not in ci['jobs']['container']
     assert 'if' not in ci['jobs']['branch-policy']
-    release = yaml.safe_load((root / '.github/workflows/release.yml').read_text())
+    release = yaml.safe_load((root / 'docs/ci/retired-workflows/release.yml').read_text())
     assert release['jobs']['evidence']['permissions'] == {'contents': 'read', 'actions': 'read', 'pull-requests': 'read'}
     assert release['jobs']['correctness']['if'].startswith('${{ always()')
     assert release['jobs']['correctness']['with']['reuse_application'] == "${{ needs.evidence.result == 'success' && needs.evidence.outputs.reuse == 'true' }}"
@@ -243,7 +243,7 @@ def test_new_rerun_during_verification_is_rejected(verifier_setup):
 
 def test_aggregate_only_accepts_skips_for_verified_release(monkeypatch):
     import yaml
-    ci = yaml.safe_load((PATH.parents[1] / '.github/workflows/ci.yml').read_text())
+    ci = yaml.safe_load((PATH.parents[1] / 'docs/ci/retired-workflows/ci.yml').read_text())
     shell = ci['jobs']['correctness']['steps'][0]['run']
     good = {name: {'result': 'success'} for name in ['branch-policy', 'container', 'firefox']}
     good.update({name: {'result': 'skipped'} for name in ['python', 'formatter', 'browser']})
@@ -263,7 +263,7 @@ def test_aggregate_only_accepts_skips_for_verified_release(monkeypatch):
 def test_reusable_actions_are_pinned_including_upload():
     import re
     import yaml
-    ci = yaml.safe_load((PATH.parents[1] / '.github/workflows/ci.yml').read_text())
+    ci = yaml.safe_load((PATH.parents[1] / 'docs/ci/retired-workflows/ci.yml').read_text())
     for job in ('python', 'formatter', 'browser'):
         for step in ci['jobs'][job]['steps']:
             if 'uses' in step:
@@ -303,7 +303,7 @@ def test_fingerprint_requires_runner_identity(monkeypatch):
 
 def test_probe_failure_is_optional_but_correctness_is_not():
     import yaml
-    jobs = yaml.safe_load((PATH.parents[1] / '.github/workflows/release.yml').read_text())['jobs']
+    jobs = yaml.safe_load((PATH.parents[1] / 'docs/ci/retired-workflows/release.yml').read_text())['jobs']
     assert jobs['evidence']['continue-on-error'] is True
     assert jobs['correctness'].get('continue-on-error', False) is False
 

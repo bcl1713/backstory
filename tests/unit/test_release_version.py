@@ -22,11 +22,12 @@ def repo(tmp_path):
     return tmp_path
 
 
-def plan(repo, channel=None):
+def plan(repo, channel=None, source=None):
     output = repo / 'outputs'
     output.unlink(missing_ok=True)
     result = subprocess.run(
-        [sys.executable, str(SCRIPT), *(['--channel', channel] if channel else [])],
+        [sys.executable, str(SCRIPT), *(['--channel', channel] if channel else []),
+         *(['--source-sha', source] if source else [])],
         cwd=repo, text=True, capture_output=True,
         env={**os.environ, 'GITHUB_OUTPUT': str(output)},
     )
@@ -37,6 +38,15 @@ def plan(repo, channel=None):
 
 def test_first_release_is_100_even_with_breaking_history(repo):
     assert plan(repo) == {'version': '1.0.0', 'tag': 'v1.0.0', 'previous': ''}
+
+
+def test_explicit_source_version_does_not_follow_later_head(repo):
+    git(repo, 'tag', 'v1.0.0')
+    git(repo, 'commit', '--allow-empty', '-m', 'fix: tested commit')
+    source = git(repo, 'rev-parse', 'HEAD')
+    expected = plan(repo, 'dev')
+    git(repo, 'commit', '--allow-empty', '-m', 'feat!: unrelated later change')
+    assert plan(repo, 'dev', source) == expected
 
 
 @pytest.mark.parametrize(('message', 'expected'), [

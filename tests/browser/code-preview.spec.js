@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 import { revealChrome } from './support/chrome.js';
 
 const source = 'Before\n\n```js\nconst answer = 42;\nconsole.log("**literal**");\n```\n\nAfter';
@@ -9,6 +10,7 @@ async function open(page, value = source) {
   await page.getByLabel('Password').fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await page.goto('/notes/Slice.md');
+  await waitForEnhancedEditor(page);
   await expect(editor(page)).toHaveAttribute('data-presentation', 'live');
   await editor(page).evaluate((el, text) => { el.markdownEditor.setVimEnabled(false); el.markdownEditor.setSource(text); el.markdownEditor.view.dispatch({ selection: { anchor: 0 } }); }, value);
 }
