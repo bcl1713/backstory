@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import { runtime } from './support/server.js';
 import { revealChrome } from './support/chrome.js';
+import { trackRoutes } from './support/controlled-routes.js';
 
 const source = 'Before\n\n![Landscape](images/wide%20view.png "Local image")\n\nInline ![Reference][photo] beside text.\n\n![Missing](images/missing.png)\n\n![Denied](.git/secret.png)\n\n![Remote](https://example.invalid/tracker.png)\n\n![SVG](images/active.svg)\n\n![Broken](images/broken.png)\n\n`![Code](images/wide%20view.png)` and \\![Escaped](images/wide%20view.png)\n\n| Picture |\n| --- |\n| ![Table](images/wide%20view.png) |\n\n[photo]: images/wide%20view.png\n\nAfter\n';
 const host = page => page.locator('[data-markdown-editor]');
@@ -130,7 +131,7 @@ test('late resolver responses cannot revive an old image or shift source selecti
   let release, started;
   const gate = new Promise(resolve => { release = resolve; });
   const waiting = new Promise(resolve => { started = resolve; });
-  await page.route('**/resolve/**', async route => {
+  const finishRoutes = await trackRoutes(page, '**/resolve/**', async route => {
     if (new URL(route.request().url()).searchParams.get('target') === 'images/wide%20view.png') { const response = await route.fetch(); started(); await gate; await route.fulfill({ response }); }
     else await route.continue();
   });
@@ -139,7 +140,7 @@ test('late resolver responses cannot revive an old image or shift source selecti
   await host(page).evaluate(el => el.markdownEditor.setSource('New note\n\nNo image.'));
   await select(page, 3);
   release();
-  await page.unrouteAll({ behavior: 'wait' });
+  await finishRoutes();
   await expect(host(page).locator('.lp-image')).toHaveCount(0);
   expect(await host(page).evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(3);
   expect(await read(page)).toBe('New note\n\nNo image.');
