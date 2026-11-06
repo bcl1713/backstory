@@ -105,9 +105,14 @@ class Publisher:
             if source_identity(source)[0] != sha:
                 raise ValueError('Checkout does not match the selected branch commit.')
             evidence = job / 'evidence'
+            # Correctness builds must load disposable images into local Docker.
+            # The publication-only container builder is selected for --push later.
+            correctness_env = dict(os.environ)
+            correctness_env.pop('BUILDX_BUILDER', None)
             run_process([sys.executable, 'scripts/local_ci.py', '--base', branch,
                          '--head', 'dev', '--report', str(evidence), '--port', str(self.port)],
-                        cwd=source, stdout=log, stderr=subprocess.STDOUT, timeout=7200)
+                        cwd=source, env=correctness_env,
+                        stdout=log, stderr=subprocess.STDOUT, timeout=7200)
             receipt = json.loads((evidence / 'receipt.json').read_text())
             current_sha, tree = source_identity(source)
             gates = receipt.get('gates')
