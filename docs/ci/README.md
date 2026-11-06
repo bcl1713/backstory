@@ -88,6 +88,10 @@ to `~/.config/systemd/user/`, and copy `scripts/systemd/fonts.conf` to the fonts
 directory above. Optional machine-specific non-secret selectors can override
 defaults through `~/.config/backstory-publisher/environment`.
 
+The publication builder selector applies only to release uploads. Correctness
+uses Docker's local default builder so its disposable test images are loaded
+for Compose and Docker integration checks.
+
 Existing `gh` authentication needs repository/release and `write:packages`
 access. Service startup passes that existing token through stdin to GHCR login
 in its private Docker configuration; it never prints or creates a token. Create

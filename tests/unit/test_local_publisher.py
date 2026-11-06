@@ -34,6 +34,7 @@ git=lambda ref:subprocess.check_output(['git','rev-parse',ref],text=True).strip(
 sha=git('HEAD')
 with open(os.environ['TEST_PUBLISH_MARKER'],'a') as f:f.write('gate:'+a.base+':'+sha+'\\n')
 mode=os.environ.get('TEST_GATE_MODE','')
+if os.environ.get('TEST_BUILDER_SPLIT') and os.environ.get('BUILDX_BUILDER'):raise SystemExit(23)
 if mode=='fail':raise SystemExit(13)
 if mode=='missing':raise SystemExit(0)
 report=pathlib.Path(a.report);report.mkdir()
@@ -44,6 +45,7 @@ receipt=dict(schema=1,source_sha='0'*40 if mode=='wrong-sha' else sha,source_tre
     (source / 'scripts/local_release.py').write_text('''import argparse,os,subprocess
 p=argparse.ArgumentParser();p.add_argument('--channel');a,_=p.parse_known_args()
 sha=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+if os.environ.get('TEST_BUILDER_SPLIT') and os.environ.get('BUILDX_BUILDER')!='publication-only':raise SystemExit(24)
 with open(os.environ['TEST_PUBLISH_MARKER'],'a') as f:f.write('publish:'+a.channel+':'+sha+'\\n')
 if os.environ.get('TEST_RELEASE_FAILURE'):raise SystemExit(17)
 ''')
@@ -167,3 +169,11 @@ def test_new_commit_does_not_wait_for_failed_revisions_backoff(tmp_path, monkeyp
     sha = origin.advance('dev')
     assert worker.poll()['dev'] == 'published'
     assert origin.operations()[-1] == 'publish:dev:' + sha
+
+
+def test_correctness_uses_local_docker_while_publication_keeps_multiarch_builder(tmp_path, monkeypatch, origin):
+    _, worker = publisher(tmp_path, monkeypatch, origin)
+    monkeypatch.setenv('BUILDX_BUILDER', 'publication-only')
+    monkeypatch.setenv('TEST_BUILDER_SPLIT', '1')
+    assert worker.poll()['dev'] == 'published'
+    assert origin.operations() == ['gate:dev:' + origin.sha, 'publish:dev:' + origin.sha]
