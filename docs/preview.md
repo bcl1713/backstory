@@ -47,6 +47,15 @@ collisions. Duplicate headings add `-1`, `-2`, and so on, skipping IDs already
 used by other headings. Fragments use the same convention; for example,
 `#Hello%2C%20World!` points to `#preview-hello-world`. Link parsing uses Markdown
 tokens and an inline wikilink rule; code and escaped wikilinks remain literal.
+Explicit formatting joins a wrapped `[[path|display label]]` alias onto one
+physical line, replacing soft line breaks and their indentation with one space.
+Literal targets and the remaining label text are retained. This also works in
+lists and blockquotes; code, escaped openers, front matter, raw HTML and supported
+math remain protected. Recognition is bounded to 8,192 characters per wrapped
+alias and a finite scan/traversal budget. Incomplete or unsupported syntax is not
+normalized; formatting still requires an exact fixed point and unchanged parsed
+destinations, and retains submitted source on failure. Ignoring Prettier also
+skips this normalization. Preview itself never joins or saves source lines.
 Each preview resolves at most 200 distinct destinations, then reports
 `preview_link_limit`. No request scans the wiki for link candidates.
 

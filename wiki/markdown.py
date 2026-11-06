@@ -1,5 +1,6 @@
 """Independent CommonMark/GFM preview. Never serialize HTML back into source."""
 from html import escape
+from functools import partial
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlsplit
 
@@ -45,17 +46,26 @@ def _resolve(env, target, kind):
     return result
 
 
-def _wiki_rule(state, silent):
+def _wiki_rule(state, silent, *, wrapped_aliases=False):
     # Runs in the inline parser: fences, code spans and backslash escapes have
     # already consumed their own syntax. Never search/replace the source string.
     if state.linkLevel or not state.src.startswith("[[", state.pos):
         return False
     end = state.src.find("]]", state.pos + 2, state.posMax)
-    if end == -1 or "\n" in state.src[state.pos + 2:end]:
+    if end == -1:
         return False
+    content = state.src[state.pos + 2:end]
+    if "\n" in content:
+        target, pipe, label = content.partition("|")
+        # Formatting's preservation check recognizes the same bounded wrapped
+        # aliases as the helper. Ordinary previews retain single-line grammar.
+        if (not wrapped_aliases or end + 2 - state.pos > 8192
+                or not target or not pipe or "\n" not in label
+                or any(char in target for char in "\n[]")):
+            return False
     if not silent:
         token = state.push("wiki_link", "", 0)
-        token.content = state.src[state.pos + 2:end]
+        token.content = content
     state.pos = end + 2
     return True
 
@@ -136,7 +146,7 @@ def _literal_html_render(self, tokens, index, options, env):
     return escape(tokens[index].content)
 
 
-def _parser():
+def _parser(*, wrapped_wiki_aliases=False):
     # HTML grammar is structural only. Source HTML is immediately converted to
     # escaped literal tokens; app-generated task checkboxes retain their own
     # existing renderer. This does not admit ordinary raw HTML to the output.
@@ -144,7 +154,8 @@ def _parser():
     parser.inline.ruler.at("html_inline", _literal_html_inline)
     parser.block.ruler.at("html_block", _literal_html_block)
     parser.add_render_rule("backstory_literal_html", _literal_html_render)
-    parser.inline.ruler.before("link", "wiki_link", _wiki_rule)
+    wiki_rule = partial(_wiki_rule, wrapped_aliases=True) if wrapped_wiki_aliases else _wiki_rule
+    parser.inline.ruler.before("link", "wiki_link", wiki_rule)
     parser.add_render_rule("wiki_link", _wiki_render)
     parser.add_render_rule("image", _image_render)
     install_math(parser)

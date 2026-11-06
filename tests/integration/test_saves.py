@@ -49,6 +49,33 @@ def test_two_editors_get_412(reader, wiki):
     assert (wiki / "note.md").read_bytes() == b"# First\n"
 
 
+@pytest.mark.parametrize("create", [False, True])
+def test_formatted_wrapped_alias_save_readback_links_and_guards(reader, wiki, create):
+    (wiki / "notes").mkdir()
+    (wiki / "notes/sample.md").write_text("# Part\n")
+    target = wiki / "note.md"
+    original = b"# Original\n"
+    if not create:
+        target.write_bytes(original)
+    draft = "# Index\n\n- [[notes/sample#Part|Sample\n  label]]\n"
+    response = save(reader, draft, None if create else revision(original), create=create)
+    assert response.status_code == 200, response.json()
+    assert response.json()["state"] == "saved"
+    readback = reader.get("/source/note.md")
+    assert readback.status_code == 200
+    source = readback.content.decode()
+    assert "- [[notes/sample#Part|Sample label]]\n" in source
+    assert target.read_bytes() == readback.content
+    preview = reader.get("/preview/note.md")
+    assert preview.status_code == 200
+    assert re.search(r'<a\b[^>]*href="/notes/notes/sample.md#preview-part"[^>]*>Sample label</a>', preview.context["preview"].html)
+    again = save(reader, source, readback["ETag"])
+    assert again.status_code == 200 and again.json()["state"] == "noop"
+    stale = save(reader, "# Stale\n", revision(original))
+    assert stale.status_code == 412
+    assert target.read_bytes() == readback.content
+
+
 @pytest.mark.parametrize("condition", [
     'W/"' + 'a' * 64 + '"', '*', '"short"', '"' + 'a' * 64 + '", "' + 'b' * 64 + '"',
 ])

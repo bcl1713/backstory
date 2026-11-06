@@ -28,6 +28,13 @@ def test_real_helper_formats_draft_and_is_exact_fixed_point(wiki):
     assert (wiki / "note.md").read_text() == "original synthetic"
 
 
+def test_real_helper_keeps_bom_yaml_literal_alias_text(wiki):
+    source = '\ufeff---\ntitle: |\n  [[target|Sample\n  label]]\n---\n\n# Index\n'
+    result = formatter().format_source("note.md", source)
+    assert result.outcome == "ok", result.diagnostics
+    assert result.source == source
+
+
 def test_real_helper_optional_data_configs_overrides_and_editorconfig(wiki):
     (wiki / "folder").mkdir()
     (wiki / "style.yaml").write_text("printWidth: 24\nproseWrap: always\n")
@@ -86,6 +93,12 @@ def test_real_helper_root_gitignore_skips_prettier_independently_of_lint(wiki):
     ("[label](one.md) [[Two|label]] ![image](image.png)", "[label](other.md) [[Two|label]] ![image](image.png)", "link_destination_changed"),
     ("`[fake](one.md)`\n\n```\n[[Fake]]\n```", "`[fake](two.md)`\n\n```\n[[Other]]\n```", None),
     ("[[One|alias]]", "[[Two|alias]]", "link_destination_changed"),
+    ("- [[One#Part|Sample\n  label]]", "- [[One#Part|Sample label]]", None),
+    ("> - [[One|Sample\n>   label]]", "> - [[One|Sample label]]", None),
+    ("- [[One|Sample\n  label]]", "- [[Two|Sample label]]", "link_destination_changed"),
+    ("- [[One|Sample\n  label]]", "- Sample label", "link_destination_changed"),
+    ("\\[[One|Sample\nlabel]]", "[[One|Sample label]]", "link_destination_changed"),
+    ("`[[One|Sample\nlabel]]`", "[[One|Sample label]]", "link_destination_changed"),
     ("[reference][id]\n\n[id]: one.md", "[reference][id]\n\n[id]: two.md", "link_destination_changed"),
 ])
 def test_preservation_compares_typed_yaml_and_syntax_links(before, after, code):

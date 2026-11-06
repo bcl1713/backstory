@@ -207,3 +207,41 @@ test('unchanged Mermaid fence source permits surrounding Markdown formatting and
  const result=helper(source,{'.editorconfig':'root=true\n[*.md]\nend_of_line=crlf\n'});
  assert.equal(result.outcome,'ok');assert.equal(result.source,source.replace('* item','- item').replaceAll('\n','\r\n'));
 });
+
+test('wrapped wikilink aliases format to stable single-line links in list containers', () => {
+  for (const [input, expected] of [
+    ['- [[notes/sample|Sample\n  label]]', '- [[notes/sample|Sample label]]'],
+    ['1. [[notes/sample#part|Sample\n   label]]', '1. [[notes/sample#part|Sample label]]'],
+    ['- parent\n  - [[notes/sample|Sample\n    label]]', '- parent\n  - [[notes/sample|Sample label]]'],
+    ['- [x] [[notes/sample|Sample\n  label]]', '- [x] [[notes/sample|Sample label]]'],
+    ['> - [[notes/sample|Sample\n>   label]]', '> - [[notes/sample|Sample label]]'],
+    ['- [[notes/sample|Sample **bold**\n  label]] and [[notes/other|Other\n  label]]', '- [[notes/sample|Sample **bold** label]] and [[notes/other|Other label]]'],
+    ['- [[notes/foo\\_bar|Sample &amp;  two\n  words]]', '- [[notes/foo\\_bar|Sample &amp;  two words]]'],
+    ['- ![[notes/sample|Sample\n  label]]', '- ![[notes/sample|Sample label]]'],
+    ['- See [draft [[notes/sample|Sample\n  label]] pending].', '- See [draft [[notes/sample|Sample label]] pending].'],
+  ]) {
+    const source = '# Index\n\n' + input + '\n';
+    const result = helper(source, {}, 'index.md');
+    assert.equal(result.outcome, 'ok', JSON.stringify(result));
+    assert.equal(result.source, '# Index\n\n' + expected + '\n');
+    const again = helper(result.source, {}, 'index.md');
+    assert.equal(again.outcome, 'ok');
+    assert.equal(again.source, result.source);
+  }
+});
+
+test('formatting BOM front matter does not join wrapped alias text in literal YAML scalars', () => {
+  const source = '\ufeff---\ntitle: |\n  [[target|Sample\n  label]]\n---\n\n# Index\n';
+  const result = helper(source, {}, 'index.md');
+  assert.equal(result.outcome, 'ok');
+  assert.equal(result.source, source);
+});
+
+test('wrapped aliases retain BOM and configured CRLF and do not wrap long labels again', () => {
+  const source = '\ufeff# Index\r\n\r\n- [[notes/sample|Sample\r\n  long label with more words]]\r\n';
+  const files = { '.prettierrc': '{"printWidth":20,"proseWrap":"always","endOfLine":"crlf"}' };
+  const result = helper(source, files, 'index.md');
+  assert.equal(result.outcome, 'ok');
+  assert.equal(result.source, '\ufeff# Index\r\n\r\n- [[notes/sample|Sample long label with more words]]\r\n');
+  assert.equal(helper(result.source, files, 'index.md').source, result.source);
+});
