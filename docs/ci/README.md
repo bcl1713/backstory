@@ -83,7 +83,13 @@ directory. Independent clones and different machines do not share that lock;
 coordinate one publisher across all of them. Partial image/release publication is possible because registry and GitHub
 operations are not atomic. Fix the cause and retry with a fresh assets directory
 and the same valid receipt only if source is unchanged. Never move/delete a
-published version tag to recover. A newer source requires a new full local pass.
+published version tag to recover. A retry reuses the registry digest only when
+both full version tags agree and both architectures carry the tested source and
+version labels; it never rebuilds or overwrites existing version images. Registry
+lookup errors, conflicting metadata or a single partially pushed tag stop
+publication. For a single missing tag, inspect the existing digest and source
+before restoring only the missing tag from that digest; conflicting tags require
+operator investigation, never an overwrite. A newer source requires a new full local pass.
 
 ## Transition checks
 

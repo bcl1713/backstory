@@ -3,6 +3,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import subprocess
 
 import pytest
 
@@ -74,6 +75,8 @@ def release_fixture(tmp_path, monkeypatch):
             return sha
         if 'scripts/release-version.py' in args:
             return 'version=1.2.3-dev.1.gabc\ntag=v1.2.3-dev.1.gabc\nprevious=v1.2.2'
+        if args[:3] == ['docker', 'buildx', 'imagetools'] and args[3] == 'inspect':
+            raise subprocess.CalledProcessError(1, args, stderr='ERROR: ' + args[4] + ': not found\n')
         return ''
     monkeypatch.setattr(m, 'command', command)
     immutable_files = {name: (root / name).read_text() for name in
@@ -97,7 +100,7 @@ def test_release_builds_immutable_source_and_keeps_dev_publication_scoped(releas
     assert builds[0][0][-1] == '-'
     assert '--platform' in builds[0][0]
     assert 'linux/amd64,linux/arm64' in builds[0][0]
-    promote = next(args for args in commands if args[:3] == ['docker', 'buildx', 'imagetools'])
+    promote = next(args for args in commands if args[:4] == ['docker', 'buildx', 'imagetools', 'create'])
     assert promote[-3:] == ['--tag', 'ghcr.io/bcl1713/backstory:dev', 'ghcr.io/bcl1713/backstory@sha256:' + 'c' * 64]
     publish = commands[-1]
     assert publish[:3] == ['gh', 'release', 'edit']
@@ -121,7 +124,7 @@ def test_build_failure_never_moves_aliases_or_creates_release(release_fixture, m
     monkeypatch.setattr(m.subprocess, 'run', fail)
     with pytest.raises(RuntimeError):
         m.publish(receipt, 'dev', assets)
-    assert not any(args[0] == 'docker' or args[:2] == ['gh', 'release'] for args in commands)
+    assert not any(args[:4] == ['docker', 'buildx', 'imagetools', 'create'] or args[:2] == ['gh', 'release'] for args in commands)
 
 
 def test_github_release_commands_are_pinned_to_public_github(release_fixture):
@@ -132,3 +135,60 @@ def test_github_release_commands_are_pinned_to_public_github(release_fixture):
             assert args[args.index('--hostname') + 1] == 'github.com'
         if args[:2] == ['gh', 'release']:
             assert args[args.index('--repo') + 1] == 'github.com/bcl1713/backstory'
+
+
+def registry_metadata(digest='c', revision='a' * 40):
+    return json.dumps({
+        'manifest': {'digest': 'sha256:' + digest * 64},
+        'image': {platform: {'os': 'linux', 'architecture': platform.split('/')[1],
+                            'config': {'Labels': {
+                                'org.opencontainers.image.source': 'https://github.com/bcl1713/backstory',
+                                'org.opencontainers.image.revision': revision,
+                                'org.opencontainers.image.version': '1.2.3-dev.1.gabc'}}}
+                  for platform in ('linux/amd64', 'linux/arm64')},
+    })
+
+
+def test_retry_after_github_failure_reuses_pushed_digest_without_rebuilding(release_fixture, monkeypatch):
+    m, receipt, assets, commands, builds = release_fixture
+    original = m.command
+    pushed = False
+    def command(args, **kwargs):
+        if args[:4] == ['docker', 'buildx', 'imagetools', 'inspect'] and pushed:
+            return registry_metadata()
+        if args[:3] == ['gh', 'release', 'create'] and not pushed:
+            raise RuntimeError('GitHub unavailable after image push')
+        return original(args, **kwargs)
+    monkeypatch.setattr(m, 'command', command)
+    with pytest.raises(RuntimeError, match='GitHub unavailable'):
+        m.publish(receipt, 'dev', assets)
+    assert len(builds) == 1
+    pushed = True
+    recovered = assets.with_name('recovered')
+    m.publish(receipt, 'dev', recovered)
+    assert len(builds) == 1
+    assert 'sha256:' + 'c' * 64 in (recovered / 'release-notes.md').read_text()
+
+
+@pytest.mark.parametrize('problem', ['different-digests', 'wrong-source', 'missing-platform', 'partial-tags', 'registry-error'])
+def test_existing_image_conflicts_or_lookup_errors_block_all_publication(release_fixture, monkeypatch, problem):
+    m, receipt, assets, commands, builds = release_fixture
+    original = m.command
+    def command(args, **kwargs):
+        if args[:4] == ['docker', 'buildx', 'imagetools', 'inspect']:
+            if problem == 'registry-error':
+                raise subprocess.CalledProcessError(1, args, stderr='ERROR: registry unavailable')
+            if problem == 'partial-tags' and args[4].endswith(':v1.2.3-dev.1.gabc'):
+                return original(args, **kwargs)
+            data = json.loads(registry_metadata(
+                digest='d' if problem == 'different-digests' and args[4].endswith(':v1.2.3-dev.1.gabc') else 'c',
+                revision='b' * 40 if problem == 'wrong-source' else 'a' * 40))
+            if problem == 'missing-platform':
+                del data['image']['linux/arm64']
+            return json.dumps(data)
+        return original(args, **kwargs)
+    monkeypatch.setattr(m, 'command', command)
+    with pytest.raises((ValueError, subprocess.CalledProcessError)):
+        m.publish(receipt, 'dev', assets)
+    assert builds == []
+    assert not any(args[:4] == ['docker', 'buildx', 'imagetools', 'create'] or args[:2] == ['gh', 'release'] for args in commands)

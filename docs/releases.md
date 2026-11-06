@@ -78,5 +78,8 @@ commit rather than borrowing an earlier receipt.
 Image publication and GitHub release publication are separate operations. A
 partial failure can leave pinned image tags or a draft release. Fix the cause,
 verify the source is unchanged, and retry with a fresh assets directory. Published
-releases are not silently modified. Never move/delete published version tags.
+releases are not silently modified. Retries reuse matching existing version image
+digests after verifying source/version labels and both platforms. Incomplete or
+conflicting version tags and registry lookup failures block publication; follow
+the runbook to investigate without overwriting an image. Never move/delete published version tags.
 No retry may re-enable or invoke GitHub-hosted workflows.

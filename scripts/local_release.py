@@ -51,6 +51,38 @@ def release_state(tag):
     return state
 
 
+def existing_image(version, tag, sha):
+    """Resume a partial release only when both immutable tags agree."""
+    digests = []
+    for name in (version, tag):
+        reference = IMAGE + ':' + name
+        try:
+            output = command(['docker', 'buildx', 'imagetools', 'inspect', reference,
+                              '--format', '{{json .}}'], stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as error:
+            # Auth, transport and other registry errors must never mean absent.
+            if (error.stderr or '').strip() != 'ERROR: ' + reference + ': not found':
+                raise
+            digests.append(None)
+            continue
+        data = json.loads(output)
+        digest = validate_digest(data.get('manifest', {}).get('digest'))
+        images = data.get('image', {})
+        if set(images) != {'linux/amd64', 'linux/arm64'}:
+            raise ValueError('Existing version image must contain both release platforms.')
+        expected = {'org.opencontainers.image.source': 'https://github.com/' + REPOSITORY,
+                    'org.opencontainers.image.revision': sha,
+                    'org.opencontainers.image.version': version}
+        for image in images.values():
+            labels = image.get('config', {}).get('Labels', {})
+            if any(labels.get(key) != value for key, value in expected.items()):
+                raise ValueError('Existing version image does not match the tested source/version.')
+        digests.append(digest)
+    if digests[0] != digests[1]:
+        raise ValueError('Version image tags are incomplete or disagree; inspect and recover without overwriting them.')
+    return digests[0]
+
+
 def write_assets(directory, version, tag, digest, sha, channel):
     def tested_file(path):
         return subprocess.check_output(['git', 'show', sha + ':' + path], cwd=ROOT, text=True)
@@ -94,6 +126,7 @@ def publish(receipt_path, channel, assets):
     if release_state(tag) == 'published':
         print('Release already published: ' + tag)
         return
+    digest = existing_image(version, tag, sha)
     assets = Path(assets).resolve()
     if assets == ROOT or ROOT in assets.parents:
         raise ValueError('Release assets must be outside the source checkout.')
@@ -107,8 +140,11 @@ def publish(receipt_path, channel, assets):
              '--label', 'org.opencontainers.image.revision=' + sha,
              '--label', 'org.opencontainers.image.version=' + version,
              '--tag', IMAGE + ':' + version, '--tag', IMAGE + ':' + tag, '-']
-    subprocess.run(build, cwd=ROOT, input=context, check=True)
-    digest = validate_digest(json.loads(metadata.read_text()).get('containerimage.digest'))
+    if digest is None:
+        subprocess.run(build, cwd=ROOT, input=context, check=True)
+        digest = validate_digest(json.loads(metadata.read_text()).get('containerimage.digest'))
+    else:
+        metadata.write_text(json.dumps({'containerimage.digest': digest, 'reused': True}, indent=2) + '\n')
     # Do not overwrite aliases if a newer release/source arrived during the build.
     assert_remote_head(branch, sha)
     if source_identity(ROOT) != (sha, tree):
