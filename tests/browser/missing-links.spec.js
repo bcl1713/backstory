@@ -4,7 +4,7 @@ import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { runtime } from './support/server.js';
 
-const source = '# Link source\n\n[[CreateLinks/New#Details|Create target]]\n\n[[CreateShared|Choose target]]\n';
+const source = '# Link source\n\n[[CreateLinks/New#Details|Create target]]\n\n[[CreateShared|Choose target]]\n\n[[ Leading space|Literal label]]\n';
 const editor = page => page.locator('[data-markdown-editor]');
 const read = page => editor(page).evaluate(el => el.markdownEditor.getSource());
 const missing = page => page.locator('.lp-link-missing').filter({ hasText: 'Create target' });
@@ -36,6 +36,8 @@ test.beforeEach(async () => {
   await mkdir(`${runtime}/wiki/CreateLinks`, { recursive: true });
   await writeFile(`${runtime}/wiki/CreateSource.md`, source);
   await rm(`${runtime}/wiki/CreateLinks/New.md`, { force: true });
+  await rm(`${runtime}/wiki/ Leading space.md`, { force: true });
+  await rm(`${runtime}/wiki/Leading space.md`, { force: true });
   for (const folder of ['CreateA', 'CreateB']) {
     await mkdir(`${runtime}/wiki/${folder}`, { recursive: true });
     await writeFile(`${runtime}/wiki/${folder}/Target.md`, '---\naliases: [CreateShared]\n---\n# Target\n');
@@ -185,11 +187,8 @@ test('creation immediately resolves links within the newly saved editor', async 
 
 
 test('linked creation preserves literal whitespace in the offered filename', async ({ page }) => {
-  await rm(`${runtime}/wiki/ Leading space.md`, { force: true });
-  await rm(`${runtime}/wiki/Leading space.md`, { force: true });
-  const original = source + '\n[[ Leading space|Literal label]]\n';
-  await writeFile(`${runtime}/wiki/CreateSource.md`, original);
-  reindex();
+  // The shared fixture includes this link before its single index rebuild.
+  const original = source;
   await open(page);
   await page.getByRole('link', { name: /Literal label.*Create note/ }).click();
   await expect(page.locator('#note-filename')).toHaveValue(' Leading space.md');
