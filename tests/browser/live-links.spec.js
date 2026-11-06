@@ -2,7 +2,7 @@ import { revealChrome } from './support/chrome.js';
 import { waitForEnhancedEditor } from './support/editor-ready.js';
 import { trackRoutes } from './support/controlled-routes.js';
 import { test, expect } from '@playwright/test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { runtime } from './support/server.js';
 
@@ -21,6 +21,7 @@ async function open(page) {
 
 test.beforeAll(async () => {
   await writeFile(`${runtime}/wiki/LiveLinks.md`, source);
+  await writeFile(`${runtime}/wiki/WrappedLinks.md`, '# Original\n');
   for (const folder of ['live-a', 'live-b']) {
     await mkdir(`${runtime}/wiki/${folder}`, { recursive: true });
     await writeFile(`${runtime}/wiki/${folder}/SharedLive.md`, '# Duplicate basename\n');
@@ -113,4 +114,30 @@ test('a delayed old resolution cannot restore a link after its source changes', 
   await expect(page.getByRole('link', { name: 'New label', exact: true })).toHaveAttribute('href', '/notes/Other.md');
   await expect(page.getByRole('link', { name: 'Wiki alias', exact: true })).toHaveCount(0);
   expect(await read(page)).toBe(changed);
+});
+
+test('explicit Save joins a wrapped alias and preserves its live and server-preview destination', async ({ page }) => {
+  await open(page);
+  await page.goto('/notes/WrappedLinks.md');
+  await waitForEnhancedEditor(page);
+  const draft = '# Wrapped links\n\n- [[Other#Details|Sample\n  label]]\n';
+  const formatted = '# Wrapped links\n\n- [[Other#Details|Sample label]]\n';
+  await editor(page).evaluate((el, value) => el.markdownEditor.setSource(value), draft);
+  await revealChrome(page);
+  const response = page.waitForResponse(r => r.url().endsWith('/save/WrappedLinks.md') && r.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  expect((await response).status()).toBe(200);
+  await expect.poll(() => read(page)).toBe(formatted);
+  expect(await readFile(`${runtime}/wiki/WrappedLinks.md`, 'utf8')).toBe(formatted);
+  await select(page, 0);
+  await expect(editor(page).getByRole('link', { name: 'Sample label', exact: true })).toHaveAttribute('href', '/notes/Other.md#preview-details');
+  await page.reload();
+  await waitForEnhancedEditor(page);
+  expect(await read(page)).toBe(formatted);
+  await expect(editor(page).getByRole('link', { name: 'Sample label', exact: true })).toBeVisible();
+  await page.goto('/preview/WrappedLinks.md');
+  const link = page.getByRole('link', { name: 'Sample label', exact: true });
+  await expect(link).toHaveAttribute('href', '/notes/Other.md#preview-details');
+  await link.click();
+  await expect(page).toHaveURL(/\/notes\/Other.md#preview-details$/);
 });

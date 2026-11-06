@@ -239,7 +239,7 @@ def _run_helper(payload):
 
 def _destinations(body):
     from .markdown import _parser
-    parser = _parser()
+    parser = _parser(wrapped_wiki_aliases=True)
     parser.validateLink = lambda value: True
     env = {}
     tokens = parser.parse(body, env)

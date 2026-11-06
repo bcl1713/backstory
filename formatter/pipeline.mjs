@@ -7,6 +7,7 @@ import { main as markdownlint } from 'markdownlint-cli2';
 import { LIMITS, ConfigError, relativePath, resolveConfiguration } from './config.mjs';
 import { diagramSources } from '../static/src/diagram-syntax.js';
 import { mathSources } from '../static/src/math-syntax.js';
+import { normalizeWrappedWikiAliases } from './wikilinks.mjs';
 
 export class FormatError extends Error {
   constructor(code,message,line,column) { super(message); Object.assign(this,{code,line,column}); }
@@ -73,7 +74,9 @@ export async function formatRequest(request, {scratchDirectory} = {}) {
     const bom = original.startsWith('\ufeff');
     async function prettierPass(source) {
       if (config.prettierSkipped) return source;
-      try { return boundedSource(await prettier.format(source,{...config.prettier,filepath:staged,parser:'markdown'})); }
+      const normalized = normalizeWrappedWikiAliases(source);
+      if (normalized === null) throw new FormatError('format-wikilink-source', 'Formatting could not verify wrapped wikilink aliases within the safety budget. Original source retained.');
+      try { return boundedSource(await prettier.format(normalized,{...config.prettier,filepath:staged,parser:'markdown'})); }
       catch (error) {
         if (error instanceof FormatError) throw error;
         throw new FormatError('format-parse','Prettier could not parse the submitted Markdown.',error.loc?.start?.line,error.loc?.start?.column);
