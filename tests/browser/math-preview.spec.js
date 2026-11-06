@@ -79,6 +79,7 @@ test('code and currency do not load the renderer; delayed import cannot revive s
   await host(page).evaluate(el => el.markdownEditor.setSource('Replacement\n\nNo math.'));
   await select(page, 3);
   release();
+  await page.unrouteAll({ behavior: 'wait' });
   await expect(host(page).locator('.lp-math')).toHaveCount(0);
   expect(await read(page)).toBe('Replacement\n\nNo math.');
   expect(await host(page).evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(3);

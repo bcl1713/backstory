@@ -169,6 +169,7 @@ test('focus refresh ignores a late missing result from before creation', async (
   const link = page.getByRole('link', { name: 'Create target', exact: true });
   await expect(link).toHaveAttribute('href', '/notes/CreateLinks/New.md#preview-details');
   release();
+  await page.unrouteAll({ behavior: 'wait' });
   await expect(link).toHaveAttribute('href', '/notes/CreateLinks/New.md#preview-details');
   expect(await read(page)).toBe(source);
 });

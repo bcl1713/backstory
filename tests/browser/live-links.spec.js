@@ -108,6 +108,7 @@ test('a delayed old resolution cannot restore a link after its source changes', 
   const changed = '# Cursor\n\n[[Other|New label]]\n';
   await editor(page).evaluate((el, value) => el.markdownEditor.setSource(value), changed);
   release();
+  await page.unrouteAll({ behavior: 'wait' });
   await expect(page.getByRole('link', { name: 'New label', exact: true })).toHaveAttribute('href', '/notes/Other.md');
   await expect(page.getByRole('link', { name: 'Wiki alias', exact: true })).toHaveCount(0);
   expect(await read(page)).toBe(changed);
