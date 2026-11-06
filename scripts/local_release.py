@@ -136,6 +136,7 @@ def publish(receipt_path, channel, assets):
     context = subprocess.check_output(['git', 'archive', '--format=tar', sha], cwd=ROOT)
     build = ['docker', 'buildx', 'build', '--platform', 'linux/amd64,linux/arm64', '--push',
              '--metadata-file', str(metadata), '--build-arg', 'BACKSTORY_VERSION=' + version,
+             '--build-arg', 'BACKSTORY_REVISION=' + sha,
              '--label', 'org.opencontainers.image.source=https://github.com/' + REPOSITORY,
              '--label', 'org.opencontainers.image.revision=' + sha,
              '--label', 'org.opencontainers.image.version=' + version,

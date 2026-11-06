@@ -524,3 +524,45 @@ def test_math_source_drift_uses_existing_explicit_recovery_without_silent_rewrit
     assert recovered.status_code == 200
     assert recovered.json()["state"] == "saved_source"
     assert target.read_bytes() == draft.encode()
+
+
+@pytest.mark.parametrize('create', [True, False])
+def test_formatter_timeout_retains_recovery_and_never_publishes(reader, wiki, monkeypatch, create):
+    import sys
+    f = importlib.import_module('wiki.formatting')
+    monkeypatch.setattr(f, '_HELPER_COMMAND', (sys.executable, '-c', 'import time; time.sleep(5)'))
+    monkeypatch.setattr(f, '_TIMEOUT', 0.1)
+    original = b'# Original\n'
+    if not create:
+        (wiki / 'note.md').write_bytes(original)
+    draft = '# Synthetic draft\n\n' + '- A synthetic item with [a link](example.md).\n' * 85
+    response = save(reader, draft, None if create else revision(original), create=create)
+    assert response.status_code == 422
+    data = response.json()
+    assert data['source'] == draft and data['recovery_token']
+    assert any(d['code'] == 'formatter_timeout' for d in data['diagnostics'])
+    if create:
+        assert not (wiki / 'note.md').exists()
+        assert reader.get('/source/note.md').status_code == 404
+    else:
+        assert (wiki / 'note.md').read_bytes() == original
+        assert reader.get('/source/note.md').content == original
+
+
+@pytest.mark.parametrize('create', [True, False])
+def test_modest_synthetic_formatted_save_has_authoritative_readback(reader, wiki, create):
+    from wiki.storage import read_note
+    original = b'# Original\n'
+    if not create:
+        (wiki / 'note.md').write_bytes(original)
+    draft = '---\ntitle: Synthetic timeout investigation\n---\n\n# Synthetic\n\n' + '- A synthetic item with [a link](example.md).\n' * 85
+    response = save(reader, draft, None if create else revision(original), create=create)
+    assert response.status_code == 200, response.json()
+    readback = read_note('note.md')
+    assert readback.source == response.json()['source']
+    assert readback.revision == response.json()['revision']
+    assert reader.get('/source/note.md').content == (wiki / 'note.md').read_bytes()
+    # Retry the stored create metadata too; existing saves do not recreate it.
+    again = save(reader, readback.source if create else draft, readback.revision)
+    assert again.status_code == 200
+    assert read_note('note.md').source == readback.source

@@ -249,3 +249,13 @@ if BACKSTORY_WIKI_TIMEZONE:
         ZoneInfo(BACKSTORY_WIKI_TIMEZONE)
     except (ValueError, ZoneInfoNotFoundError):
         raise ImproperlyConfigured("BACKSTORY_WIKI_TIMEZONE must be an IANA timezone, for example America/Chicago") from None
+
+# Formatter evidence has its own allowlisted schema. Request logs stay redacted.
+LOGGING['filters']['format_diagnostic'] = {'()': 'wiki.format_diagnostics.RedactFormatDiagnostic'}
+LOGGING['handlers']['format_diagnostic'] = {
+    'class': 'logging.StreamHandler', 'filters': ['format_diagnostic'],
+}
+LOGGING['loggers']['backstory.format'] = {
+    'handlers': ['format_diagnostic'], 'filters': ['format_diagnostic'],
+    'propagate': False, 'level': 'INFO',
+}

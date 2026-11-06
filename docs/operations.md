@@ -283,3 +283,52 @@ stay outside it. Pending work still prevents publication, and ordinary lock
 contention still follows the existing timeout and bounded worker backoff. A busy
 worker resets scan progress for a fresh pass while retaining previously indexed
 rows; zero progress counters do not indicate deleted notes or an empty index.
+
+## Formatter timeout evidence
+
+A formatter failure retains the submitted draft and prevents publication. Use
+explicit draft recovery only after reviewing the failure; never automatically
+replay a write. Direct note/source reads verify publication independently of
+index state.
+
+The `backstory.format` logger emits one source-free JSON event per helper call.
+Keep deployment logs under the normal bounded retention/rotation policy. Events
+contain `source_bytes` (UTF-8 bytes actually sent to the helper, including prepared
+save metadata), total helper `elapsed_ms`, helper `outcome`, `timeout_origin`
+(`python`, `node`, `none`), build `revision`/`version`, and at most 64 progress
+markers. They omit bodies, paths, configuration, raw stderr, exception details
+and credentials. Logging failure cannot turn a successful helper into a failed save.
+Helper outcome describes formatting, not publication or subsequent preservation
+checks. No per-note identifiers or source hashes are logged.
+
+Each trace marker records a fixed `stage` and elapsed milliseconds since Node
+process startup. Differences between consecutive offsets locate time in startup,
+module import, configuration, source preservation parsing, each of the two
+Prettier/lint passes, candidate verification, worker termination/scratch cleanup,
+and output. The first offset includes Node's initial module loading. A marker
+names the operation about to start; its duration ends at the next marker. Python's
+total starts before scratch/input setup and includes process launch and cleanup.
+If Python kills the process, its event still retains the last received markers.
+`worker_timeout` records Node's budget expiration even if Python's independent
+deadline wins during cleanup. Both ten-second deadlines remain unchanged.
+
+Published images embed the tested SHA and release version through
+`BACKSTORY_BUILD_REVISION` and `BACKSTORY_BUILD_VERSION`. These are internal log
+selectors, not new health/API fields. Native/local image builds without the
+release arguments report `unknown` revision; do not identify a deployment from a
+working checkout's head. Overrides must retain the actual image identity.
+
+Run the generated-data probe from an identified checkout with pinned Node:
+
+```sh
+python3 scripts/probe_formatter.py --report /tmp/new-formatter-probe.json
+```
+
+It never reads wiki data or production configuration. It measures identical
+retries across prose/list/structured notes from roughly 1–64 KB, module-cold
+helpers versus repeated warm pipeline calls, and four-way helper load. Evidence
+records the checkout SHA, dirty flag, Node version, byte count and stage timings.
+Warm calls are a measurement only; production still uses an isolated process per
+request. This probe does not establish deployment health or reproduce an unknown
+private draft. Save-path tests separately cover New Note/existing-note readback,
+failure recovery and no publication.
