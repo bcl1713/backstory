@@ -84,9 +84,12 @@ for (const mode of ['live','source']) test(`${mode}: shared history requires exp
   const historical = Buffer.from('\ufeff\ufeff# History\r\n');
   await writeFile(target,historical);
   await login(page);
+  await expect(page.locator('[data-editor-stage]')).toHaveAttribute('data-editor-state', 'ready');
+  await expect(page.locator('.cm-content')).toBeVisible();
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+a');
   await page.keyboard.insertText('# Changed\n');
+  expect(await source(page)).toBe('# Changed\r\n');
   expect((await action(page,'Save')).status()).toBe(200);
   await page.goto('/history/Recovery.md');
   await page.getByRole('link',{name:'Open original for comparison and explicit restoration'}).first().click();

@@ -13,6 +13,7 @@ export function mathModels(state) {
   return mathModelsFromTree(syntaxTree(state), (from, to) => state.doc.sliceString(from, to));
 }
 export const revealMathMotion = StateEffect.define();
+const refreshMathGeometry = StateEffect.define();
 export const mathMotionRange = StateField.define({
   create: () => null,
   update(value, transaction) {
@@ -26,8 +27,10 @@ export function mathIsActive(state, model) {
     || state.selection.ranges.some(range => range.from <= state.doc.lineAt(model.to).to && range.to >= state.doc.lineAt(model.from).from);
 }
 class MathWidget extends WidgetType {
-  constructor(model) { super(); this.model = model; }
-  eq(other) { return this.model.source === other.model.source && this.model.from === other.model.from; }
+  constructor(model, geometry = 0) { super(); this.model = model; this.geometry = geometry; }
+  sameModel(other) { return this.model.source === other.model.source && this.model.from === other.model.from; }
+  eq(other) { return this.sameModel(other) && this.geometry === other.geometry; }
+  updateDOM(dom, view, previous) { return this.sameModel(previous); }
   toDOM(view) {
     const doc = view.dom.ownerDocument;
     const wrapper = doc.createElement(this.model.display ? 'div' : 'span');
@@ -41,15 +44,26 @@ class MathWidget extends WidgetType {
     const valid = () => !wrapper.mathDisposed && wrapper.isConnected && view.state.doc.sliceString(this.model.from, this.model.to) === this.model.source && !mathIsActive(view.state, this.model);
     bindSourceEdit(wrapper, { label: 'Edit math source', valid,
       activate: () => { view.dispatch({ selection: { anchor: this.model.from }, scrollIntoView: true }); view.focus(); } });
-    mountMath(output, this.model, valid, () => { if (valid()) view.requestMeasure(); });
+    mountMath(output, this.model, valid, () => {
+      // Scheduling alone can retain stale line heights when the editor's
+      // minimum height hides the widget's size change. Updating its decoration
+      // makes CodeMirror measure the rendered DOM without mounting math again.
+      if (valid()) view.dispatch({ effects: refreshMathGeometry.of(this.model) });
+    });
     return wrapper;
   }
   destroy(dom) { dom.mathDisposed = true; }
   ignoreEvent() { return true; }
 }
-export function mathDecorations(state) {
-  return Decoration.set(mathModels(state).filter(model => !mathIsActive(state, model)).map(model =>
-    Decoration.replace({ block: model.display, widget: new MathWidget(model) }).range(model.from, model.to)), true);
+export function mathDecorations(state, previous = Decoration.none, refreshed = []) {
+  const widgets = new Map();
+  previous.between(0, state.doc.length, (from, to, decoration) => { widgets.set(from, decoration.spec.widget); });
+  return Decoration.set(mathModels(state).filter(model => !mathIsActive(state, model)).map(model => {
+    const old = widgets.get(model.from);
+    let geometry = old?.model.source === model.source ? old.geometry : 0;
+    if (refreshed.some(value => value.from === model.from && value.source === model.source)) geometry++;
+    return Decoration.replace({ block: model.display, widget: new MathWidget(model, geometry) }).range(model.from, model.to);
+  }), true);
 }
 const mathKeyboard = ViewPlugin.fromClass(class {
   constructor() { this.generation = 0; this.destroyed = false; }
@@ -69,10 +83,11 @@ const mathKeyboard = ViewPlugin.fromClass(class {
   queueMicrotask(() => { if (!this.destroyed && this.generation === generation) view.dispatch({ effects: revealMathMotion.of(null) }); });
 } } });
 export const mathPreview = StateField.define({
-  create: mathDecorations,
+  create: state => mathDecorations(state),
   update(value, transaction) {
-    return transaction.docChanged || transaction.selection || transaction.effects.some(effect => effect.is(revealMathMotion)) || syntaxTree(transaction.startState) !== syntaxTree(transaction.state)
-      ? mathDecorations(transaction.state) : value;
+    const refreshed = transaction.effects.filter(effect => effect.is(refreshMathGeometry)).map(effect => effect.value);
+    return transaction.docChanged || transaction.selection || refreshed.length || transaction.effects.some(effect => effect.is(revealMathMotion)) || syntaxTree(transaction.startState) !== syntaxTree(transaction.state)
+      ? mathDecorations(transaction.state, value, refreshed) : value;
   },
   provide: field => [mathMotionRange, mathKeyboard, EditorView.decorations.from(field)],
 });
