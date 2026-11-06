@@ -55,13 +55,14 @@ function noteOnlyFS(file) {
     return target[key];
   }});
 }
-export async function formatRequest(request, {scratchDirectory} = {}) {
+export async function formatRequest(request, {scratchDirectory, reportStage = () => {}} = {}) {
   const original = typeof request?.source === 'string' ? request.source : '';
   let scratch;
   try {
     if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).some(k=>!['path','source','files'].includes(k)) || typeof request.source !== 'string') throw new FormatError('format-input','Expected path, UTF-8 source and approved configuration snapshot.');
     relativePath(request.path);
     if (!/\.md$/i.test(request.path) || Buffer.byteLength(original) > LIMITS.source) throw new FormatError('format-input','Expected one Markdown note within the 2 MiB source limit.');
+    reportStage('configuration');
     const config = resolveConfiguration(request.path,request.files ?? {});
     const skipped = [];
     if (config.prettierSkipped) skipped.push({code:'prettier-skipped',message:'Prettier skipped this note according to its approved ignore rules.',severity:'info'});
@@ -72,10 +73,12 @@ export async function formatRequest(request, {scratchDirectory} = {}) {
     await mkdir(path.dirname(staged),{recursive:true,mode:0o700});
     const adapter = noteOnlyFS(staged);
     const bom = original.startsWith('\ufeff');
-    async function prettierPass(source) {
+    async function prettierPass(source, prefix, check = false) {
       if (config.prettierSkipped) return source;
+      reportStage(prefix + (check ? '_wikilinks_check' : '_wikilinks'));
       const normalized = normalizeWrappedWikiAliases(source);
       if (normalized === null) throw new FormatError('format-wikilink-source', 'Formatting could not verify wrapped wikilink aliases within the safety budget. Original source retained.');
+      reportStage(prefix + (check ? '_prettier_check' : '_prettier'));
       try { return boundedSource(await prettier.format(normalized,{...config.prettier,filepath:staged,parser:'markdown'})); }
       catch (error) {
         if (error instanceof FormatError) throw error;
@@ -99,28 +102,36 @@ export async function formatRequest(request, {scratchDirectory} = {}) {
       if (logFailed || code > 1) throw new FormatError('format-lint','markdownlint could not safely process the staged note.');
       return diagnostics;
     }
+    reportStage('source_math');
     const originalMath = mathSources(original);
     if (originalMath === null) throw new FormatError('format-math-source', 'Formatting could not verify all mathematical source within the safety budget. Original source retained.');
+    reportStage('source_diagrams');
     const originalDiagrams = diagramSources(original);
     if (originalDiagrams === null) throw new FormatError('format-mermaid-source', 'Formatting could not verify all Mermaid source within the safety budget. Original source retained.');
+    let pass = 0;
     const result = await requireFixedPoint(original, async source => {
-      let formatted = await prettierPass(source);
+      const prefix = 'pass' + ++pass;
+      let formatted = await prettierPass(source, prefix);
       await writeFile(staged,formatted,{encoding:'utf8',mode:0o600});
       if (!config.lintSkipped) {
+        reportStage(prefix + '_lint_fix');
         await lintPass(true);
         if ((await stat(staged)).size > LIMITS.output) throw new FormatError('format-output-limit','Formatter output exceeded the 8 MiB limit.');
         formatted = boundedSource(await readFile(staged,'utf8'));
       }
-      formatted = await prettierPass(formatted);
+      formatted = await prettierPass(formatted, prefix, true);
       // Preserve existing BOM even when a tool strips it.
       formatted = (bom ? '\ufeff' : '') + formatted.replace(/^\ufeff/,'');
       await writeFile(staged,formatted,'utf8');
+      if (!config.lintSkipped) reportStage(prefix + '_lint_check');
       const diagnostics = config.lintSkipped ? [] : await lintPass(false);
       return {source:formatted,diagnostics:[...skipped,...diagnostics]};
     });
+    reportStage('candidate_math');
     const candidateMath = mathSources(result.source);
     if (candidateMath === null) throw new FormatError('format-math-source', 'Formatting could not verify all mathematical source within the safety budget. Original source retained.');
     if (JSON.stringify(candidateMath) !== JSON.stringify(originalMath)) throw new FormatError('format-math-source', 'Formatting would change mathematical source. Original source retained; format the surrounding blocks instead.');
+    reportStage('candidate_diagrams');
     const candidateDiagrams = diagramSources(result.source);
     if (candidateDiagrams === null || JSON.stringify(candidateDiagrams) !== JSON.stringify(originalDiagrams)) throw new FormatError('format-mermaid-source', 'Formatting would change Mermaid source or could not verify it within the safety budget. Original source retained.');
     return {...result,outcome:'ok'};

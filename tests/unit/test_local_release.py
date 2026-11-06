@@ -192,3 +192,11 @@ def test_existing_image_conflicts_or_lookup_errors_block_all_publication(release
         m.publish(receipt, 'dev', assets)
     assert builds == []
     assert not any(args[:4] == ['docker', 'buildx', 'imagetools', 'create'] or args[:2] == ['gh', 'release'] for args in commands)
+
+
+def test_image_internal_identity_uses_the_exact_tested_commit(release_fixture):
+    m, receipt, assets, commands, builds = release_fixture
+    m.publish(receipt, 'dev', assets)
+    command = builds[0][0]
+    assert 'BACKSTORY_REVISION=' + 'a' * 40 in command
+    assert 'BACKSTORY_VERSION=1.2.3-dev.1.gabc' in command

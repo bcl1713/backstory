@@ -340,3 +340,118 @@ def test_format_http_validates_size_json_and_readiness(reader, wiki, settings):
     assert reader.post("/format/note.md", data=json.dumps({"source":"long synthetic"}), content_type="application/json").status_code == 413
     (wiki / ".backstory-marker").unlink()
     assert reader.post("/format/note.md", data='{"source":"draft"}', content_type="application/json").status_code == 503
+
+
+def test_helper_progress_and_identity_are_source_free(wiki, monkeypatch):
+    from wiki import format_diagnostics as evidence
+    events = []
+    monkeypatch.setattr(evidence.logger, 'info', lambda *args, **kwargs: events.append(kwargs['extra']['format_event']))
+    monkeypatch.setenv('BACKSTORY_BUILD_REVISION', 'a' * 40)
+    monkeypatch.setenv('BACKSTORY_BUILD_VERSION', '1.4.0-dev.1.gaaaaaaaaaaaa')
+    source = '# Confidential synthetic title\n\n* ordinary synthetic draft\n'
+    result = formatter().format_source('private-name.md', source)
+    assert result.outcome == 'ok'
+    assert len(events) == 1
+    event = events[0]
+    assert event['source_bytes'] == len(source.encode('utf-8'))
+    assert event['revision'] == 'a' * 40
+    assert event['version'] == '1.4.0-dev.1.gaaaaaaaaaaaa'
+    assert event['timeout_origin'] == 'none'
+    assert event['outcome'] == 'ok'
+    stages = [item['stage'] for item in event['trace']]
+    assert stages[:3] == ['input', 'worker_start', 'module_import']
+    assert 'pass1_lint_fix' in stages and 'pass2_lint_check' in stages
+    assert stages[-2:] == ['cleanup', 'output']
+    assert 'Confidential' not in json.dumps(event) and 'private-name' not in json.dumps(event)
+    offsets = [item['elapsed_ms'] for item in event['trace']]
+    assert offsets == sorted(offsets)
+    assert all(type(n) is int and 0 <= n <= 60000 for n in offsets)
+
+
+def test_timeout_retains_last_safe_stage_without_logging_raw_stderr(wiki, monkeypatch, settings):
+    from wiki import format_diagnostics as evidence
+    events = []
+    monkeypatch.setattr(evidence.logger, 'info', lambda *args, **kwargs: events.append(kwargs['extra']['format_event']))
+    program = (
+        "import os,time; "
+        "os.write(2,b'private raw stderr\\n'); "
+        "os.write(2,b'backstory-format:{\"stage\":\"pass1_prettier\",\"elapsed_ms\":1}\\n'); "
+        "time.sleep(5)"
+    )
+    f = formatter()
+    monkeypatch.setattr(f, '_HELPER_COMMAND', (sys.executable, '-c', program))
+    monkeypatch.setattr(f, '_TIMEOUT', 0.2)
+    source = '# Private draft\n'
+    result = f.format_source('private-name.md', source)
+    assert result.source == source and result.outcome == 'failed'
+    assert result.diagnostics[0].code == 'formatter_timeout'
+    assert events[0]['timeout_origin'] == 'python'
+    assert events[0]['trace'][-1]['stage'] == 'pass1_prettier'
+    assert 'private' not in json.dumps(events).lower()
+    assert not list(settings.BACKSTORY_DATA_DIR.glob('formatter-*'))
+
+
+def test_stderr_flood_and_broken_evidence_sink_do_not_break_success(wiki, monkeypatch):
+    from wiki import format_diagnostics as evidence
+    f = formatter()
+    program = (
+        "import json,os,sys; data=json.load(sys.stdin); "
+        "os.write(2,b'private'*200000); "
+        "print(json.dumps({'source':data['source'],'diagnostics':[],'outcome':'ok'}))"
+    )
+    monkeypatch.setattr(f, '_HELPER_COMMAND', (sys.executable, '-c', program))
+    def broken(*args, **kwargs):
+        raise OSError('private sink failure')
+    monkeypatch.setattr(evidence.logger, 'info', broken)
+    result = f.format_source('note.md', '# Synthetic\n')
+    assert result.outcome == 'ok' and result.source == '# Synthetic\n'
+
+
+def test_node_timeout_origin_is_distinct_from_python_deadline(wiki, monkeypatch):
+    from wiki import format_diagnostics as evidence
+    events = []
+    monkeypatch.setattr(evidence.logger, 'info', lambda *args, **kwargs: events.append(kwargs['extra']['format_event']))
+    program = "import json,sys; data=json.load(sys.stdin); print(json.dumps({'source':data['source'],'diagnostics':[{'code':'format-timeout','message':'Budget exceeded.','severity':'error'}],'outcome':'failed'}))"
+    monkeypatch.setattr(formatter(), '_HELPER_COMMAND', (sys.executable, '-c', program))
+    result = formatter().format_source('note.md', '# Synthetic\n')
+    assert result.outcome == 'failed' and result.source == '# Synthetic\n'
+    assert events[0]['timeout_origin'] == 'node'
+
+
+def test_real_node_budget_records_timeout_before_cleanup(wiki, monkeypatch, settings):
+    import shutil
+    from pathlib import Path
+    from wiki import format_diagnostics as evidence
+    events = []
+    monkeypatch.setattr(evidence.logger, 'info', lambda *args, **kwargs: events.append(kwargs['extra']['format_event']))
+    # Exhaust the real Node uptime budget before worker startup, without a
+    # production test switch or a ten-second sleep. Its real timer and cleanup run.
+    command = (shutil.which('node'), '--import', 'data:text/javascript,process.uptime=()=>10;',
+               str(Path(__file__).resolve().parents[2] / 'formatter/main.mjs'))
+    monkeypatch.setattr(formatter(), '_HELPER_COMMAND', command)
+    result = formatter().format_source('note.md', '# Synthetic\n')
+    assert result.outcome == 'failed' and result.source == '# Synthetic\n'
+    assert result.diagnostics[0].code == 'format-timeout'
+    assert events[0]['timeout_origin'] == 'node'
+    stages = [item['stage'] for item in events[0]['trace']]
+    assert stages[-3:] == ['worker_timeout', 'cleanup', 'output']
+    assert not list(settings.BACKSTORY_DATA_DIR.glob('formatter-*'))
+
+
+def test_timeout_terminates_helper_descendants_and_cleans_scratch(wiki, monkeypatch, tmp_path, settings):
+    from pathlib import Path
+    pidfile = tmp_path / 'synthetic-child-pid'
+    program = (
+        "import pathlib,subprocess,sys,time; "
+        "child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+        f"pathlib.Path({str(pidfile)!r}).write_text(str(child.pid)); time.sleep(30)"
+    )
+    f = formatter()
+    monkeypatch.setattr(f, '_HELPER_COMMAND', (sys.executable, '-c', program))
+    monkeypatch.setattr(f, '_TIMEOUT', 0.3)
+    result = f.format_source('note.md', '# Synthetic\n')
+    assert result.outcome == 'failed' and result.diagnostics[0].code == 'formatter_timeout'
+    pid = int(pidfile.read_text())
+    status = Path(f'/proc/{pid}/stat')
+    assert not status.exists() or status.read_text().rsplit(')', 1)[1].split()[0] == 'Z'
+    assert not list(settings.BACKSTORY_DATA_DIR.glob('formatter-*'))

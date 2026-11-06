@@ -17,6 +17,7 @@ import time
 from django.conf import settings
 
 from .contracts import Diagnostic, FormatResult, StorageError
+from . import format_diagnostics
 from .metadata import MetadataError, parse_front_matter, yaml_data
 from .policy import CONFIG_NAMES, validate_path
 from .storage import read_regular, require_ready
@@ -195,18 +196,41 @@ def snapshot_config(path):
 
 
 def _run_helper(payload):
-    """Bound stdout while it arrives; stderr is discarded, never surfaced/logged."""
+    progress = format_diagnostics.Progress()
+    started = time.monotonic()
+    outcome, origin = "failed", "none"
+    try:
+        result = _invoke_helper(payload, progress)
+        if isinstance(result, dict):
+            outcome = result.get("outcome")
+            diagnostics = result.get("diagnostics")
+            if isinstance(diagnostics, list) and any(isinstance(item, dict) and item.get("code") == "format-timeout" for item in diagnostics[:200]):
+                origin = "node"
+        return result
+    except FormatFailure as error:
+        if error.code == "formatter_timeout":
+            origin = "python"
+        raise
+    finally:
+        format_diagnostics.record(len(payload["source"].encode("utf-8")),
+                                  round((time.monotonic() - started) * 1000),
+                                  outcome, origin, progress.trace)
+
+
+def _invoke_helper(payload, progress):
+    """Bound stdout; drain stderr through a fixed-schema progress decoder."""
     encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     settings.BACKSTORY_DATA_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="formatter-", dir=settings.BACKSTORY_DATA_DIR) as scratch, tempfile.TemporaryFile(dir=scratch) as incoming:
         incoming.write(encoded)
         incoming.seek(0)
-        with subprocess.Popen(_HELPER_COMMAND, stdin=incoming, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        with subprocess.Popen(_HELPER_COMMAND, stdin=incoming, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               cwd=scratch, env={"PATH": os.defpath, "LANG": "C.UTF-8", "TMPDIR": scratch}, start_new_session=True) as process:
             output = bytearray()
             deadline = time.monotonic() + _TIMEOUT
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ)
+            selector.register(process.stderr, selectors.EVENT_READ)
             try:
                 while selector.get_map():
                     remaining = deadline - time.monotonic()
@@ -216,7 +240,10 @@ def _run_helper(payload):
                         chunk = os.read(key.fd, 65536)
                         if not chunk:
                             selector.unregister(key.fileobj)
-                            break
+                            continue
+                        if key.fileobj is process.stderr:
+                            progress.feed(chunk)
+                            continue
                         output.extend(chunk)
                         if len(output) > _OUTPUT_LIMIT:
                             raise FormatFailure("formatter_output_limit")
