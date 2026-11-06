@@ -1,4 +1,5 @@
 import { expectCreatedMetadata } from './support/metadata.js';
+import { trackRoutes } from './support/controlled-routes.js';
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -152,7 +153,7 @@ test('focus refresh ignores a late missing result from before creation', async (
   const gate = new Promise(resolve => { release = resolve; });
   const waiting = new Promise(resolve => { started = resolve; });
   let held = false;
-  await page.route('**/resolve/**', async route => {
+  const finishRoutes = await trackRoutes(page, '**/resolve/**', async route => {
     const target = new URL(route.request().url()).searchParams.get('target');
     if (!held && target === 'CreateLinks/New#Details|Create target') {
       held = true;
@@ -169,7 +170,7 @@ test('focus refresh ignores a late missing result from before creation', async (
   const link = page.getByRole('link', { name: 'Create target', exact: true });
   await expect(link).toHaveAttribute('href', '/notes/CreateLinks/New.md#preview-details');
   release();
-  await page.unrouteAll({ behavior: 'wait' });
+  await finishRoutes();
   await expect(link).toHaveAttribute('href', '/notes/CreateLinks/New.md#preview-details');
   expect(await read(page)).toBe(source);
 });

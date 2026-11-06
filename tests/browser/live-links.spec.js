@@ -1,5 +1,6 @@
 import { revealChrome } from './support/chrome.js';
 import { waitForEnhancedEditor } from './support/editor-ready.js';
+import { trackRoutes } from './support/controlled-routes.js';
 import { test, expect } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -95,7 +96,7 @@ test('a delayed old resolution cannot restore a link after its source changes', 
   const gate = new Promise(resolve => { release = resolve; });
   let started;
   const waiting = new Promise(resolve => { started = resolve; });
-  await page.route('**/resolve/**', async route => {
+  const finishRoutes = await trackRoutes(page, '**/resolve/**', async route => {
     if (new URL(route.request().url()).searchParams.get('target') === 'Other#Details|Wiki alias') {
       const response = await route.fetch();
       started();
@@ -108,7 +109,7 @@ test('a delayed old resolution cannot restore a link after its source changes', 
   const changed = '# Cursor\n\n[[Other|New label]]\n';
   await editor(page).evaluate((el, value) => el.markdownEditor.setSource(value), changed);
   release();
-  await page.unrouteAll({ behavior: 'wait' });
+  await finishRoutes();
   await expect(page.getByRole('link', { name: 'New label', exact: true })).toHaveAttribute('href', '/notes/Other.md');
   await expect(page.getByRole('link', { name: 'Wiki alias', exact: true })).toHaveCount(0);
   expect(await read(page)).toBe(changed);

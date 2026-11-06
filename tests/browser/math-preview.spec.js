@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { trackRoutes } from './support/controlled-routes.js';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { runtime } from './support/server.js';
 import { revealChrome } from './support/chrome.js';
@@ -73,13 +74,13 @@ test('code and currency do not load the renderer; delayed import cannot revive s
   let started, release;
   const waiting = new Promise(resolve => { started = resolve; });
   const gate = new Promise(resolve => { release = resolve; });
-  await page.route('**/static/math-renderer.js', async route => { const response = await route.fetch(); started(); await gate; await route.fulfill({ response }); });
+  const finishRoutes = await trackRoutes(page, '**/static/math-renderer.js', async route => { const response = await route.fetch(); started(); await gate; await route.fulfill({ response }); });
   await host(page).evaluate(el => el.markdownEditor.setSource('Before\n\n\\(x\\)'));
   await waiting;
   await host(page).evaluate(el => el.markdownEditor.setSource('Replacement\n\nNo math.'));
   await select(page, 3);
   release();
-  await page.unrouteAll({ behavior: 'wait' });
+  await finishRoutes();
   await expect(host(page).locator('.lp-math')).toHaveCount(0);
   expect(await read(page)).toBe('Replacement\n\nNo math.');
   expect(await host(page).evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(3);
