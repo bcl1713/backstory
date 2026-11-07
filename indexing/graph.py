@@ -26,7 +26,7 @@ from .search import sqlite_budget
 CANDIDATE_LIMIT = 300
 MAX_PAYLOAD = 512 * 1024
 LIMITS = {'nodes': 200, 'edges': 500, 'items': 100, 'examined_candidates': CANDIDATE_LIMIT,
-          'payload_bytes': MAX_PAYLOAD, 'depth': 2}
+          'payload_bytes': MAX_PAYLOAD, 'depth': 8}
 
 
 def _string(value, maximum, code, *, empty=True):
@@ -379,7 +379,7 @@ def _selected_pairs(context, pairs):
 def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, node_limit=200, edge_limit=500):
     if path is not None:
         _path(path)
-    if type(depth) is not int or depth not in {1, 2}:
+    if type(depth) is not int or not 1 <= depth <= LIMITS['depth']:
         raise StorageError('invalid_depth')
     validate_path(folder, 'folder')
     _string(tag, 256, 'invalid_tag')
@@ -419,14 +419,15 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
                     if not a or not b:
                         continue
                     for node in [a, b]:
-                        if _matches(node.path, folder, tag, query).filter(generation=context.generation).exists():
+                        if node.path not in neighborhood:
                             following.add(node.path)
                             neighborhood.add(node.path)
-                        else:
-                            context.boundary = True
                 frontier = following
-                if len(pairs) == 501:
-                    context.reasons.add('edge_candidate_limit')
+                if 'candidate_limit' in context.reasons:
+                    # Traversal membership itself is incomplete; unlike a page
+                    # limit, later occurrence pages cannot recover these nodes.
+                    context.reasons.add('neighborhood_limit')
+                    break
             neighborhood = {p for p in neighborhood if _matches(p, folder, tag, query).filter(generation=context.generation).exists()}
         if not _matches(path, folder, tag, query).filter(generation=context.generation).exists():
             center = None

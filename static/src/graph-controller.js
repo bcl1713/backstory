@@ -1,5 +1,6 @@
 import { GraphView } from './graph-view.js';
 import { GraphPages } from './graph-pages.js';
+import { DEFAULT_FORCES, loadForces, saveForces } from './graph-preferences.js';
 
 let preferredList = false;
 const linkTo = path => '/notes/' + path.split('/').map(encodeURIComponent).join('/');
@@ -17,6 +18,7 @@ const safeNote = node => {
   } catch { return false; }
 };
 const safePage = page => page && page.untrusted_content === true && page.authoritative === false &&
+  (page.next_cursor === null || typeof page.next_cursor === 'string' && page.next_cursor.length > 0 && page.next_cursor.length <= 4096) &&
   Array.isArray(page.nodes) && page.nodes.length <= 200 && Array.isArray(page.edges) && page.edges.length <= 500 &&
   page.nodes.every(safeNote) && page.edges.every(edge => typeof edge.source === 'string' &&
     typeof edge.destination === 'string' && Number.isSafeInteger(edge.occurrence_count) && edge.occurrence_count > 0);
@@ -43,16 +45,30 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   const listen = (el, name, fn, options = {}) => el.addEventListener(name, fn, { ...options, signal: life.signal });
   const say = text => { if (status.textContent !== text) status.textContent = text; };
   const pages = new GraphPages();
-  let closed = false, sequence = 0, detailSequence = 0, request = null, detailRequest = null, debounce;
+  let closed = false, sequence = 0, detailSequence = 0, request = null, detailRequest = null, debounce = null;
   let page = null, selected = currentPath || null, focused = currentPath || null;
   let listMode = preferredList, graphicsAvailable = true, trail = [], nextCursor = null, activeParams = null;
-  let view = null, windowed = false;
-  const expanded = new Set();
+  let pendingPositions = null, pendingVersion = null;
+  let view = null, windowed = false, loadingPaused = false, loadingError = false, autoTimer;
+  let storage; try { storage = window.localStorage; } catch { /* Preferences remain page-local. */ }
+  let forces = loadForces(storage);
+  const cancelAutomatic = () => { clearTimeout(autoTimer); autoTimer = null; };
+  const wholeWiki = () => !activeParams?.path;
+  const automaticallyContinue = () => {
+    cancelAutomatic();
+    if (!closed && wholeWiki() && nextCursor && !request && !loadingPaused && !loadingError && !pages.limited) {
+      // Yield between bounded requests so controls, input and rendering stay live.
+      autoTimer = setTimeout(() => { autoTimer = null; void load({ cursor: nextCursor, append: true }); }, 40);
+    }
+  };
+
   find('[data-graph-filter-options]').open = false;
   find('[data-graph-map-options]').open = false;
+  find('[data-graph-settings]').open = false;
+  find('[data-graph-forces]').open = false;
   const focusSearch = () => { find('[data-graph-filter-options]').open = true; input('query').focus({ preventScroll: true }); };
   const parameters = () => {
-    const values = Object.fromEntries(new FormData(form));
+    const values = { ...Object.fromEntries(new FormData(form)), depth: input('depth').value };
     if (!values.path) delete values.path;
     return values;
   };
@@ -81,6 +97,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
         onRestored: () => { graphicsAvailable = true; find('[data-graph-graphics-retry]').hidden = true; say('Map ready. Switch to the map to continue.'); },
         onLimit: () => {},
       });
+      view.setForces(forces);
       graphicsAvailable = view.available !== false;
       if (!graphicsAvailable) unavailable();
     } catch { unavailable(); }
@@ -93,13 +110,26 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     find('[data-graph-list-toggle]').setAttribute('aria-pressed', String(listMode));
   }
   function controls() {
-    find('[data-graph-next]').hidden = !nextCursor;
+    const global = wholeWiki(), depth = Number(input('depth').value), filters = ['query', 'folder', 'tag'].filter(name => (activeParams?.[name] || '').trim());
+    find('[data-graph-next]').hidden = global || !nextCursor;
     find('[data-graph-next]').disabled = Boolean(request) || pages.limited;
-    find('[data-graph-cancel]').hidden = !request;
+    find('[data-graph-cancel]').hidden = !global || loadingPaused || loadingError || pages.limited || !(request || nextCursor);
+    find('[data-graph-resume]').hidden = !loadingPaused || loadingError || pages.limited;
+    find('[data-graph-restart]').hidden = !loadingError;
     find('[data-graph-window]').hidden = !pages.limited;
-    find('[data-graph-expand]').disabled = !selected || expanded.has(selected) || Boolean(nextCursor) || Boolean(request);
+    find('[data-graph-depth-controls]').hidden = global;
+    input('depth').disabled = global;
+    find('[data-graph-depth-down]').disabled = depth <= 1;
+    find('[data-graph-depth-up]').disabled = depth >= 8;
+    find('[data-graph-depth-value]').textContent = `${depth} hop${depth === 1 ? '' : 's'}`;
+    find('[data-graph-local]').setAttribute('aria-pressed', String(!global));
+    find('[data-graph-global]').setAttribute('aria-pressed', String(global));
+    find('[data-graph-scope]').textContent = `${global ? 'Whole wiki' : `Local · ${activeParams?.path || input('path').value}`}${filters.length ? ` · Filtered by ${filters.map(name => `${name}: ${activeParams[name]}`).join(', ')}` : ''}`;
+    const state = pages.limited ? 'Partial — view limit reached' : loadingError ? 'Partial — loading stopped' :
+      loadingPaused ? 'Loading paused · Partial' : nextCursor ? global ? 'Loading…' : 'More to load' :
+      pages.complete && !windowed ? 'Complete' : 'Partial — updating or limited';
     find('[data-graph-summary]').textContent = !page ? '' :
-      `${page.nodes.length} notes · ${page.edges.length} directed links · ${pages.limited ? 'Partial — view limit reached' : nextCursor ? 'More to load' : pages.complete && !windowed ? 'Complete' : 'Partial — updating or limited'}${page.boundary_connections ? ' · Some connections are outside your filters' : ''}`;
+      `${page.nodes.length} notes · ${page.edges.length} directed links · ${state}${page.boundary_connections ? ' · Some connections are outside your filters' : ''}`;
   }
   function renderList() {
     const activePath = document.activeElement?.dataset.graphInspect;
@@ -127,7 +157,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     renderList(); controls();
   }
   function revokeEvidence() {
-    sequence++; request?.abort(); request = null; clearEvidence();
+    sequence++; cancelAutomatic(); request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence();
   }
   function showDetails(path) {
     const ticket = ++detailSequence;
@@ -192,27 +222,28 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     if (!safePage(data)) throw new Error('invalid_response');
     if (!pages.accept(data, append)) { controls(); say('View limit reached. Continue in a new view or narrow your filters.'); return; }
     page = pages.data; nextCursor = page.next_cursor;
-    if (!page.nodes.some(node => node.path === selected)) selected = null;
+    if (!page.nodes.some(node => node.path === selected)) selected = page.nodes.some(node => node.path === activeParams?.path) ? activeParams.path : null;
     if (!page.nodes.some(node => node.path === focused)) focused = page.nodes[0]?.path || null;
     view?.setGraph(page, currentPath); view?.setSelection(selected, focused);
     if (fit) view?.fit();
-    if (!nextCursor && activeParams?.path) expanded.add(activeParams.path);
     renderList(); if (!append || selected && !details.textContent.includes(selected)) showDetails(selected);
     presentation(); controls();
     find('[data-graph-diagnostics]').textContent = `Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. ${page.limiting_reasons?.join(', ') || ''} Indexed saved content, not a disk snapshot. Hops refer to loaded edges; unsaved edits are excluded.`;
     say('');
   }
   async function load({ cursor, fit = false, append = false, params = null } = {}) {
-    clearTimeout(debounce); const ticket = ++sequence;
-    const retainedPositions = !append && page && view ? new Map(view.simulation.nodes) : null;
-    const retainedVersion = page?.eligibility_version;
+    clearTimeout(debounce); debounce = null; cancelAutomatic(); const ticket = ++sequence;
+    const retainedPositions = !append ? page && view ? new Map(view.simulation.nodes) : pendingPositions : null;
+    const retainedVersion = page ? page.eligibility_version : pendingVersion;
+    if (!append) { pendingPositions = retainedPositions; pendingVersion = retainedVersion; }
     request?.abort(); request = new AbortController();
     if (!append) {
       const priorSelected = selected, priorFocused = focused;
       clearEvidence(); selected = priorSelected; focused = priorFocused;
-      expanded.clear(); windowed = false;
+      windowed = false;
     }
     activeParams = params || (cursor ? activeParams : parameters());
+    loadingError = false;
     if (!activeParams) activeParams = parameters();
     say(page ? 'Updating connections…' : 'Loading connections…'); controls();
     try {
@@ -226,34 +257,51 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
       }
     } catch (error) {
       if (!closed && ticket === sequence && error.name !== 'AbortError') {
-        clearEvidence();
+        loadingError = true;
+        if (error.message !== 'continuation_stalled' && error.message !== 'graph_query_limited') { pendingPositions = pendingVersion = null; clearEvidence(); }
         say(error.message === 'authentication_required' ? 'Session expired. Sign in again to load the graph.' :
-          error.message === 'restart_required' ? 'Connections changed. Refresh to restart this view.' : 'Unable to load connections. Refresh to try again.');
+          error.message === 'restart_required' ? 'Connections changed. Restart loading to revalidate this view.' :
+          error.message === 'continuation_stalled' ? 'Loading stopped because the continuation did not advance. Restart loading or narrow your filters.' : 'Unable to load connections. Restart loading to try again.');
       }
-    } finally { if (ticket === sequence) { request = null; controls(); } }
+    } finally { if (ticket === sequence) { request = null; controls(); automaticallyContinue(); } }
   }
   function center(path) {
     if (!path) return;
     const previous = input('path').value;
     if (previous !== path && previous) trail.push(previous);
     trail = trail.slice(-20); input('path').value = path;
-    find('[data-graph-back]').disabled = !trail.length; void load({ fit: true });
+    loadingPaused = false; find('[data-graph-back]').disabled = !trail.length; void load({ fit: true });
   }
-  listen(form, 'submit', event => { event.preventDefault(); void load({ fit: true }); });
-  listen(input('query'), 'input', () => { clearTimeout(debounce); sequence++; request?.abort(); request = null; clearEvidence(); debounce = setTimeout(() => void load(), 180); });
+  listen(form, 'submit', event => { event.preventDefault(); loadingPaused = false; void load({ fit: true }); });
+  for (const name of ['query', 'path', 'folder', 'tag']) listen(input(name), 'input', () => { clearTimeout(debounce); cancelAutomatic(); sequence++; request?.abort(); request = null; loadingPaused = false; clearEvidence(); debounce = setTimeout(() => { debounce = null; void load(); }, 180); });
+  listen(input('depth'), 'change', () => { loadingPaused = false; void load(); });
+  function changeDepth(delta) {
+    if (!input('path').value) { say('Hop depth applies to a local neighborhood. Choose Local first.'); return; }
+    const next = Number(input('depth').value) + delta;
+    if (next < 1 || next > 8) { say(next < 1 ? 'Minimum local depth is one hop.' : 'Maximum local depth is eight hops; query resource limits may make the view partial.'); return; }
+    input('depth').value = String(next); loadingPaused = false; void load();
+  }
+  listen(find('[data-graph-depth-down]'), 'click', () => changeDepth(-1));
+  listen(find('[data-graph-depth-up]'), 'click', () => changeDepth(1));
+  listen(root, 'keydown', event => {
+    if (!['[', ']'].includes(event.key) || event.isComposing || event.ctrlKey || event.altKey || event.metaKey ||
+        event.target.closest('input, textarea, select, [contenteditable], [role=textbox]') ||
+        event.target !== map && event.target !== find('[data-graph-list-toggle]')) return;
+    event.preventDefault(); event.stopPropagation(); changeDepth(event.key === '[' ? -1 : 1);
+  });
   listen(root, 'keydown', event => {
     if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
     if (!find('[data-graph-help]').hidden) { event.preventDefault(); event.stopImmediatePropagation(); toggleHelp(); return; }
     if (form.contains(event.target)) {
-      event.preventDefault(); event.stopImmediatePropagation(); clearTimeout(debounce); sequence++; request?.abort(); request = null; controls();
+      event.preventDefault(); event.stopImmediatePropagation(); if (debounce !== null) { clearTimeout(debounce); debounce = null; void load(); } controls();
       find('[data-graph-filter-options]').open = false;
       if (listMode) find('[data-graph-list-toggle]').focus(); else map.focus({ preventScroll: true });
       say('Search closed. Escape returns to your note.');
     } else if (event.target !== map) { event.preventDefault(); event.stopImmediatePropagation(); escape(); }
   });
   listen(find('[data-graph-clear]'), 'click', () => { input('query').value = ''; void load(); });
-  listen(find('[data-graph-local]'), 'click', () => center(selected || currentPath));
-  listen(find('[data-graph-global]'), 'click', () => { input('path').value = ''; void load({ fit: true }); });
+  listen(find('[data-graph-local]'), 'click', () => center(currentPath || selected));
+  listen(find('[data-graph-global]'), 'click', () => { input('path').value = ''; input('depth').disabled = false; loadingPaused = false; void load({ fit: true }); });
   listen(find('[data-graph-back]'), 'click', () => { input('path').value = trail.pop() || currentPath; find('[data-graph-back]').disabled = !trail.length; void load({ fit: true }); });
   listen(find('[data-graph-list-toggle]'), 'click', () => { listMode = !listMode || !graphicsAvailable; if (graphicsAvailable) preferredList = listMode; presentation(); });
   listen(find('[data-graph-fit]'), 'click', () => view?.fit());
@@ -264,16 +312,14 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   for (const button of root.querySelectorAll('[data-graph-pan]')) listen(button, 'click', () => view?.pan(...pans[button.dataset.graphPan]));
   listen(find('[data-graph-pause]'), 'click', () => view?.setPaused(!view.paused));
   listen(find('[data-graph-bloom]'), 'input', event => { view?.setBloom(event.target.value); find('[data-graph-bloom-value]').textContent = ['Off', 'Default', 'High'][Number(event.target.value)]; });
-  listen(find('[data-graph-refresh]'), 'click', () => { void load(); });
+  listen(find('[data-graph-refresh]'), 'click', () => { loadingPaused = false; void load(); });
   listen(find('[data-graph-next]'), 'click', () => { if (nextCursor) void load({ cursor: nextCursor, append: true }); });
-  listen(find('[data-graph-cancel]'), 'click', () => { sequence++; request?.abort(); request = null; controls(); say('Loading paused. Load more to resume, or refresh.'); });
+  listen(find('[data-graph-cancel]'), 'click', () => { loadingPaused = true; sequence++; cancelAutomatic(); request?.abort(); request = null; controls(); say('Loading paused. Resume loading to continue. Motion is unchanged.'); });
+  listen(find('[data-graph-resume]'), 'click', () => { loadingPaused = false; if (nextCursor) void load({ cursor: nextCursor, append: true }); else void load(); });
+  listen(find('[data-graph-restart]'), 'click', () => { loadingPaused = false; void load(); });
   listen(find('[data-graph-window]'), 'click', () => {
     const cursor = nextCursor, params = activeParams;
     clearEvidence(); windowed = true; void load({ cursor, params, append: true, fit: true });
-  });
-  listen(find('[data-graph-expand]'), 'click', () => {
-    if (!selected || nextCursor) return;
-    void load({ params: { ...parameters(), path: selected, depth: '1' }, append: true });
   });
   listen(find('[data-graph-graphics-retry]'), 'click', () => {
     view?.destroy(); view = null; createView();
@@ -282,19 +328,33 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     if (page) { view.setGraph(page, currentPath); view.setSelection(selected, focused); view.fit(); }
     presentation();
   });
+  const displayForces = () => {
+    for (const slider of root.querySelectorAll('[data-graph-force]')) {
+      const name = slider.dataset.graphForce; slider.value = String(forces[name]);
+      slider.setAttribute('aria-valuetext', `${forces[name]} times default`);
+      find(`[data-graph-force-value="${name}"]`).textContent = `${forces[name]}×`;
+    }
+  };
+  for (const slider of root.querySelectorAll('[data-graph-force]')) listen(slider, 'input', () => {
+    forces = { ...forces, [slider.dataset.graphForce]: Number(slider.value) }; saveForces(storage, forces); displayForces(); view?.setForces(forces);
+  });
+  listen(find('[data-graph-forces-reset]'), 'click', () => { forces = { ...DEFAULT_FORCES }; saveForces(storage, forces); displayForces(); view?.setForces(forces); });
+  displayForces();
   listen(find('[data-graph-help-toggle]'), 'click', toggleHelp);
   // Returning from a hidden tab must revalidate retained private evidence.
-  listen(document, 'visibilitychange', () => { if (document.hidden) { sequence++; request?.abort(); request = null; clearEvidence(); } else if (!closed) void load(); });
+  listen(document, 'visibilitychange', () => { if (document.hidden) { sequence++; cancelAutomatic(); request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence(); } else if (!closed && !loadingPaused) void load(); });
+  listen(window, 'pagehide', () => { sequence++; cancelAutomatic(); clearTimeout(debounce); debounce = null; request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence(); view?.stop(); });
+  listen(window, 'pageshow', event => { if (event.persisted && !closed && !loadingPaused) void load(); });
   find('[data-graph-controls]').hidden = false; find('[data-graph-clear]').hidden = false;
   createView();
   find('[data-graph-pause]').setAttribute('aria-pressed', String(view?.paused || false));
   view?.setBloom(find('[data-graph-bloom]').value); presentation();
   activeParams = parameters();
-  if (initial) accept(initial, { fit: true }); else void load({ fit: true });
+  if (initial) { accept(initial, { fit: true }); automaticallyContinue(); } else void load({ fit: true });
   return {
     focusSearch,
     focusNavigation() { if (listMode) find('[data-graph-list-toggle]').focus({ preventScroll: true }); else map.focus({ preventScroll: true }); },
-    destroy() { closed = true; sequence++; detailSequence++; clearTimeout(debounce); request?.abort(); detailRequest?.abort(); life.abort(); view?.destroy(); pages.clear(); page = null; nextCursor = null;
+    destroy() { closed = true; sequence++; detailSequence++; clearTimeout(debounce); cancelAutomatic(); request?.abort(); detailRequest?.abort(); life.abort(); view?.destroy(); pendingPositions = pendingVersion = null; pages.clear(); page = null; nextCursor = null;
       find('[data-graph-nodes]').replaceChildren(); find('[data-graph-edges]').replaceChildren();
       details.replaceChildren(); find('[data-graph-summary]').textContent = ''; say('');
     },

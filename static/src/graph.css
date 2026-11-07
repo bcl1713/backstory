@@ -91,3 +91,18 @@
 }
 
 .graph-panel [data-graph-status]:empty { display: none; }
+
+.graph-sidebar { min-width: 0; }
+[data-graph-settings] { margin-bottom: .75rem; }
+[data-graph-forces] { margin-left: .75rem; }
+.graph-force-settings { display: grid; grid-template-columns: minmax(0, 1fr); gap: .25rem; }
+.graph-force-scope { grid-column: 1 / -1; }
+.graph-force-settings > button { justify-self: start; min-height: 2.75rem; }
+.graph-force-settings label { display: block; width: 100%; }
+.graph-force-settings p, .graph-depth-controls small { font-size: .75rem; color: var(--muted); margin-block: .25rem .65rem; }
+.graph-force-settings output { float: right; }
+.graph-depth-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.graph-depth-controls small { flex-basis: 100%; margin: 0; }
+[data-graph-scope] { font-size: .8125rem; overflow-wrap: anywhere; }
+
+@media (max-width: 650px) { .graph-force-settings { grid-template-columns: minmax(0, 1fr); } }

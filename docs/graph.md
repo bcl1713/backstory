@@ -1,7 +1,7 @@
 # Wiki graph
 
 Open **Menu → Graph**, **Local connections**, or type `g/` in Vim Normal mode
-or a navigation control. `g/` focuses search; Escape returns to graph navigation,
+or a navigation control. `g/` starts a two-hop local view centered on the current note and focuses search; Escape returns to graph navigation,
 then closes the graph and restores the editor caret. Browser Back also closes it.
 Insert mode, composition, Tab and browser shortcuts keep their normal behavior.
 
@@ -11,29 +11,47 @@ draft/conflict navigation guard. Pending idle-save is cancelled on graph entry.
 
 ## Explore connections
 
-Local starts with incoming/outgoing one-hop links. **Load more** adds bounded pages
-to the existing map and connection list; it never replaces earlier pages. Repeated
-canonical nodes and directed aggregate edges are deduplicated, including empty
-continuing pages. **All notes** includes disconnected notes. Folder, exact tag and
-literal path/title/name filters use the shared JSON/WebMCP service.
+Local starts with incoming/outgoing links at **two hops** when opened from a note.
+The visible hop controls and `[` / `]` change depth from **one to eight hops** while
+graph navigation has focus. Brackets remain ordinary input in search or the editor.
+Depth is shortest explicit-link distance from the stable center, through eligible
+notes in either direction. Selection does not change the center. Shrinking removes
+out-of-scope results; the center is selected if the old selection leaves scope.
+Surviving coordinates, orientation and zoom remain. Query budgets can make large
+neighborhoods partial even below eight hops; the summary reports that limitation.
 
-Select a node, then **Expand selected** under Map controls to add all its immediate
-connections. Repeat on a descendant to explore beyond two hops. This is deliberate
-expansion of the loaded neighborhoods, not a claim to have traversed an entire
-connected component. Two hops remains a bounded convenience filter; a limited
-response is labeled partial rather than presented as a complete neighborhood.
+**All notes** starts automatic loading of every eligible wiki component, including
+disconnected notes. Bounded pages accumulate without repeated Load more clicks;
+empty continuing pages advance too. Canonical nodes and directed aggregate edges
+are deduplicated; repeated aggregate counts replace earlier counts. Local pages
+still offer **Load more** when a neighborhood requires continuation. Folder, exact
+tag and literal path/title/name filters use the shared JSON/WebMCP service. Active
+filters are shown beside the local/whole-wiki scope, including their values.
 
-The summary shows loaded notes/links and Complete, More to load, or Partial.
-Complete means all pages in the requested scope were exhausted with valid evidence;
-counts are loaded counts, not invented whole-wiki totals. Pause loading retains
-results and continuation. Refresh starts a new validated result set. Expired cursors
-clear retained results and ask for a restart. Scope/filter changes cancel obsolete
-requests. Selection, camera and surviving positions persist across page merges.
+The summary shows loaded notes/links and Complete, Loading, Loading paused, or
+Partial. Complete means all pages in the requested scope were exhausted with valid
+evidence; counts are loaded counts, not invented whole-wiki totals. **Pause loading**
+retains results and continuation; **Resume loading** continues automatically. Loading
+pause is independent of **Pause motion**. Errors and expired/stalled cursors expose
+**Restart loading**; authorization/storage/namespace failures clear retained evidence.
+Scope/filter/depth changes cancel obsolete requests. Close releases pending work.
+A request with a different index/eligibility version cannot mix with earlier pages.
 
-The client retains at most 10,000 nodes/30,000 edges. If reached, the unconsumed
+The client retains at most 10,000 nodes/30,000 edges and 10,000 continuing pages per view. If reached, the unconsumed
 continuation remains available through **Continue in a new view** or narrower
 filters. A new window explicitly discards the previous window and remains Partial;
 it never calls the whole scope complete. API response limits are unchanged.
+
+**Graph settings → Forces** starts collapsed. Spring strength, Repulsion and
+Gravity apply live from **0.25× to 4× default**, in quarter steps. Linked pairs use
+equal springs regardless of repeated/reciprocal mentions. Springs gather linked
+neighborhoods; gravity gently pulls toward the overall graph center. Changes reheat
+from current positions without changing camera, selection or loaded relationships.
+Pause motion and reduced motion remain in force; tuned values take effect on resume.
+**Reset defaults** saves 1× for these three forces only. Versioned force settings are
+saved for this site in this browser and survive close/reopen and reload. Invalid,
+missing or obsolete values fall back safely. Storage denial keeps tuning page-local.
+Only force settings are saved, never graph content, paths or topology.
 
 Phone layouts open in graph mode where WebGL is supported; the full connection
 list is one action away. An explicit list choice is preserved across scope changes
@@ -57,7 +75,7 @@ the page. Labeled Fit, Reset orientation, orbit, pan and zoom controls avoid
 requiring gestures. Pause motion and reduced motion preserve navigation.
 
 Arrow keys or h/j/k/l focus and inspect a visible node. Enter opens it; Space
-centers it; `/` searches; `?` shows help; `+`/`−` zoom. Tab leaves the map. The
+centers it; `/` searches; `?` shows help; `+`/`−` zoom; `[`/`]` adjust local depth. Tab leaves the map. The
 connection list provides canonical paths, real links and ordinary keyboard actions
 independent of changing coordinates. □ marks current, ◇ selected, and a reticle
 focused. Arrows preserve direction. Position and size do not imply meaning.
