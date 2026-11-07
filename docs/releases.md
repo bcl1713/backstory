@@ -65,6 +65,23 @@ immutable archive of the exact tested commit. Releases retain version/source OCI
 labels, the image digest, the Portainer manifest, a version-pinned environment
 example, deployment guide and checksums.
 
+The Docker build also writes `wiki/_build_identity.json` inside the application
+from the publisher's `BACKSTORY_VERSION` and `BACKSTORY_REVISION` build arguments.
+The runtime user can read this image-owned file; it is not wiki data or a runtime
+configuration setting. Local context copies are excluded and overwritten during
+packaging. Native checkouts and builds without release arguments report unknown
+identity. The authenticated `wiki_status` tool and `/tools/status/` expose only the
+validated source SHA and release version from this file, with `unknown` for missing
+or invalid fields. Validation accepts a lowercase 40-character Git SHA and the
+publisher's stable or dev version format (at most 80 ASCII characters, no leading
+zero numeric components); reads are bounded to 1 KiB.
+
+After an operator deploys an image, read authenticated status and compare both
+fields with that immutable release's source/version evidence. An unknown value
+is uncertainty, not proof of deployment failure. Registry publication and a moving
+branch or image alias do not establish which artifact is running. This change
+does not publish or deploy an image or add credentials or runtime settings.
+
 Dev publishes full prerelease tags and updates only `:dev`. Stable publishes
 version tags, minor and major aliases and `:latest`. The local service uses existing
 GitHub authentication for release and GHCR publication; it never creates tokens

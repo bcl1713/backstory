@@ -38,6 +38,16 @@ receives HTTP 401 with `authentication_required`. Sign in again through the UI.
 | `create_folder` | `/tools/create-folder/` | `path` (required root-relative folder path) |
 | `list_notes` | `/tools/list/` | `folder` (default root), `limit` (default 100, 1–100), `cursor` |
 
+`wiki_status` reports the packaged running identity in `application.build` (the
+full 40-character source SHA) and `application.version` (the stable or dev release
+version). These fields come from validated metadata baked into the application
+image. Native/unpackaged builds and missing, unreadable or invalid metadata report
+`unknown`; individual missing/invalid fields remain unknown independently. Status
+does not consult runtime identity environment overrides, Git, a registry alias or
+the Docker socket. This is artifact identity, not proof that a particular server
+was redeployed or that its storage/index is healthy. `/health/` remains public web
+liveness only.
+
 Each read tool fetches only its fixed same-origin endpoint with same-origin
 credentials and rejects redirects, non-JSON responses and transport errors.
 Argument validation rejects unknown properties and invalid types or bounds.

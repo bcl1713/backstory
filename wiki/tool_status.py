@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.conf import settings
 from indexing.worker import index_status
 from indexing.models import ScanState
+from .build_identity import application_identity
 from .models import MoveOperation
 from .readiness import check_readiness
 from .timezones import timezone_state
@@ -27,7 +28,7 @@ def _index():
 def status_snapshot():
     observed_at = timezone.now().isoformat()
     result = {'state': 'ok', 'observed_at': observed_at,
-              'application': {'name': 'Backstory', 'build': 'unknown', 'version': 'unknown'},
+              'application': application_identity(),
               'capabilities': {'contract_version': 1, 'note_max_bytes': settings.BACKSTORY_NOTE_MAX_BYTES,
                                'list_max_items': 100, 'folder_creation': True,
                                'read_many_max_paths': 8, 'read_many_max_source_bytes': 4194304,
