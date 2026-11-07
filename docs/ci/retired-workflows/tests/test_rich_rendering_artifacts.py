@@ -3,7 +3,7 @@ import yaml
 
 
 def test_rich_rendering_screenshots_use_the_browser_runtime_and_are_uploaded():
-    root = Path(__file__).parents[2]
+    root = Path(__file__).parents[4]
     workflow = yaml.safe_load((root / 'docs/ci/retired-workflows/ci.yml').read_text())
     uploads = [step['with'] for step in workflow['jobs']['browser']['steps']
                if str(step.get('uses', '')).startswith('actions/upload-artifact@')]

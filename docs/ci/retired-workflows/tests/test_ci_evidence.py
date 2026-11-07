@@ -10,7 +10,7 @@ import zipfile
 
 import pytest
 
-PATH = Path(__file__).resolve().parents[2] / 'scripts/ci_evidence.py'
+PATH = Path(__file__).resolve().parents[4] / 'scripts/ci_evidence.py'
 
 
 def module():

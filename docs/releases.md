@@ -12,12 +12,14 @@ The former workflow definitions are retained only as inert migration references.
 
 ## Branch and release policy
 
-1. Feature/fix PRs target `dev`. Verify the intended merge tree locally and retain
-   the full test record plus code/UI review before merging.
+1. Feature/fix PRs target `dev`. Run focused checks for the affected behavior and
+   retain the test record plus code/UI review before merging. The publisher owns
+   the full release gate; do not routinely duplicate it before merge.
 2. The local service tests the resulting current `dev` commit and automatically
    publishes its unique prerelease and `ghcr.io/bcl1713/backstory:dev` alias.
 3. Promote this repository's `dev` to `main` through a reviewed merge commit,
-   preserving Conventional Commit history. Test that resulting commit separately.
+   preserving Conventional Commit history. The publisher tests that resulting
+   commit separately.
 4. The service tests main and automatically publishes its stable release and
    numbered/`:latest` aliases.
 5. Merge main back into dev after stable publication to retain tag ancestry.
