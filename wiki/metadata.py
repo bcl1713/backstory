@@ -198,7 +198,7 @@ def project_note(snapshot):
                     break
         phase = 'links'
         edges = tuple(extract_links(body))
-        offset = snapshot.source.count('\n') - body.count('\n')
+        offset = len(snapshot.source.splitlines()) - len(body.splitlines())
         from dataclasses import replace
         edges = tuple(replace(edge, position=(edge.position[0] + offset, edge.position[1])) for edge in edges)
     except (ValueError, RecursionError) as error:

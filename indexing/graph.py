@@ -92,7 +92,8 @@ class Query:
     def _stamp(self):
         return [self.generation.pk if self.generation else None,
                 self.generation.mutation if self.generation else 0,
-                self.relations.epoch if self.relations else 0, self.namespace, self.index.state]
+                self.relations.epoch if self.relations else 0, self.namespace, self.index.state,
+                bool(self.relations and self.relations.complete), bool(self.relations and self.relations.evidence_complete)]
 
     def eligible(self, path):
         if path in self.cache:
@@ -218,7 +219,12 @@ class Query:
         else:
             require_ready()
             generation = IndexGeneration.objects.filter(state='active').first()
+            relations = RelationState.objects.filter(generation=generation).first() if generation else None
+            relation_stamp = [relations.epoch if relations else 0, bool(relations and relations.complete),
+                              bool(relations and relations.evidence_complete)]
             if (generation.pk if generation else None) != self.stamp[0] or (generation.mutation if generation else 0) != self.stamp[1] or namespace_version() != self.namespace or current.state != self.index.state:
+                raise StorageError('graph_cursor_expired', 409)
+            if relation_stamp != [self.stamp[2], self.stamp[5], self.stamp[6]]:
                 raise StorageError('graph_cursor_expired', 409)
         metadata = dict(state='unavailable' if current.state == 'unavailable' else 'ok' if self.complete else 'incomplete',
                         freshness={'state': current.state, 'last_completed': current.last_completed,
@@ -413,12 +419,15 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
                            .values_list('pk', flat=True)[:CANDIDATE_LIMIT])
             candidate_relations = context.relation_rows().filter(occurrence_id__in=raw_ids)
         candidates = list(candidate_relations.order_by('occurrence_id').values(
-            'occurrence_id', 'source', 'destination')[:CANDIDATE_LIMIT])
-        if path:
-            candidates = [row for row in candidates if row['source'] in neighborhood and row['destination'] in neighborhood]
+            'occurrence_id', 'source', 'destination', 'state', 'resource_type',
+            'occurrence__occurrence_kind')[:CANDIDATE_LIMIT])
         context.prime([p for row in candidates for p in [row['source'], row['destination']]])
         for row in candidates:
             source, target = row['source'], row['destination']
+            if (row['state'] != 'resolved' or row['resource_type'] != 'note' or row['occurrence__occurrence_kind'] != 'link'
+                    or path and (source not in neighborhood or target not in neighborhood)):
+                after = row['occurrence_id']
+                continue
             if not context.can_check([source, target]):
                 next_checkpoint = {'phase': 'edges', 'after': after}
                 break

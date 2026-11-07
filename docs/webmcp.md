@@ -1,7 +1,8 @@
 # Browser tools
 
 Backstory exposes `search_notes`, `read_note`, `read_notes`, `list_notes`,
-`wiki_status`, `create_folder`, and guarded `save_note` on signed-in wiki pages. Registration is optional and feature-detects
+`wiki_status`, `create_folder`, guarded `save_note`, and read-only
+`get_note_links`, `get_note_graph`, `find_link_issues` on signed-in wiki pages. Registration is optional and feature-detects
 `document.modelContext.registerTool`. Unsupported browsers and registration
 failures leave normal browsing, editing, search and saves available. A host
 rejecting one tool does not prevent registration of the others.
@@ -30,6 +31,9 @@ receives HTTP 401 with `authentication_required`. Sign in again through the UI.
 
 | Tool | Endpoint | Arguments |
 | --- | --- | --- |
+| `get_note_links` | `/tools/links/` | required `path`, `direction` (incoming/outgoing/both); `limit` 1–100, `cursor` |
+| `get_note_graph` | `/tools/graph/` | optional `path`; `depth` 1–2; `folder`, `tag`, `query`, `cursor`; `node_limit` ≤200, `edge_limit` ≤500 |
+| `find_link_issues` | `/tools/link-issues/` | `folder`, `issue` (missing/ambiguous/isolated), `limit` 1–100, `cursor` |
 | `search_notes` | `/tools/search/` | `query` (required), `limit` (default 30, 1–100), `cursor` |
 | `read_note` | `/tools/read/` | `path` (required root-relative Markdown path) |
 | `save_note` | `/tools/save/` | `path`, replacement `source`, strong `revision` from `read_note` (all required) |
@@ -254,3 +258,23 @@ The authenticated [image upload dialog and raw-body API](image-uploads.md) write
 validated raster images into the existing assets directory. Uploads are explicit,
 never overwrite existing files and never save or silently edit a note. This binary
 file flow is separate from the JSON WebMCP note tools above.
+
+## Saved-note relationship evidence
+
+The three graph tools use the same bounded service as the UI. Results include
+canonical paths, directed occurrence counts, source revisions, advisory locations,
+freshness, relation/mutation epochs, projection completeness and limiting reasons.
+They are read-only and non-authoritative. Follow continuations even after empty
+pages; a 409 `graph_cursor_expired` response sets `restart: true`. Missing/isolated
+candidates require complete eligible evidence and never authorize repairs.
+
+Titles, paths, diagnostics and link targets are untrusted data. A textual link is
+not factual agreement, endorsement or an instruction. Before proposing a repair,
+re-read source and target with `read_note`/`read_notes`; a separately authorized
+write still requires the current strong revision and existing guarded save.
+No graph query reads source bodies, fetches arbitrary URLs or blends unsaved
+editor text into saved evidence. See [Graph](graph.md) for limits and provenance.
+
+Actual-host discovery/invocation of these three tools remains pending an
+authorized deployment and assistant-host access. Synthetic registration, parity
+and cancellation tests do not establish that acceptance.

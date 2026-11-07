@@ -16,7 +16,7 @@ export function mountGraphLauncher() {
     else if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   };
   const close = () => { if (history.state?.backstoryGraph) history.back(); else finish(); };
-  const open = async () => {
+  const open = async ({ search = true } = {}) => {
     if (dialog.open) { controller?.focusSearch(); return; }
     const ticket = ++sequence;
     returnFocus = document.activeElement;
@@ -25,7 +25,10 @@ export function mountGraphLauncher() {
     dialog.showModal();
     history.pushState({ ...history.state, backstoryGraph: true }, '');
     document.dispatchEvent(new Event('backstory:graph-opened'));
-    dialog.querySelector('[name=query]').focus({ preventScroll: true });
+    if (search) {
+      dialog.querySelector('[data-graph-filter-options]').open = true;
+      dialog.querySelector('[name=query]').focus({ preventScroll: true });
+    }
     if (!document.querySelector('[data-graph-styles]')) {
       const style = document.createElement('link'); style.rel = 'stylesheet'; style.href = '/static/graph.css'; style.dataset.graphStyles = '';
       document.head.append(style);
@@ -34,7 +37,7 @@ export function mountGraphLauncher() {
       const { mountGraph } = await import('/static/graph-controller.js');
       if (ticket !== sequence || !dialog.open) return;
       controller = mountGraph(dialog, { currentPath: path, onClose: close });
-      controller.focusSearch();
+      if (search) controller.focusSearch(); else controller.focusNavigation();
     } catch {
       if (ticket === sequence) {
         const status = dialog.querySelector('[data-graph-status]');
@@ -47,7 +50,7 @@ export function mountGraphLauncher() {
   document.addEventListener('click', event => {
     const anchor = event.target.closest('[data-graph-open]');
     if (!anchor || event.button || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
-    event.preventDefault(); void open();
+    event.preventDefault(); void open({ search: false });
   });
   document.addEventListener('backstory:open-graph', () => { void open(); });
   dialog.querySelector('[data-graph-close]').addEventListener('click', close);

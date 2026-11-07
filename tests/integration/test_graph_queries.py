@@ -139,3 +139,17 @@ def test_request_occurrence_select_excludes_unused_note_metadata(wiki, django_as
     occurrence_queries = [query['sql'] for query in captured if 'INNER JOIN "indexing_linkedge"' in query['sql'] and 'target_text' in query['sql']]
     assert occurrence_queries
     assert all('"indexing_indexednote"."body"' not in query and '"indexing_indexednote"."projection"' not in query for query in occurrence_queries)
+
+
+def test_cursor_from_building_projection_restarts_after_publication(wiki):
+    graph = build_graph(wiki, {'a.md': '[[b]]', 'b.md': '# B'})
+    from indexing.models import RelationState
+    from indexing import worker
+    state = RelationState.objects.get(generation__state='active')
+    state.complete = False
+    state.save(update_fields=['complete'])
+    first = graph.query_graph(node_limit=1)
+    assert first.next_cursor and not first.projection_complete
+    worker.run_batch()
+    with pytest.raises(StorageError, match='graph_cursor_expired'):
+        graph.query_graph(node_limit=1, cursor=first.next_cursor)

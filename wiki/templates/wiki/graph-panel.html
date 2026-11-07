@@ -1,4 +1,5 @@
 <div class="graph-panel" data-graph-panel>
+<details data-graph-filter-options open><summary>Filters</summary>
 <form method="get" action="{% url 'wiki:graph' %}" data-graph-filters>
 <label>Center note <input name="path" maxlength="4096" value="{{ graph_params.path|default:'' }}" placeholder="Blank for overview"></label>
 <label>Graph search <input name="query" type="search" maxlength="256" value="{{ graph_params.query|default:'' }}" autocomplete="off"></label>
@@ -7,14 +8,17 @@
 <label>Depth <select name="depth"><option value="1">One hop</option><option value="2" {% if graph_params.depth == 2 %}selected{% endif %}>Two hops</option></select></label>
 <button type="submit">Apply filters</button><button type="button" data-graph-clear hidden>Clear search</button>
 </form>
+</details>
 <div class="graph-controls" data-graph-controls hidden>
 <button type="button" data-graph-local>Local</button><button type="button" data-graph-global>Overview</button>
 <button type="button" data-graph-back disabled>Previous center</button><button type="button" data-graph-list-toggle aria-pressed="false">Connection list</button>
+<button type="button" data-graph-pause aria-pressed="false">Pause motion</button>
+<button type="button" data-graph-refresh>Refresh evidence</button><button type="button" data-graph-help-toggle>Help</button>
+<details data-graph-map-options open><summary>Map controls</summary><div class="graph-map-options">
 <button type="button" data-graph-fit>Fit</button><button type="button" data-graph-zoom="1.25" aria-label="Zoom in">+</button><button type="button" data-graph-zoom="0.8" aria-label="Zoom out">−</button>
 <button type="button" data-graph-pan="left" aria-label="Pan left">←</button><button type="button" data-graph-pan="right" aria-label="Pan right">→</button><button type="button" data-graph-pan="up" aria-label="Pan up">↑</button><button type="button" data-graph-pan="down" aria-label="Pan down">↓</button>
-<button type="button" data-graph-pause aria-pressed="false">Pause motion</button>
 <label>Bloom intensity <input data-graph-bloom type="range" min="0" max="2" step="1" value="1"></label><output data-graph-bloom-value>Restrained</output>
-<button type="button" data-graph-refresh>Refresh evidence</button><button type="button" data-graph-help-toggle>Help</button>
+</div></details>
 </div>
 <p data-graph-status role="status" aria-live="polite" aria-atomic="true"></p>
 <p class="graph-caption" data-graph-summary></p>

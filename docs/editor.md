@@ -307,3 +307,12 @@ not prove that a security policy blocked a script. Reloading retries rendering;
 entering source and moving away retains the original failure detail without
 silently retrying. Source editing, renderer isolation, and resource deadlines
 are unchanged.
+
+## Relationship graph
+
+Open Menu → Graph or Local connections, or type `g/` in Vim Normal mode. Search
+receives focus; Escape returns to graph navigation, then closes back to the
+editor caret. Selecting/dragging inspects without opening or saving a note.
+The list has equivalent evidence and real links; mobile defaults to it.
+See [Graph](graph.md) for keyboard controls, filters, elastic motion, installed
+themes, Bloom Off and indexed-content freshness.

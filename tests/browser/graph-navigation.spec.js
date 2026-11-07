@@ -99,11 +99,13 @@ test('drag tugs a neighbor, cancellation releases pins, and physics sleeps with 
   const node = map(page).locator('[data-node-path="Graph B.md"]');
   const neighbor = map(page).locator('[data-node-path="Graph D.md"]');
   const before = await neighbor.getAttribute('transform');
-  const box = await node.boundingBox();
-  await page.mouse.move(box.x + 10, box.y + 10); await page.mouse.down();
+  const box = await node.locator('.graph-node-mark').boundingBox();
+  await map(page).evaluate(el => el.addEventListener('pointerdown', event => { window.graphDragPointer = event.pointerId; }, { once: true }));
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
   await page.mouse.move(box.x + 130, box.y + 80, { steps: 18 });
   await expect.poll(() => neighbor.getAttribute('transform')).not.toBe(before);
-  await map(page).dispatchEvent('pointercancel', { pointerId: 1 });
+  await map(page).dispatchEvent('pointercancel', { pointerId: await page.evaluate(() => window.graphDragPointer) });
+  await expect(map(page)).toHaveAttribute('data-pinned', 'false');
   await page.mouse.up();
   await expect(map(page)).toHaveAttribute('data-pinned', 'false');
   expect(await map(page).getAttribute('data-selected')).toBe(selected);

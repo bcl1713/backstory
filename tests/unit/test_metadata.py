@@ -52,3 +52,10 @@ def test_real_link_structure_limit_retains_safe_category():
     note = metadata.project_note(snapshot('---\ntitle: Many links\n---\n' + '[x](target) ' * 26000))
     assert note.projection_failure.phase == 'links'
     assert note.projection_failure.reason == 'link_structure_limit'
+
+
+@pytest.mark.parametrize('newline', ['\n', '\r\n', '\r'])
+def test_graph_occurrence_line_offsets_cover_front_matter_newline_styles(newline):
+    source = newline.join(['---', 'id: target', '---', '[[Other]]', ''])
+    note = metadata.project_note(snapshot(source))
+    assert note.edges[0].position[0] == 4

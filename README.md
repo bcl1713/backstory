@@ -18,7 +18,8 @@ network, privacy and device-verification limits.
 
 The [editor guide](docs/editor.md) covers Zen, navigation shortcuts, clickable
 live links and complete-document source access.
-[Move and archive](docs/relocation.md) covers reviewed note/folder relocation and
+[Graph](docs/graph.md) covers the elastic relationship map and accessible
+connection list. [Move and archive](docs/relocation.md) covers reviewed note/folder relocation and
 recovery; [browser tools](docs/webmcp.md) describes the WebMCP read and guarded-save
 adapter and the remaining actual-host write verification.
 

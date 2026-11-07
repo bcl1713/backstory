@@ -17,19 +17,34 @@ export class GraphView {
     this.reduced = matchMedia('(prefers-reduced-motion: reduce)');
     this.paused = this.reduced.matches; this.intensity = 1; this.drag = null;
     this.data = { nodes: [], edges: [] }; this.focused = this.selected = null;
+    this.pixelRatio = 1;
     const id = `graph-arrow-${++instance}`;
     this.svg = svgElement('svg', { viewBox: '0 0 960 600', 'aria-hidden': 'true', focusable: 'false', preserveAspectRatio: 'none' });
     const defs = svgElement('defs');
-    const marker = svgElement('marker', { id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto-start-reverse' });
+    const marker = svgElement('marker', { id, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, markerUnits: 'userSpaceOnUse', orient: 'auto-start-reverse' });
+    this.marker = marker;
     marker.append(svgElement('path', { d: 'M 0 0 L 10 5 L 0 10 z', class: 'graph-arrow' }));
-    defs.append(marker); this.svg.append(defs);
-    this.svg.append(svgElement('path', { d: 'M 24 90 V 24 H 90 M 870 24 H 936 V 90 M 24 510 V 576 H 90 M 870 576 H 936 V 510 M 24 300 H 936', class: 'graph-frame' }));
+    const filter = svgElement('filter', { id: id + '-bloom', x: '-10%', y: '-10%', width: '120%', height: '120%' });
+    this.blur = svgElement('feGaussianBlur', { stdDeviation: 3 }); filter.append(this.blur);
+    defs.append(marker, filter); this.svg.append(defs);
+    this.frameMarks = svgElement('path', { class: 'graph-frame' }); this.svg.append(this.frameMarks);
     this.world = svgElement('g', { class: 'graph-world' });
-    this.halos = svgElement('g', { class: 'graph-bloom' });
+    this.halos = svgElement('g', { class: 'graph-bloom', filter: `url(#${id}-bloom)` });
     this.edgeLayer = svgElement('g'); this.nodeLayer = svgElement('g');
     this.world.append(this.halos, this.edgeLayer, this.nodeLayer); this.svg.append(this.world);
     this.arrow = `url(#${id})`;
     container.replaceChildren(this.svg);
+    this.resize = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      if (!width || !height) return;
+      this.pixelRatio = width / this.camera.width;
+      this.viewportWidth = width;
+      this.camera.height = this.camera.width * height / width;
+      this.svg.setAttribute('viewBox', `0 0 ${this.camera.width} ${this.camera.height}`);
+      if (!this.sized && this.loaded) this.camera.fit(this.simulation.nodes, true);
+      this.sized = true; this.draw();
+    });
+    this.resize.observe(container);
     const listen = (el, type, fn, options = {}) => el.addEventListener(type, fn, { ...options, signal: this.life.signal });
     listen(container, 'keydown', event => this.keydown(event));
     listen(container, 'pointerdown', event => this.pointerDown(event));
@@ -75,7 +90,7 @@ export class GraphView {
       label.textContent = node.title.length > 38 ? node.title.slice(0, 37) + '…' : node.title;
       group.append(title, hit, circle, current, diamond, reticle, label);
       this.nodeLayer.append(group); this.halos.append(halo);
-      return [node.path, { group, halo, label }];
+      return [node.path, { group, halo, label, title: node.title }];
     }));
     this.setSelection(this.selected, this.focused);
     if (!this.loaded) { this.camera.fit(this.simulation.nodes, true); this.loaded = true; }
@@ -101,6 +116,10 @@ export class GraphView {
       line.setAttribute('data-hop', String(tier)); halo.setAttribute('opacity', emission(tier, this.intensity) * .28);
       line.classList.toggle('is-near', tier <= 1);
     }
+    for (const path of [this.current, this.focused, this.selected]) {
+      const group = this.nodeElements?.get(path)?.group;
+      if (group) this.nodeLayer.append(group);
+    }
     this.draw();
   }
   setBloom(value) {
@@ -116,7 +135,11 @@ export class GraphView {
     this.actions.onPause?.(this.paused); this.draw();
   }
   fit() { this.camera.fit(this.simulation.nodes, this.paused); this.draw(); this.wake(); }
-  zoom(factor, point) { this.camera.zoom(factor, point, this.paused); this.draw(); this.wake(); }
+  zoom(factor, point) {
+    const focused = this.simulation.nodes.get(this.focused);
+    this.camera.zoom(factor, point || (focused ? this.camera.screen(focused) : undefined), this.paused);
+    this.draw(); this.wake();
+  }
   pan(dx, dy) { this.camera.pan(dx, dy, this.paused); this.draw(); this.wake(); }
   keydown(event) {
     if (event.target !== this.container || event.isComposing || event.altKey || event.metaKey || event.ctrlKey || event.getModifierState?.('AltGraph')) return;
@@ -125,7 +148,7 @@ export class GraphView {
     if (direction) {
       const visible = new Map([...this.simulation.nodes].filter(([path, position]) => {
         const point = this.camera.screen(position);
-        return path === this.focused || point.x >= 0 && point.x <= 960 && point.y >= 0 && point.y <= 600;
+        return path === this.focused || point.x >= 0 && point.x <= this.camera.width && point.y >= 0 && point.y <= this.camera.height;
       }));
       const path = nearestNode(visible, this.focused, direction);
       if (path) this.actions.onSelect(path, true);
@@ -141,12 +164,16 @@ export class GraphView {
   }
   point(event) {
     const bounds = this.svg.getBoundingClientRect();
-    return { x: (event.clientX - bounds.left) * 960 / bounds.width, y: (event.clientY - bounds.top) * 600 / bounds.height };
+    return { x: (event.clientX - bounds.left) * this.camera.width / bounds.width, y: (event.clientY - bounds.top) * this.camera.height / bounds.height };
   }
   pointerDown(event) {
     if (this.drag || event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey) return;
-    const path = event.target.closest('[data-node-path]')?.getAttribute('data-node-path');
     const point = this.point(event);
+    let path = null, nearest = 24 / this.pixelRatio;
+    for (const [candidate, position] of [...this.simulation.nodes].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
+      const screen = this.camera.screen(position), distance = Math.hypot(point.x - screen.x, point.y - screen.y);
+      if (distance < nearest) { nearest = distance; path = candidate; }
+    }
     this.drag = { pointer: event.pointerId, path, start: point, previous: point, moved: false };
     this.container.focus({ preventScroll: true });
     this.container.setPointerCapture(event.pointerId);
@@ -160,7 +187,7 @@ export class GraphView {
     const drag = this.drag;
     if (!drag || drag.pointer !== event.pointerId) return;
     const point = this.point(event);
-    if (Math.hypot(point.x - drag.start.x, point.y - drag.start.y) > 5) drag.moved = true;
+    if (Math.hypot(point.x - drag.start.x, point.y - drag.start.y) > 5 / this.pixelRatio) drag.moved = true;
     if (!drag.moved) return;
     if (drag.path) {
       const world = this.camera.world(point); this.simulation.pin(drag.path, world.x, world.y);
@@ -181,25 +208,41 @@ export class GraphView {
   }
   draw() {
     if (this.destroyed) return;
+    const inverse = 1 / (this.camera.scale * this.pixelRatio);
+    const maximum = Math.max(12, Math.min(38, Math.floor(((this.viewportWidth || 960) - 50) / 7.4)));
+    this.marker.setAttribute('markerWidth', 7 * inverse); this.marker.setAttribute('markerHeight', 7 * inverse);
+    this.blur.setAttribute('stdDeviation', Math.min(28, 3 * inverse));
+    const height = this.camera.height;
+    this.frameMarks.setAttribute('d', `M24 90 V24 H90 M870 24 H936 V90 M24 ${height - 90} V${height - 24} H90 M870 ${height - 24} H936 V${height - 90} M24 ${height / 2} H936`);
     this.world.setAttribute('transform', this.camera.transform());
     for (const { edge, line, halo } of this.edgeElements || []) {
       const a = this.simulation.nodes.get(edge.source), b = this.simulation.nodes.get(edge.destination);
       if (!a || !b) continue;
       const dx = b.x - a.x, dy = b.y - a.y, distance = Math.max(1, Math.hypot(dx, dy));
+      const padding = Math.min(distance * .35, 12 * inverse);
       for (const el of [line, halo]) {
-        el.setAttribute('x1', a.x + dx / distance * 13); el.setAttribute('y1', a.y + dy / distance * 13);
-        el.setAttribute('x2', b.x - dx / distance * 16); el.setAttribute('y2', b.y - dy / distance * 16);
+        el.setAttribute('x1', a.x + dx / distance * padding); el.setAttribute('y1', a.y + dy / distance * padding);
+        el.setAttribute('x2', b.x - dx / distance * padding); el.setAttribute('y2', b.y - dy / distance * padding);
       }
     }
-    const occupied = new Set();
-    for (const [path, { group, halo, label }] of this.nodeElements || []) {
+    const occupied = [];
+    const priority = path => path === this.selected ? 3 : path === this.focused ? 2 : path === this.current ? 1 : 0;
+    const entries = [...(this.nodeElements || [])].sort(([a], [b]) => priority(b) - priority(a));
+    for (const [path, { group, halo, label, title }] of entries) {
       const node = this.simulation.nodes.get(path);
-      group.setAttribute('transform', `translate(${node.x} ${node.y})`);
+      group.setAttribute('transform', `translate(${node.x} ${node.y}) scale(${inverse})`);
       halo.setAttribute('cx', node.x); halo.setAttribute('cy', node.y);
+      halo.setAttribute('r', 19 * inverse);
       const point = this.camera.screen(node);
-      const cell = `${Math.floor(point.x / 120)},${Math.floor(point.y / 25)}`;
-      label.classList.toggle('is-decluttered', occupied.has(cell) && path !== this.selected && path !== this.focused && path !== this.current);
-      occupied.add(cell);
+      const text = title.length > maximum ? title.slice(0, maximum - 1) + '…' : title;
+      if (label.textContent !== text) label.textContent = text;
+      const width = text.length * 7.4 / this.pixelRatio;
+      const left = point.x + 17 / this.pixelRatio + width > this.camera.width;
+      label.setAttribute('text-anchor', left ? 'end' : 'start'); label.setAttribute('x', left ? -17 : 17);
+      const rect = { x: point.x + (left ? -17 / this.pixelRatio - width : 17 / this.pixelRatio), y: point.y - 11 / this.pixelRatio, w: width, h: 20 / this.pixelRatio };
+      const overlaps = occupied.some(r => rect.x < r.x + r.w && rect.x + rect.w > r.x && rect.y < r.y + r.h && rect.y + rect.h > r.y);
+      label.classList.toggle('is-decluttered', overlaps && priority(path) === 0);
+      if (!overlaps || priority(path)) occupied.push(rect);
     }
     this.container.dataset.motion = this.paused || this.reduced.matches ? 'paused' : this.simulation.active ? 'moving' : 'settled';
   }
@@ -221,5 +264,5 @@ export class GraphView {
     else if (this.simulation.limitReached) this.actions.onLimit?.();
   }
   stop() { if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; }
-  destroy() { this.release(null, true); this.destroyed = true; this.stop(); this.life.abort(); this.simulation.destroy(); this.container.replaceChildren(); }
+  destroy() { this.release(null, true); this.destroyed = true; this.stop(); this.life.abort(); this.resize.disconnect(); this.simulation.destroy(); this.container.replaceChildren(); }
 }

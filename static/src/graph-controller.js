@@ -43,6 +43,9 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   let page = null, selected = currentPath || null, focused = currentPath || null;
   let listMode = matchMedia('(max-width: 650px)').matches, trail = [], nextCursor = null;
   let view = null;
+  find('[data-graph-filter-options]').open = !listMode;
+  find('[data-graph-map-options]').open = !listMode;
+  const focusSearch = () => { find('[data-graph-filter-options]').open = true; input('query').focus({ preventScroll: true }); };
 
   const parameters = () => {
     const values = Object.fromEntries(new FormData(form));
@@ -64,7 +67,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   try {
     view = new GraphView(map, {
       onSelect: (path, focus) => select(path, focus), onOpen: open, onCenter: path => center(path),
-      onSearch: () => input('query').focus(), onEscape: escape, onHelp: toggleHelp,
+      onSearch: focusSearch, onEscape: escape, onHelp: toggleHelp,
       onPause: paused => { find('[data-graph-pause]').setAttribute('aria-pressed', String(paused)); },
       onLimit: () => say('Layout work limit reached; positions frozen. Navigation and evidence remain available.'),
     });
@@ -192,6 +195,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     if (!find('[data-graph-help]').hidden) { event.preventDefault(); event.stopImmediatePropagation(); toggleHelp(); return; }
     if (form.contains(event.target)) {
       event.preventDefault(); event.stopImmediatePropagation(); clearTimeout(debounce); sequence++; request?.abort();
+      if (matchMedia('(max-width: 650px)').matches) find('[data-graph-filter-options]').open = false;
       if (listMode) find('[data-graph-list-toggle]').focus(); else map.focus({ preventScroll: true });
       say('Search focus ended. Selection retained. Escape closes the graph.');
     } else if (event.target !== map) { event.preventDefault(); event.stopImmediatePropagation(); escape(); }
@@ -217,7 +221,8 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   view?.setBloom(find('[data-graph-bloom]').value); presentation();
   if (initial) accept(initial); else void load();
   return {
-    focusSearch() { input('query').focus({ preventScroll: true }); },
+    focusSearch,
+    focusNavigation() { if (listMode) find('[data-graph-list-toggle]').focus({ preventScroll: true }); else map.focus({ preventScroll: true }); },
     destroy() { closed = true; sequence++; detailSequence++; clearTimeout(debounce); request?.abort(); detailRequest?.abort(); life.abort(); view?.destroy(); },
   };
 }

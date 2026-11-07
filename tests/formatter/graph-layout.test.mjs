@@ -58,6 +58,18 @@ test('fixed catch-up, topology continuity and total settling work are bounded', 
   assert.throws(() => sim.setGraph(nodes(Array.from({ length: 201 }, (_, i) => String(i))), []), RangeError);
 });
 
+test('equal elapsed time at 30 and 60 fps produces the same fixed-step state', async () => {
+  const { GraphPhysics } = await modules();
+  const a = new GraphPhysics(nodes(['a', 'b', 'c']), [edge('a', 'b'), edge('b', 'c')]);
+  const b = new GraphPhysics(nodes(['a', 'b', 'c']), [edge('a', 'b'), edge('b', 'c')]);
+  for (let i = 0; i < 30; i++) a.advance(1 / 30);
+  for (let i = 0; i < 60; i++) b.advance(1 / 60);
+  for (const path of ['a', 'b', 'c']) {
+    assert.ok(Math.abs(a.nodes.get(path).x - b.nodes.get(path).x) < 1e-8);
+    assert.ok(Math.abs(a.nodes.get(path).y - b.nodes.get(path).y) < 1e-8);
+  }
+});
+
 test('shortest explicit hops handle cycles, duplicates, disconnected nodes and farther edge tiers', async () => {
   const { hopTiers, emission } = await modules();
   const all = nodes(['a', 'b', 'c', 'd', 'unlinked']);
