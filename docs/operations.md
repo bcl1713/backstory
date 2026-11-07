@@ -314,9 +314,12 @@ deadline wins during cleanup. Both ten-second deadlines remain unchanged.
 
 Published images embed the tested SHA and release version through
 `BACKSTORY_BUILD_REVISION` and `BACKSTORY_BUILD_VERSION`. These are internal log
-selectors, not new health/API fields. Native/local image builds without the
-release arguments report `unknown` revision; do not identify a deployment from a
-working checkout's head. Overrides must retain the actual image identity.
+selectors. Authenticated status separately reads artifact-local packaged metadata
+for `application.build` and `application.version`; runtime environment overrides
+do not change those fields. Native/local image builds without release arguments
+report `unknown` identity. Do not identify a deployment from a working checkout's
+head. Log selector overrides must retain the actual image identity. See
+[release identity and verification](releases.md#published-artifacts).
 
 Run the generated-data probe from an identified checkout with pinned Node:
 

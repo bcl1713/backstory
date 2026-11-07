@@ -31,10 +31,13 @@ chooses a new evidence directory outside the checkout; otherwise a private
 temporary directory is created. Use a different `--port` for another concurrent
 suite. Run from separate checkouts so dependency installation and asset builds
 cannot race. Browser suites run sequentially, each with its own synthetic wiki
-and database, and one Playwright worker as before. Chromium runs the whole suite,
-not just one former shard. Python retains its two isolated xdist workers.
+and database, and one Playwright worker as before. The automatic gate uses the
+focused Firefox suites; the catch-all Chromium suite (440 tests at removal) is
+no longer run or required by release receipts, and browser installation is limited
+to Firefox. Python retains its two
+isolated xdist workers. For individual issues, run the relevant tests directly.
 
-The full gate includes asset build, all Python and formatter tests, Chromium,
+The full gate includes asset build, all Python and formatter tests,
 focused Firefox code blocks, Firefox renderer tests, pinned stock Firefox, Django
 deployment checks, Compose validation and a built-container Django check. A
 missing tool or failed stage blocks success. There is no reduced-release or

@@ -5,6 +5,14 @@ from tests.integration.test_browsing import reader
 pytestmark = pytest.mark.django_db
 
 
+@pytest.fixture(autouse=True)
+def package_metadata(tmp_path, monkeypatch):
+    import wiki.build_identity as identity
+    path = tmp_path / '_build_identity.json'
+    monkeypatch.setattr(identity, '_METADATA_PATH', path)
+    return path
+
+
 def test_status_is_private_read_only_and_reports_unknown_build(reader, wiki):
     from wiki.models import WikiSettings
     from indexing.models import IndexJob
@@ -12,6 +20,7 @@ def test_status_is_private_read_only_and_reports_unknown_build(reader, wiki):
     assert response.status_code == 200
     body = response.json()
     assert body['application']['build'] == 'unknown'
+    assert body['application']['version'] == 'unknown'
     assert body['storage']['state'] == 'ready'
     assert body['timezone']['source'] == 'fallback'
     assert body['timezone']['timezone'] == 'UTC'
@@ -21,6 +30,47 @@ def test_status_is_private_read_only_and_reports_unknown_build(reader, wiki):
     assert not IndexJob.objects.exists()
     assert response['Cache-Control'] == 'no-store'
     assert str(wiki) not in response.content.decode()
+
+
+@pytest.mark.parametrize('version', ['1.4.0', '1.4.0-dev.12.gaaaaaaaaaaaa'])
+def test_status_reports_packaged_release_identity(reader, wiki, package_metadata, version):
+    import json
+    from indexing.models import IndexJob
+    from wiki.models import WikiSettings
+
+    content = json.dumps({'build': 'a' * 40, 'version': version,
+                          'private_path': '/private/wiki', 'token': 'private-token'})
+    package_metadata.write_text(content)
+    response = reader.get('/tools/status/')
+    assert response.status_code == 200
+    assert response.json()['application'] == {
+        'name': 'Backstory', 'build': 'a' * 40, 'version': version,
+    }
+    assert response['Cache-Control'] == 'no-store'
+    assert b'private' not in response.content
+    assert package_metadata.read_text() == content
+    assert not WikiSettings.objects.exists()
+    assert not IndexJob.objects.exists()
+    reader.logout()
+    assert reader.get('/tools/status/').status_code == 401
+    assert reader.get('/health/').json() == {'web': 'ok'}
+
+
+@pytest.mark.parametrize('raw', [
+    b'{"build":"/secret/source","version":"private-token"}', b'[]', b'\xff',
+    b'{"build":"' + b'a' * 40 + b'","version":"1.4.0","extra":"' + b'x' * 1024 + b'"}',
+])
+def test_invalid_package_metadata_does_not_hide_other_status(reader, wiki, package_metadata, raw):
+    package_metadata.write_bytes(raw)
+    response = reader.get('/tools/status/')
+    assert response.status_code == 200
+    body = response.json()
+    assert body['application'] == {'name': 'Backstory', 'build': 'unknown', 'version': 'unknown'}
+    assert body['state'] == 'ok'
+    assert body['storage']['state'] == 'ready'
+    assert body['timezone']['timezone'] == 'UTC'
+    assert response['Cache-Control'] == 'no-store'
+    assert b'secret' not in response.content and b'private-token' not in response.content
 
 
 def test_status_component_failure_does_not_hide_other_results(reader, wiki, monkeypatch):
@@ -74,11 +124,12 @@ def test_status_redacts_recovery_and_raw_index_failures(reader, wiki, monkeypatc
 
 
 @pytest.mark.parametrize('end_session', ['revoke', 'disable', 'expire'])
-def test_status_requires_current_session(reader, wiki, end_session):
+def test_status_requires_current_session(reader, wiki, end_session, package_metadata):
     from accounts.models import SessionDevice
     from django.contrib.auth import get_user_model
     from django.utils import timezone
     from datetime import timedelta
+    package_metadata.write_text('{"build":"' + 'a' * 40 + '","version":"1.4.0"}')
     if end_session == 'disable':
         get_user_model().objects.filter(username='synthetic-reader').update(is_active=False)
     elif end_session == 'revoke':
