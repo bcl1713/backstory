@@ -110,3 +110,22 @@ an older PR base snapshot and a newer target, plus mismatched CLI/REST head/base
 observations. `git diff --check` passed. Other receipts/browser/publication
 checks retain prior evidence; no full gate, remote push or controller change was
 performed for this correction.
+
+## Installed CLI review-pagination correction
+
+The installed `gh api` supports `--paginate` but not `--slurp`. Replaced that
+version-dependent flag combination with explicit `GET` review pages using
+`per_page=100&page=N`, continuing until the first short page. Every response
+must be a review array with valid state/user identity fields; malformed pages
+fail closed. Repeated PR/current-target binding still follows all review pages.
+Checked installed `gh api --help` and `gh pr view --help`: the remaining new
+command flags (`--hostname`, `--repo`, `--json`) are supported.
+
+The focused mocked-command regressions first failed against the unsupported
+flag/incomplete parser (7 failures, 2 passes). Final candidate-file command using
+the same supplied Python virtualenv passed **29 tests in 1.76s**. Coverage includes
+101 reviews across two pages, a change request on page two, explicit absence of
+unsupported pagination flags, and four malformed-response forms. Existing real
+Git stale-head/base and exact-candidate tests remain in this selected file.
+`git diff --check` passed. No other suites, live API calls, remote pushes or
+controller/state changes ran for this correction.

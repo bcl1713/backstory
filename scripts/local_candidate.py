@@ -49,13 +49,25 @@ def pull_request(number):
          '--json', fields], text=True, timeout=120))
     if any(view[key] != pr[key] for key in fields.split(',') if key != 'reviewDecision'):
         raise ValueError('PR metadata changed between REST and review decision observations.')
-    pages = json.loads(subprocess.check_output(
-        ['gh', 'api', '--hostname', 'github.com', '--paginate', '--slurp',
-         endpoint + '/reviews'], text=True, timeout=120))
+    reviews, page_number = [], 1
+    while True:
+        page = json.loads(subprocess.check_output(
+            ['gh', 'api', '--hostname', 'github.com',
+             endpoint + f'/reviews?per_page=100&page={page_number}'], text=True, timeout=120))
+        if (not isinstance(page, list) or any(
+                not isinstance(review, dict) or not isinstance(review.get('state'), str)
+                or not review['state'] or not isinstance(review.get('user'), dict)
+                or not isinstance(review['user'].get('login'), str) or not review['user']['login']
+                for review in page)):
+            raise ValueError('Malformed PR review metadata; refusing incomplete review evidence.')
+        reviews.extend(page)
+        if len(page) < 100:
+            break
+        page_number += 1
     if snapshot() != pr:
         raise ValueError('PR head/base metadata changed while reading review evidence.')
     pr['reviewDecision'] = view['reviewDecision']
-    pr['reviews'] = [review for page in pages for review in page]
+    pr['reviews'] = reviews
     return pr
 
 

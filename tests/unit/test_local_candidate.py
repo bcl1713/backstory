@@ -264,7 +264,7 @@ def test_pull_request_uses_supported_cli_fields_and_consistent_rest_metadata(mon
         cli['headRefOid'] = 'c' * 40
     if mismatch == 'cli-base':
         cli['baseRefName'] = 'main'
-    calls, snapshots = [], 0
+    calls, snapshots, review_pages = [], 0, []
     def output(args, **kwargs):
         nonlocal snapshots
         calls.append(args)
@@ -275,8 +275,13 @@ def test_pull_request_uses_supported_cli_fields_and_consistent_rest_metadata(mon
                 raise subprocess.CalledProcessError(1, args, stderr='Unknown JSON field: baseRefOid')
             return json.dumps(cli)
         assert args[:4] == ['gh', 'api', '--hostname', 'github.com']
-        if args[-1].endswith('/reviews'):
-            return json.dumps([[dict(state='CHANGES_REQUESTED', user={'login': 'reviewer'}, commit_id='b' * 40)]])
+        assert '--slurp' not in args and '--paginate' not in args
+        if '/reviews?' in args[-1]:
+            assert 'per_page=100' in args[-1]
+            page = int(args[-1].rsplit('page=', 1)[1])
+            review_pages.append(page)
+            return json.dumps([dict(state='COMMENTED', user={'login': 'reviewer'})] * 100 if page == 1 else
+                              [dict(state='CHANGES_REQUESTED', user={'login': 'reviewer'}, commit_id='b' * 40)])
         if args[-1] == 'repos/bcl1713/backstory/git/ref/heads/dev':
             return json.dumps({'object': {'sha': ('c' if mismatch == 'rest-base' and snapshots > 1 else 'a') * 40}})
         assert args[-1] == 'repos/bcl1713/backstory/pulls/121'
@@ -292,7 +297,9 @@ def test_pull_request_uses_supported_cli_fields_and_consistent_rest_metadata(mon
         pr = m.pull_request(121)
         assert pr['baseRefOid'] == 'a' * 40 and pr['headRefOid'] == 'b' * 40
         assert pr['reviewDecision'] == 'REVIEW_REQUIRED'
-        assert pr['reviews'][0]['state'] == 'CHANGES_REQUESTED'
+        assert len(pr['reviews']) == 101
+        assert pr['reviews'][-1]['state'] == 'CHANGES_REQUESTED'
+        assert review_pages == [1, 2]
         assert pr['headRepositoryOwner'] == {'login': 'bcl1713'}
         assert pr['headRepository'] == {'name': 'backstory'}
         assert snapshots == 2
@@ -316,8 +323,8 @@ def test_prepare_uses_current_target_after_pr_base_snapshot_is_stale(candidate, 
         if args[:3] == ['gh', 'pr', 'view']:
             return json.dumps({**pr, 'reviewDecision': None})
         if args[0] == 'gh':
-            if args[-1].endswith('/reviews'):
-                return json.dumps([pr['reviews']])
+            if '/reviews?' in args[-1]:
+                return json.dumps(pr['reviews'])
             if '/git/ref/heads/' in args[-1]:
                 return json.dumps({'object': {'sha': current_base}})
             return json.dumps(rest)
@@ -332,3 +339,24 @@ def test_prepare_uses_current_target_after_pr_base_snapshot_is_stale(candidate, 
     parents = original(['git', 'show', '-s', '--format=%P', record['source_sha']],
                        cwd=path.parent / 'source', text=True).strip().split()
     assert parents == [current_base, pr['headRefOid']]
+
+
+@pytest.mark.parametrize('malformed', [{'message': 'not a list'}, [None], [{}],
+                                      [{'state': None, 'user': {'login': 'reviewer'}}]])
+def test_review_pagination_rejects_malformed_api_response(monkeypatch, malformed):
+    m = module()
+    view = dict(number=121, state='OPEN', isDraft=False, baseRefName='dev',
+                headRefName='feature', headRefOid='b' * 40, reviewDecision=None)
+    def output(args, **kwargs):
+        if args[:3] == ['gh', 'pr', 'view']:
+            return json.dumps(view)
+        if '/reviews?' in args[-1]:
+            return json.dumps(malformed)
+        if '/git/ref/' in args[-1]:
+            return json.dumps({'object': {'sha': 'a' * 40}})
+        return json.dumps(dict(number=121, state='open', draft=False, user={'login': 'author'},
+            base={'ref': 'dev'}, head=dict(ref='feature', sha='b' * 40,
+                repo=dict(name='backstory', owner={'login': 'bcl1713'}))))
+    monkeypatch.setattr(m.subprocess, 'check_output', output)
+    with pytest.raises(ValueError, match='review'):
+        m.pull_request(121)
