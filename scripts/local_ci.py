@@ -7,19 +7,21 @@ and installed Playwright OS dependencies. No publication or live deployment.
 import argparse
 from datetime import datetime, timezone
 import json
+import hashlib
 import os
 from pathlib import Path
 import platform
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RECEIPT_SCHEMA = 2
+RECEIPT_SCHEMA = 3
 
 
 def branch_policy(base, head):
@@ -53,10 +55,10 @@ docker compose --env-file "$LOCAL_REPORT/container-fixture/fixture.env" -f compo
 '''
     return [
         step('dependencies', 'uv sync --frozen --python 3.14\nnpm ci'),
+        step('browser-install', 'npx playwright install firefox'),
         step('build', 'npm run build'),
         step('python', 'uv run pytest -n 2 --dist loadfile --durations=20'),
         step('formatter', 'npm run test:formatter'),
-        step('browser-install', 'npx playwright install firefox'),
         step('firefox-code', 'npx playwright test --config=playwright.code.config.js', browser('firefox-code')),
         step('firefox-renderers', 'npx playwright test --config=playwright.firefox.config.js', browser('firefox-renderers')),
         step('container', container),
@@ -72,13 +74,64 @@ def source_identity(root):
                  for ref in ('HEAD', 'HEAD^{tree}'))
 
 
-def validate_receipt(receipt, source_sha, source_tree):
+def tool_identity(args, *, cwd=None):
+    return subprocess.check_output(args, cwd=cwd, text=True, stderr=subprocess.PIPE, timeout=30).strip()
+
+
+def file_digest(path):
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def browser_identity(root):
+    path = tool_identity(['node', '-e', 'process.stdout.write(require("playwright").firefox.executablePath())'], cwd=root)
+    return file_digest(path)
+
+
+def runtime_inputs(root):
+    """Conservative local provenance; hashes selectors, never stores credentials.
+
+    Reuse is intentionally limited to an unchanged executor/toolchain. Source
+    lockfiles, gate code and browser revision are additionally bound by the tree.
+    """
+    tools = {
+        'node': ['node', '--version'], 'npm': ['npm', '--version'], 'uv': ['uv', '--version'],
+        'docker': ['docker', 'version', '--format', '{{.Client.Version}}/{{.Server.Version}}'],
+        'compose': ['docker', 'compose', 'version', '--short'],
+        'buildx': ['docker', 'buildx', 'version'],
+        'python': [str(Path(root) / '.venv/bin/python'), '--version'],
+    }
+    result = {name: tool_identity(args, cwd=root) for name, args in tools.items()}
+    result.update(runner=sys.version, platform=platform.platform(), browser_sha256=browser_identity(root),
+                  os_sha256=file_digest('/etc/os-release'))
+    # Include installed OS libraries/fonts, without recording a package inventory.
+    result['packages_sha256'] = hashlib.sha256(tool_identity(
+        ['dpkg-query', '-W', '-f=${binary:Package}=${Version}\n']).encode()).hexdigest()
+    font = tool_identity(['fc-match', '-f', '%{file}', 'Arial'])
+    result['font_sha256'] = file_digest(font)
+    selected = {name: os.environ.get(name, '') for name in (
+        'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_DEFAULT_PLATFORM', 'FONTCONFIG_FILE',
+        'FONTCONFIG_PATH', 'PLAYWRIGHT_BROWSERS_PATH', 'LD_LIBRARY_PATH',
+        'LD_PRELOAD', 'LANG', 'LC_ALL', 'TZ')}
+    result['selectors_sha256'] = hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest()
+    for name in ('FONTCONFIG_FILE',):
+        if selected[name]:
+            result[name.lower() + '_sha256'] = file_digest(selected[name])
+    return result
+
+
+def validate_receipt(receipt, source_sha, source_tree, root=ROOT):
     gates = {step['name'] for step in build_plan(Path('/tmp/unused'), 18765)}
     if (receipt.get('schema') != RECEIPT_SCHEMA or receipt.get('source_sha') != source_sha
             or receipt.get('source_tree') != source_tree
             or set(receipt.get('gates', {})) != gates
             or any(value != 'passed' for value in receipt['gates'].values())):
         raise ValueError('A full successful local CI receipt for this exact clean commit is required.')
+    if not receipt.get('inputs') or receipt['inputs'] != runtime_inputs(root):
+        raise ValueError('Receipt runtime inputs are missing or changed; a new candidate gate is required.')
 
 
 def process_table():
@@ -183,6 +236,8 @@ def run_suite(root, report, port):
     record = dict(schema=RECEIPT_SCHEMA, source_sha=source_sha, source_tree=source_tree,
                   started_at=datetime.now(timezone.utc).isoformat(), gates={})
     for step in build_plan(report, port):
+        if step['name'] not in ('dependencies', 'browser-install') and 'inputs' not in record:
+            record['inputs'] = runtime_inputs(root)
         print('Running ' + step['name'], flush=True)
         record['gates'][step['name']] = 'running'
         (report / 'status.json').write_text(json.dumps(record, indent=2) + '\n')
@@ -196,7 +251,7 @@ def run_suite(root, report, port):
     if source_identity(root) != (source_sha, source_tree):
         raise ValueError('Source changed while tests were running; receipt refused.')
     record['completed_at'] = datetime.now(timezone.utc).isoformat()
-    validate_receipt(record, source_sha, source_tree)
+    validate_receipt(record, source_sha, source_tree, root=root)
     (report / 'status.json').write_text(json.dumps(record, indent=2) + '\n')
     (report / 'receipt.json').write_text(json.dumps(record, indent=2) + '\n')
     return record
@@ -211,7 +266,7 @@ def preflight():
         os.close(os.pidfd_open(os.getpid()))
     except OSError as error:
         raise ValueError('Linux pidfd support is required for scoped process cleanup.') from error
-    for tool in ('bash', 'git', 'uv', 'node', 'npm', 'npx', 'docker', 'curl', 'tar', 'sha256sum'):
+    for tool in ('bash', 'git', 'uv', 'node', 'npm', 'npx', 'docker', 'curl', 'tar', 'sha256sum', 'dpkg-query', 'fc-match'):
         if not shutil.which(tool):
             raise ValueError('Required local tool missing: ' + tool)
     if subprocess.check_output(['node', '--version'], text=True).strip() != 'v22.23.4':

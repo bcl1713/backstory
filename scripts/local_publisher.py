@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Watch release branches and automatically test, build and publish locally."""
+"""Watch release branches and publish retained exact-candidate evidence locally."""
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -8,7 +8,6 @@ import json
 import logging
 import os
 from pathlib import Path
-import shutil
 import signal
 import subprocess
 import sys
@@ -16,7 +15,7 @@ import tempfile
 import threading
 import time
 
-from local_ci import ROOT, run_process, source_identity
+from local_ci import ROOT, run_process
 
 REPOSITORY_URL = 'https://github.com/bcl1713/backstory.git'
 CHANNELS = {'dev': 'dev', 'main': 'stable'}
@@ -77,60 +76,34 @@ class Publisher:
             }
         self.save()
 
-    def checkout(self, job, sha, log):
-        temporary = Path(tempfile.mkdtemp(prefix='checkout-', dir=job))
-        try:
-            run_process(['git', 'clone', '--shared', '--no-checkout', str(self.mirror), str(temporary)],
-                        stdout=log, stderr=subprocess.STDOUT, timeout=120)
-            run_process(['git', '-C', str(temporary), 'remote', 'set-url', 'origin', REPOSITORY_URL],
-                        stdout=log, stderr=subprocess.STDOUT, timeout=120)
-            run_process(['git', '-C', str(temporary), 'checkout', '--detach', sha],
-                        stdout=log, stderr=subprocess.STDOUT, timeout=120)
-            source = job / 'source'
-            temporary.rename(source)
-            return source
-        except BaseException:
-            shutil.rmtree(temporary)
-            raise
-
     def attempt(self, branch, sha, record):
         jobs = self.state_dir / 'jobs'
         jobs.mkdir(mode=0o700, exist_ok=True)
         job = Path(tempfile.mkdtemp(prefix=branch + '-' + sha[:12] + '-', dir=jobs))
-        record.update(source_sha=sha, job=str(job), status='testing')
+        record.update(source_sha=sha, job=str(job), status='validating')
         self.save()
-        logging.info('Testing %s %s; evidence: %s', branch, sha, job)
+        logging.info('Publishing %s %s with retained candidate evidence; attempt: %s', branch, sha, job)
+        # Import lazily: the candidate controller shares this module's lock.
+        from local_candidate import validate_evidence
+        candidate_path = self.state_dir / 'candidates' / sha / 'candidate.json'
+        candidate = json.loads(candidate_path.read_text())
+        if (branch not in candidate.get('landed_branches', []) or candidate.get('source_sha') != sha
+                or candidate.get('status') not in ('landing', 'landed')
+                or candidate.get('reviewed_candidate') != sha):
+            raise ValueError('Release branch needs reviewed exact-candidate evidence; no post-merge gate fallback.')
+        receipt_path = validate_evidence(candidate_path, candidate)
+        source = candidate_path.parent / 'source'
+        record.update(candidate=str(candidate_path), receipt=str(receipt_path), status='publishing')
+        self.save()
         with (job / 'pipeline.log').open('w') as log:
-            source = self.checkout(job, sha, log)
-            if source_identity(source)[0] != sha:
-                raise ValueError('Checkout does not match the selected branch commit.')
-            evidence = job / 'evidence'
-            # Correctness builds must load disposable images into local Docker.
-            # The publication-only container builder is selected for --push later.
-            correctness_env = dict(os.environ)
-            correctness_env.pop('BUILDX_BUILDER', None)
-            run_process([sys.executable, 'scripts/local_ci.py', '--base', branch,
-                         '--head', 'dev', '--report', str(evidence), '--port', str(self.port)],
-                        cwd=source, env=correctness_env,
-                        stdout=log, stderr=subprocess.STDOUT, timeout=7200)
-            receipt = json.loads((evidence / 'receipt.json').read_text())
-            current_sha, tree = source_identity(source)
-            gates = receipt.get('gates')
-            if (current_sha != sha or receipt.get('schema') != 1
-                    or receipt.get('source_sha') != sha or receipt.get('source_tree') != tree
-                    or not isinstance(gates, dict) or not gates
-                    or any(value != 'passed' for value in gates.values())):
-                raise ValueError('Gate did not produce a successful exact-commit receipt.')
             self.fetch()
             if self.git('rev-parse', 'refs/heads/' + branch) != sha:
                 record['status'] = 'superseded'
                 self.save()
                 return 'superseded'
-            record['status'] = 'publishing'
-            self.save()
-            # The source commit's release runner independently validates every
-            # required gate, origin, current branch, image digest and channel.
-            run_process([sys.executable, 'scripts/local_release.py', '--receipt', str(evidence / 'receipt.json'),
+            # The source runner independently validates provenance, every gate,
+            # origin, current branch, image digest and both release platforms.
+            run_process([sys.executable, 'scripts/local_release.py', '--receipt', str(receipt_path),
                          '--channel', CHANNELS[branch], '--assets', str(job / 'release-assets'), '--publish'],
                         cwd=source, stdout=log, stderr=subprocess.STDOUT, timeout=7200)
         record.update(status='published', published_sha=sha,

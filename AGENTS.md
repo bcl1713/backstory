@@ -35,20 +35,21 @@ or an older plan suggests broader or repeated checks.
 
 ## Build and publication
 
-- Plan one owner for the full release gate. With the current automatic publisher,
-  use focused checks and code review before merge, then let the publisher run its
-  required full gate on the resulting release commit. Do not routinely run a
-  duplicate complete gate before merge. If a specific risk requires that earlier
-  run, explain the additional cost and the publisher's separate requirement.
-- For manual publication, reuse an existing successful receipt for the same clean
-  commit with unchanged relevant inputs. `scripts/local_release.py` accepts that
-  receipt; do not invoke `scripts/local_ci.py` again merely to build or publish.
-  Preserve source, branch, receipt, image identity, and packaging validation.
-- The automatic publisher currently runs its own full gate on each release
-  attempt. This instruction does not change that implementation or make receipts
-  transferable between commits. Do not fabricate receipts or bypass validation.
-  If publication would repeat a completed gate, surface that limitation and
-  prefer the documented manual receipt-based path when publication is authorized.
+- The local candidate queue owns the full release gate before merge. Prepare a
+  real proposed merge commit, run its full gate, retain independent review, then
+  land exactly that SHA. A feature-head pass is insufficient. Changed head/base
+  means a new candidate and gate; never transfer receipts between commits. Land
+  with atomic expected leases on both source/target refs. Main promotion
+  synchronizes dev/main to that tested merge before either channel publishes.
+- The publisher consumes the landed candidate's successful receipt and unchanged
+  runtime provenance. It does not rerun the gate. Retain the candidate store and
+  use the same trusted executor/toolchain for test, land and publication.
+- Manual `scripts/local_release.py --receipt ...` and automatic retries reuse
+  valid exact-commit evidence. Preserve source/tree, branch policy, complete gate
+  contract, relevant runtime inputs, version, both image architectures, immutable
+  digest and freshness checks. Missing or changed evidence fails closed.
+- Keep GitHub Actions disabled, preserve independent code/UI review and remote
+  branch protections, and use the [candidate runbook](docs/ci/README.md).
 - A publication or upload failure alone does not invalidate passing application
   tests. Retry using valid existing evidence and the documented recovery path
   when source and relevant inputs are unchanged. Keep publication authorization
