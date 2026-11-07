@@ -100,3 +100,202 @@ def test_relation_pass_resumes_and_bounds_occurrence_resolution(wiki, monkeypatc
     importlib.reload(worker)
     drain(worker)
     assert len(graph.query_links('target.md', 'incoming', limit=100).items) == 63
+
+
+def relation_identity():
+    from indexing.models import IndexGeneration, LinkEdge, RelationState, ResolvedRelation
+    generation = IndexGeneration.objects.get(state='active')
+    state = RelationState.objects.get(generation=generation)
+    return (generation.mutation, state.epoch,
+            list(LinkEdge.objects.order_by('pk').values_list('pk', flat=True)),
+            list(ResolvedRelation.objects.order_by('pk').values_list('pk', 'occurrence_id')))
+
+
+def count_resolutions(monkeypatch):
+    from indexing import graph_projection
+    calls = []
+    original = graph_projection.resolve_relation
+    def counted(source, *args):
+        calls.append(source)
+        return original(source, *args)
+    monkeypatch.setattr(graph_projection, 'resolve_relation', counted)
+    return calls
+
+
+def test_unchanged_verification_preserves_occurrences_epoch_cursor_and_does_no_resolution(wiki, monkeypatch):
+    graph = build_graph(wiki, {'a.md': '[[b]] [[b#Part]]', 'b.md': '# B'})
+    before = relation_identity()
+    first = graph.query_links('a.md', 'outgoing', limit=1)
+    calls = count_resolutions(monkeypatch)
+    from indexing import worker
+    from indexing.queue import request_scan
+    request_scan('verify')
+    drain(worker)
+    assert relation_identity() == before
+    assert calls == []
+    second = graph.query_links('a.md', 'outgoing', cursor=first.next_cursor, limit=1)
+    assert second.items[0].occurrence_id != first.items[0].occurrence_id
+
+
+def test_body_only_refresh_preserves_relations_and_updates_revision_and_positions(wiki, monkeypatch):
+    graph = build_graph(wiki, {'a.md': '[[b]]', 'b.md': '# B'})
+    before = relation_identity()
+    calls = count_resolutions(monkeypatch)
+    from indexing import worker
+    from indexing.queue import enqueue_note
+    from wiki.storage import read_note
+    (wiki / 'a.md').write_text('New prose\n\n[[b]]')
+    revision = read_note('a.md').revision
+    enqueue_note('a.md', revision)
+    drain(worker)
+    after = relation_identity()
+    assert after[1:] == before[1:]
+    assert calls == []
+    item = graph.query_links('a.md', 'outgoing').items[0]
+    assert item.source_revision == revision and item.position[0] == 3
+
+
+def test_new_exact_target_and_negative_name_dependencies_only_resolve_affected_sources(wiki, monkeypatch):
+    graph = build_graph(wiki, {'a.md': '[[Wanted]] [[Missing]]', 'b.md': '[[c]]',
+                               'c.md': '# C', 'deep/alias.md': '---\naliases: [Wanted]\n---\n# Alias'})
+    from indexing import worker
+    from indexing.queue import enqueue_note
+    from wiki.storage import read_note
+    before = relation_identity()
+    calls = count_resolutions(monkeypatch)
+    (wiki / 'Wanted.md').write_text('# Exact')
+    enqueue_note('Wanted.md', read_note('Wanted.md').revision)
+    drain(worker)
+    assert destinations(graph.query_links('a.md', 'outgoing')) == ['Wanted.md']
+    assert calls and set(calls) == {'a.md'}
+    assert relation_identity()[1] == before[1]
+    calls.clear()
+    (wiki / 'new.md').write_text('---\nids: [Missing]\n---\n# New')
+    enqueue_note('new.md', read_note('new.md').revision)
+    drain(worker)
+    assert destinations(graph.query_links('a.md', 'outgoing')) == ['Wanted.md', 'new.md']
+    assert calls and set(calls) == {'a.md'}
+    calls.clear()
+    (wiki / 'other.md').write_text('# Unrelated')
+    enqueue_note('other.md', read_note('other.md').revision)
+    drain(worker)
+    assert calls == []
+
+
+def test_retains_independently_safe_completed_sources_while_affected_source_resumes(wiki):
+    graph = build_graph(wiki, {'a.md': '\n'.join('[[Missing]]' for _ in range(45)),
+                               'safe.md': '[[target]]', 'target.md': '# Target'})
+    from indexing import worker
+    from indexing.queue import enqueue_note
+    from wiki.storage import read_note
+    from indexing.models import ResolvedRelation
+    stable = list(ResolvedRelation.objects.filter(source='safe.md').values_list('pk', 'epoch'))
+    (wiki / 'Missing.md').write_text('# Found')
+    enqueue_note('Missing.md', read_note('Missing.md').revision)
+    result = worker.run_batch()
+    assert result.pending
+    retained = graph.query_links('safe.md', 'outgoing')
+    assert destinations(retained) == ['target.md']
+    assert not retained.projection_complete
+    assert not graph.query_links('a.md', 'outgoing').items
+    drain(worker)
+    assert len(graph.query_links('a.md', 'outgoing', limit=100).items) == 45
+    assert list(ResolvedRelation.objects.filter(source='safe.md').values_list('pk', 'epoch')) == stable
+
+
+def test_alias_collision_removal_and_rename_revisit_negative_and_ambiguous_dependents(wiki, monkeypatch):
+    graph = build_graph(wiki, {'a.md': '[[Alias]]', 'old.md': '---\naliases: [Alias]\n---\n# Old',
+                               'safe.md': '[[safe-target]]', 'safe-target.md': '# Safe'})
+    from indexing import worker
+    from indexing.queue import enqueue_note, request_scan
+    from wiki.storage import read_note
+    calls = count_resolutions(monkeypatch)
+    (wiki / 'new.md').write_text('---\naliases: [Alias]\n---\n# New')
+    enqueue_note('new.md', read_note('new.md').revision)
+    drain(worker)
+    item = graph.query_links('a.md', 'outgoing').items[0]
+    assert item.state == 'ambiguous' and item.choices == ('new.md', 'old.md')
+    assert set(calls) == {'a.md'}
+    calls.clear()
+    (wiki / 'old.md').unlink()
+    (wiki / 'new.md').rename(wiki / 'renamed.md')
+    request_scan('verify')
+    drain(worker)
+    assert destinations(graph.query_links('a.md', 'outgoing')) == ['renamed.md']
+    assert calls and set(calls) == {'a.md'}
+
+
+def test_source_publication_rejects_concurrent_namespace_mutation(wiki, monkeypatch):
+    graph = build_graph(wiki, {'a.md': '[[Alias]] [[Alias]]',
+                               'target.md': '---\naliases: [Alias]\n---\n# Target'})
+    from indexing import graph_projection, worker
+    from indexing.models import IndexGeneration
+    from indexing.queue import enqueue_note
+    from indexing.scanner import file_stat
+    from wiki.storage import read_note
+    (wiki / 'a.md').write_text('[[Alias]] [[Alias]] [[Alias]]')
+    enqueue_note('a.md', read_note('a.md').revision)
+    original = graph_projection.resolve_relation
+    changed = False
+    def race(*args):
+        nonlocal changed
+        result = original(*args)
+        if not changed:
+            changed = True
+            (wiki / 'target.md').write_text('# Alias removed')
+            worker._commit_projection(read_note('target.md'), file_stat('target.md'),
+                                      list(IndexGeneration.objects.filter(state='active')), '')
+        return result
+    monkeypatch.setattr(graph_projection, 'resolve_relation', race)
+    assert worker.run_batch().pending
+    assert not graph.query_links('a.md', 'outgoing').items
+    drain(worker)
+    page = graph.query_links('a.md', 'outgoing')
+    assert len(page.items) == 3 and all(item.state == 'missing' for item in page.items)
+
+
+def test_large_affected_source_finishes_while_unrelated_body_edits_continue(wiki, monkeypatch):
+    graph = build_graph(wiki, {'a.md': '\n'.join('[[Missing]]' for _ in range(45)),
+                               'busy.md': '# Busy'})
+    from indexing import worker
+    from indexing.queue import enqueue_note
+    from wiki.storage import read_note
+    calls = count_resolutions(monkeypatch)
+    (wiki / 'Missing.md').write_text('# Found')
+    enqueue_note('Missing.md', read_note('Missing.md').revision)
+    assert worker.run_batch().pending
+    for number in range(4):
+        (wiki / 'busy.md').write_text(f'# Busy\nUnrelated prose {number}')
+        enqueue_note('busy.md', read_note('busy.md').revision)
+        worker.run_batch()
+    assert len(graph.query_links('a.md', 'outgoing', limit=100).items) == 45
+    assert calls.count('a.md') == 45
+
+
+def test_non_note_path_dependencies_refresh_asset_shadowing_and_missing_images(wiki, monkeypatch):
+    graph = build_graph(wiki, {'source.md': '[[Alias]] ![image](pic.png)',
+                               'deep/a.md': '---\naliases: [Alias]\n---\n# Alias',
+                               'safe.md': '[[deep/a]]'})
+    from indexing import worker
+    from indexing.queue import request_scan
+    before = relation_identity()
+    calls = count_resolutions(monkeypatch)
+    (wiki / 'Alias').write_text('extensionless attachment')
+    (wiki / 'pic.png').write_text('inert')
+    request_scan('verify')
+    drain(worker)
+    items = graph.query_links('source.md', 'outgoing').items
+    assert [(item.destination, item.resource_type) for item in items] == [('Alias', 'asset'), ('pic.png', 'asset')]
+    assert set(calls) == {'source.md'}
+    assert relation_identity()[1:] == before[1:]
+    calls.clear()
+    request_scan('verify')
+    drain(worker)
+    assert calls == []
+    (wiki / 'Alias').unlink()
+    (wiki / 'pic.png').unlink()
+    request_scan('verify')
+    drain(worker)
+    items = graph.query_links('source.md', 'outgoing').items
+    assert items[0].destination == 'deep/a.md' and items[1].state == 'missing'
+    assert set(calls) == {'source.md'}

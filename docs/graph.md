@@ -1,123 +1,133 @@
 # Wiki graph
 
 Open **Menu → Graph**, **Local connections**, or type `g/` in Vim Normal mode
-or a navigation control. Graph search receives focus. Escape leaves search for
-the map first; the next Escape closes the graph and restores the editor caret.
-Insert mode, other text fields, composition, quick open, `gf`, `gh`, browser
-shortcuts and Tab retain their existing behavior. Browser Back closes the overlay.
+or a navigation control. `g/` focuses search; Escape returns to graph navigation,
+then closes the graph and restores the editor caret. Browser Back also closes it.
+Insert mode, composition, Tab and browser shortcuts keep their normal behavior.
 
-The graph uses **indexed saved content**. Unsaved editor buffers are excluded.
-Opening it cancels a pending idle-save timer; selection, searching, recentering
-and dragging never save, format or create notes. Opening a note is a separate
-action and uses the ordinary draft/conflict navigation guard.
+The graph reads **indexed saved content**. Selection, filters, orbit, expansion and
+node dragging never save, format or create notes. Opening a note uses the ordinary
+draft/conflict navigation guard. Pending idle-save is cancelled on graph entry.
 
-## Evidence and navigation
+## Explore connections
 
-The local map starts with incoming/outgoing one-hop links. Choose Two hops to
-expand, or Overview for a bounded global view. Folder, exact tag and literal
-path/title/name search filters share the tool service's semantics. A boundary
-message distinguishes eligible connections outside the filters. Excluded paths
-are never disclosed as boundary nodes.
+Local starts with incoming/outgoing one-hop links. **Load more** adds bounded pages
+to the existing map and connection list; it never replaces earlier pages. Repeated
+canonical nodes and directed aggregate edges are deduplicated, including empty
+continuing pages. **All notes** includes disconnected notes. Folder, exact tag and
+literal path/title/name filters use the shared JSON/WebMCP service.
 
-Arrow keys or h/j/k/l on the focused map focus and inspect the nearest visible
-node in that direction. Enter opens it; Space centers it; `/` focuses search;
-`?` shows help; `+`/`−` zoom. Fit, pan, zoom, previous-center and filter actions
-also have labeled buttons. Tab leaves the map normally. The list has real note
-links, canonical paths, inspect/center controls and stable path ordering.
-Mobile defaults to the list. The direct `/graph/` page provides a server-rendered
-connection/direction list and filter form without JavaScript.
-Filters and additional map controls fold on small screens; Pause and the list
-toggle stay available. `g/` expands and focuses search; Escape reveals navigation.
+Select a node, then **Expand selected** under Map controls to add all its immediate
+connections. Repeat on a descendant to explore beyond two hops. This is deliberate
+expansion of the loaded neighborhoods, not a claim to have traversed an entire
+connected component. Two hops remains a bounded convenience filter; a limited
+response is labeled partial rather than presented as a complete neighborhood.
 
-□ marks the current note, ◇ the selection, and corner brackets the focused note.
-Inspecting a note shows incoming/outgoing occurrences, original target spelling,
-syntax/image classification, fragment, indexed source revision and advisory
-line/column. Reference-link positions may identify the containing line rather
-than the definition. Locations are not edit ranges; fragments are not verified.
-An arrow means that one saved note explicitly references another, not agreement,
-importance or factual support. External links and assets stay references rather
-than note nodes; images/embeds and self-heading links do not add map springs.
+The summary shows loaded notes/links and Complete, More to load, or Partial.
+Complete means all pages in the requested scope were exhausted with valid evidence;
+counts are loaded counts, not invented whole-wiki totals. Pause loading retains
+results and continuation. Refresh starts a new validated result set. Expired cursors
+clear retained results and ask for a restart. Scope/filter changes cancel obsolete
+requests. Selection, camera and surviving positions persist across page merges.
 
-## Motion, theme and bloom
+The client retains at most 10,000 nodes/30,000 edges. If reached, the unconsumed
+continuation remains available through **Continue in a new view** or narrower
+filters. A new window explicitly discards the previous window and remains Partial;
+it never calls the whole scope complete. API response limits are unchanged.
 
-The app-owned SVG map uses the installed semantic palette. Theme changes update
-strokes, labels, focus and halos through CSS without restarting the simulation.
-Light palettes reduce halo opacity; forced colors removes decorative halos.
+Phone layouts open in graph mode where WebGL is supported; the full connection
+list is one action away. An explicit list choice is preserved across scope changes
+within the open graph. Filters, tuning and technical evidence begin collapsed.
+Selected-note actions and incoming/outgoing groups remain available below/beside
+the map. Revisions, epochs, timestamps and advisory locations live in disclosures.
+The direct `/graph/` page has a server-rendered paged connection list without JS.
 
-Physics uses one symmetric spring per unique note pair, regardless of repeated
-mentions or reciprocal arrows. Dragging pins only that node and tugs linked
-neighbors; release/cancellation clears the pin without throwing the node. Drag
-the background to pan. Touch users can scroll outside the map and use labeled
-pan/zoom controls. Positions are presentation, never semantic distance.
+## 3D interaction and accessible alternatives
 
-Final constants live in `static/src/graph-physics.js`: 60 Hz fixed steps, at most
-four catch-up steps, spring rest length 90, stiffness 8, repulsion 1,200,000 with
-softening 144/cap 300, collision radius 22/strength 20, center pull .04,
-elapsed-time damping 4.8 and speed cap 600. The simulation sleeps after 45 steps
-below speed 2 or at 720 total steps. A work-limit message explains forced rest.
-Slow frames suppress halos and reduce catch-up work. Hidden tabs, list mode,
-closed graphs and navigation stop frame work. Reduced motion settles at most
-240 steps without animation and uses immediate camera changes. Pause motion
-freezes the current map while keeping all navigation/evidence available.
+The lazy, locally bundled Three.js `WebGLRenderer` uses true xyz coordinates,
+instanced nodes, shared line/arrow buffers and batched soft halos. No CDN or
+external rendering service is used. Labels use a bounded canvas overlay; there
+is no DOM or draw call per node/edge. All loaded nodes remain in the scene/list.
 
-Bloom is strongest at the selected note, falling monotonically with shortest
-explicit-link hops **inside this displayed graph**; edge tiers use the farther
-endpoint. Direction remains in arrows and evidence. Disconnected nodes remain at
-baseline. Intensity is Off, Restrained or High; Off removes the halo layer.
-Emission is `intensity × (.12 + .65 × .52^hop)`, with disconnected baseline `.08`.
-Selection changes recompute rings once and never move the camera or reheat physics.
-Labels, hit targets and selection/focus glyphs retain readable screen sizes when
-zooming out. Overlapping labels declutter with selected/focused notes first;
-the list always retains every returned path.
+Drag the background to orbit around a stable focus; Shift-drag or two-finger drag
+pans. Pinch/the wheel zooms. Drag a node to stretch its real link springs and tug
+neighbors; release settles elastically. Movement thresholds distinguish taps from
+drags, and pointer cancellation releases pins. Scroll outside the map to scroll
+the page. Labeled Fit, Reset orientation, orbit, pan and zoom controls avoid
+requiring gestures. Pause motion and reduced motion preserve navigation.
 
-## Bounds, freshness and continuation
+Arrow keys or h/j/k/l focus and inspect a visible node. Enter opens it; Space
+centers it; `/` searches; `?` shows help; `+`/`−` zoom. Tab leaves the map. The
+connection list provides canonical paths, real links and ordinary keyboard actions
+independent of changing coordinates. □ marks current, ◇ selected, and a reticle
+focused. Arrows preserve direction. Position and size do not imply meaning.
 
-Responses contain at most 200 nodes, 500 directed aggregated edges, 100 link or
-diagnostic items and 512 KiB of JSON. Depth is 1 or 2, paths/cursors at most 4096
-characters, query/tag at most 256. Candidate and SQLite instruction/time budgets
-also apply. Isolation examines a continuing 20-note window because endpoint
-eligibility includes filesystem checks. An empty page can have a continuation.
+Physics uses unique-pair springs, damping, collision/repulsion, weak centering,
+bounded timesteps/catch-up, deterministic neighbor seeding and cooling. Large
+layouts use a bounded spatial approximation. Simulation stops when settled or at
+the work budget; hidden/list/closed graphs stop animation. Reduced motion starts
+without animation and keeps camera changes immediate. DPR and label work are capped.
 
-Graph pages first page explicit occurrences with both endpoints included, then
-page indexed nodes so disconnected notes remain discoverable. Nodes can repeat
-between pages. A local page retains its eligible center. A one-node limit cannot
-represent an edge and discloses that limit; use links or a larger node limit.
-All cursors bind the full query/limits, policy/storage namespace, generation,
-mutation and relation epoch, expire after one hour and require an explicit
-restart after invalidation. Numeric checkpoints keep tokens bounded for long paths.
+Installed theme semantic colors and typography update without replacing graph
+state. Forced colors removes decoration and retains readable glyphs. Selection is
+the strongest bloom source; brightness falls with shortest explicit-link hops in
+**loaded eligible edges**, with edges using their farther endpoint's tier. Cycles,
+reciprocal edges, occurrence counts and screen proximity cannot amplify emission.
+Off is a true Off. Adaptive quality reduces decorative cost with hysteresis and
+recovers when frames improve, while respecting forced colors and user Off.
 
-The worker keeps raw occurrences and a separately indexed forward/inverse
-canonical projection. Every indexed source/name/path mutation invalidates the
-whole relation epoch. Policy, storage-root identity and resolver version changes
-also invalidate it. Re-resolution resumes in batches of at most 20 occurrences;
-no request scans/parses the vault or reads note bodies. Indexed parse-completeness
-flags avoid scanning metadata while holding the writer lock. Existing indexes
-are rebuilt in the background after migration to classify image occurrences.
+WebGL initialization failure and context loss retain the same loaded connection
+list, filters and navigation. Retry map or context restoration recovers graphics;
+restoration does not start duplicate loops. Resource teardown disposes graphics,
+listeners and observers. No graphics capability is required to open a note.
 
-`authoritative: false`, `untrusted_content: true`, freshness, epochs, observation
-time, limiting reasons and projection completeness accompany each result. Both
-endpoints and ambiguous choices are checked against current policy and no-follow
-storage eligibility before they affect returned relationships/counts. Changed,
-deleted, symlinked or known unindexed endpoints withhold completeness. Failed
-parsing, unfinished resolution and capped work cannot establish missing links or
-isolation. “No indexed connections observed” never proves the disk is unchanged;
-external writers and same-stat edits remain bounded by normal reconciliation.
+## Evidence, incremental indexing and bounds
 
-Only the theme preference persists in the browser. Private graph results,
-positions and the small navigation trail remain in memory. No remote images,
-scripts, raw note HTML/SVG, telemetry, new credentials, CORS changes or remote
-MCP server are involved.
+The worker stores raw occurrences, resolution dependencies and canonical relations
+in SQLite. An unchanged revision refreshes scan/stat bookkeeping without recreating
+raw or resolved rows, changing the completed epoch, or invalidating graph cursors.
+Body/provenance edits preserve occurrence identities when link semantics are equal
+and refresh source revision/positions without re-resolving the whole vault.
 
-## Verification and remaining acceptance
+Known name/path changes dirty affected sources, including dependencies on absent
+and ambiguous names and higher-priority exact paths. Recorded exact-path fingerprints, including absent
+paths and attachments, are verified at most 20 per reconciliation batch without
+scanning attachment trees. A new extensionless file can therefore safely shadow
+an alias without requiring a global relation rebuild. A dirty source is withheld
+while bounded staged work runs; independent safe completed sources remain usable.
+Publication checks source/dependency versions and namespace atomically. Unrelated
+edits do not restart a large source's resumable work. Policy, storage identity,
+resolver/migration uncertainty retain a conservative bounded rebuild path; old
+namespace evidence is never used across an unknown eligibility boundary.
 
-See [graph verification](testing/graph-verification.md) for commands, measured
-synthetic corpus/query/layout results and environment limitations. The fixture
-generator is `tests/fixtures/graph.py`; the query benchmark is
-`python scripts/benchmark_graph.py --output /tmp/graph-results.json` and refuses
-existing fixture destinations. Use generated data only.
+Both endpoints and ambiguity choices are revalidated before they affect results
+or counts. Denied, deleted, symlinked, changed or unverifiable endpoints are
+withheld. Client requests compare an opaque eligibility version as well as index
+identity; authorization/storage failures clear cached map, titles, counts and detail
+panels and cancel older requests. Leaving/closing the graph releases private state.
+No private graph contents are persisted in browser storage.
 
-Actual assistant-host discovery/invocation remains a separate, post-deployment
-acceptance step: discover the three tools, query links/backlinks/graphs/issues,
-follow continuations, navigate and rediscover, then authoritative-read a source.
-Browser registration stubs do not establish host acceptance. This work does not
-deploy or change a live wiki.
+Each response remains bounded to 200 nodes, 500 directed aggregate edges, 100 link
+items and 512 KiB JSON. Paths/cursors are at most 4096 characters, search/tag 256;
+candidate, SQL instruction/time and depth budgets remain enforced. Queries never
+scan the vault or parse/read note bodies. Signed continuations bind query, limits,
+policy/storage namespace and index/publication versions, and expire after an hour.
+
+Results are advisory: `authoritative: false`, `untrusted_content: true`, freshness,
+observation time and completeness accompany them. Source locations are advisory,
+fragments unchecked, assets/images references rather than invented note springs.
+Incomplete parsing/resolution cannot establish missing links or isolation. External
+writers and same-stat changes remain bounded by normal reconciliation; this index
+is not an atomic filesystem snapshot.
+
+## Verification
+
+Current issue 107 checks and limitations are recorded in
+[implementation evidence](testing/107-implementation.md) and the
+[app-wide UX review](testing/107-ux-review.md). Earlier measurements in
+[graph verification](testing/graph-verification.md) describe the previous SVG
+implementation, not this renderer. No new benchmark or device matrix is required.
+
+Actual assistant-host WebMCP discovery/invocation remains a separate, authorized
+post-deployment check. Browser registration stubs do not establish host acceptance.
+Publication builds/releases artifacts; it does not redeploy a live wiki.

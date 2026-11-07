@@ -1,5 +1,7 @@
 import { GraphView } from './graph-view.js';
+import { GraphPages } from './graph-pages.js';
 
+let preferredList = false;
 const linkTo = path => '/notes/' + path.split('/').map(encodeURIComponent).join('/');
 const element = (name, text, attributes = {}) => {
   const el = document.createElement(name);
@@ -16,8 +18,8 @@ const safeNote = node => {
 };
 const safePage = page => page && page.untrusted_content === true && page.authoritative === false &&
   Array.isArray(page.nodes) && page.nodes.length <= 200 && Array.isArray(page.edges) && page.edges.length <= 500 &&
-  page.nodes.every(safeNote) &&
-  page.edges.every(edge => typeof edge.source === 'string' && typeof edge.destination === 'string');
+  page.nodes.every(safeNote) && page.edges.every(edge => typeof edge.source === 'string' &&
+    typeof edge.destination === 'string' && Number.isSafeInteger(edge.occurrence_count) && edge.occurrence_count > 0);
 
 async function readJSON(url, signal) {
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal, headers: { Accept: 'application/json' } });
@@ -25,6 +27,7 @@ async function readJSON(url, signal) {
   const data = await response.json();
   if (!response.ok) throw new Error(response.status === 401 ? 'authentication_required' : data.restart ? 'restart_required' : data.reason_code || 'graph_unavailable');
   if (data.untrusted_content !== true) throw new Error('invalid_response');
+  if (data.state === 'unavailable' || data.freshness?.state === 'unavailable') throw new Error('storage_unavailable');
   return data;
 }
 
@@ -38,15 +41,16 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   const map = find('[data-graph-map]');
   const life = new AbortController();
   const listen = (el, name, fn, options = {}) => el.addEventListener(name, fn, { ...options, signal: life.signal });
-  const say = text => { status.textContent = text; };
+  const say = text => { if (status.textContent !== text) status.textContent = text; };
+  const pages = new GraphPages();
   let closed = false, sequence = 0, detailSequence = 0, request = null, detailRequest = null, debounce;
   let page = null, selected = currentPath || null, focused = currentPath || null;
-  let listMode = matchMedia('(max-width: 650px)').matches, trail = [], nextCursor = null;
-  let view = null;
-  find('[data-graph-filter-options]').open = !listMode;
-  find('[data-graph-map-options]').open = !listMode;
+  let listMode = preferredList, graphicsAvailable = true, trail = [], nextCursor = null, activeParams = null;
+  let view = null, windowed = false;
+  const expanded = new Set();
+  find('[data-graph-filter-options]').open = false;
+  find('[data-graph-map-options]').open = false;
   const focusSearch = () => { find('[data-graph-filter-options]').open = true; input('query').focus({ preventScroll: true }); };
-
   const parameters = () => {
     const values = Object.fromEntries(new FormData(form));
     if (!values.path) delete values.path;
@@ -54,8 +58,6 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   };
   const open = path => {
     if (!path || !page?.nodes.some(node => node.path === path)) return;
-    // A real, connected anchor enters the same draft/conflict guard as the
-    // editor's existing gf command. Selection itself never navigates or saves.
     const anchor = element('a', '', { href: linkTo(path), hidden: '' });
     panel.append(anchor); try { anchor.click(); } finally { anchor.remove(); }
   };
@@ -64,17 +66,25 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     if (!find('[data-graph-help]').hidden) { find('[data-graph-help]').hidden = true; return; }
     onClose();
   };
-  try {
-    view = new GraphView(map, {
-      onSelect: (path, focus) => select(path, focus), onOpen: open, onCenter: path => center(path),
-      onSearch: focusSearch, onEscape: escape, onHelp: toggleHelp,
-      onPause: paused => { find('[data-graph-pause]').setAttribute('aria-pressed', String(paused)); },
-      onLimit: () => say('Layout work limit reached; positions frozen. Navigation and evidence remain available.'),
-    });
-  } catch {
-    listMode = true; say('Map unavailable. The connection list has the same relationships and navigation.');
+  const unavailable = () => {
+    graphicsAvailable = false; listMode = true; presentation();
+    say('Map unavailable. Use the connection list, or retry the map.');
+    find('[data-graph-graphics-retry]').hidden = false;
+  };
+  function createView() {
+    try {
+      view = new GraphView(map, {
+        onSelect: (path, focus) => select(path, focus), onOpen: open, onCenter: path => center(path),
+        onSearch: focusSearch, onEscape: escape, onHelp: toggleHelp,
+        onPause: paused => { find('[data-graph-pause]').setAttribute('aria-pressed', String(paused)); },
+        onUnavailable: unavailable,
+        onRestored: () => { graphicsAvailable = true; find('[data-graph-graphics-retry]').hidden = true; say('Map ready. Switch to the map to continue.'); },
+        onLimit: () => {},
+      });
+      graphicsAvailable = view.available !== false;
+      if (!graphicsAvailable) unavailable();
+    } catch { unavailable(); }
   }
-
   function presentation() {
     panel.classList.toggle('graph-list-mode', listMode);
     find('[data-graph-list]').hidden = !listMode;
@@ -82,156 +92,219 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     if (listMode) view?.stop(); else view?.wake();
     find('[data-graph-list-toggle]').setAttribute('aria-pressed', String(listMode));
   }
-
+  function controls() {
+    find('[data-graph-next]').hidden = !nextCursor;
+    find('[data-graph-next]').disabled = Boolean(request) || pages.limited;
+    find('[data-graph-cancel]').hidden = !request;
+    find('[data-graph-window]').hidden = !pages.limited;
+    find('[data-graph-expand]').disabled = !selected || expanded.has(selected) || Boolean(nextCursor) || Boolean(request);
+    find('[data-graph-summary]').textContent = !page ? '' :
+      `${page.nodes.length} notes · ${page.edges.length} directed links · ${pages.limited ? 'Partial — view limit reached' : nextCursor ? 'More to load' : pages.complete && !windowed ? 'Complete' : 'Partial — updating or limited'}${page.boundary_connections ? ' · Some connections are outside your filters' : ''}`;
+  }
   function renderList() {
     const activePath = document.activeElement?.dataset.graphInspect;
     const list = find('[data-graph-nodes]'); list.replaceChildren();
-    for (const node of [...page.nodes].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) {
+    for (const node of [...(page?.nodes || [])].sort((a, b) => a.path.localeCompare(b.path))) {
       const li = element('li');
       const inspect = element('button', `Inspect ${node.title}`, { type: 'button', 'data-graph-inspect': node.path, 'aria-pressed': String(node.path === selected) });
-      listen(inspect, 'click', () => select(node.path, false));
+      // These listeners disappear with the row, rather than accumulating abort
+      // callbacks on the long-lived graph for every continuation.
+      inspect.addEventListener('click', () => select(node.path, false));
       const openLink = element('a', `Open ${node.path}`, { href: node.href });
       if (node.path === currentPath) openLink.setAttribute('aria-current', 'page');
-      const recenter = element('button', `Center ${node.path}`, { type: 'button' });
-      listen(recenter, 'click', () => center(node.path));
-      li.append(element('strong', node.title), element('div', node.path), inspect, openLink, recenter); list.append(li);
+      li.append(element('strong', node.title), element('div', node.path), inspect, openLink); list.append(li);
       if (activePath === node.path) inspect.focus({ preventScroll: true });
     }
-    if (!page.nodes.length) list.append(element('li', 'No indexed connections observed in this response. Check freshness and limits.'));
+    if (!page?.nodes.length) list.append(element('li', page && pages.complete ? 'No notes match this scope.' : 'Relationships are still being prepared. Refresh to try again.'));
     const edges = find('[data-graph-edges]'); edges.replaceChildren();
-    for (const edge of page.edges) edges.append(element('li', `${edge.source} → ${edge.destination} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'} · advisory line ${edge.position?.[0] || '?'} · indexed revision ${edge.source_revision}`));
-    if (!page.edges.length) edges.append(element('li', 'No directed links in this response.'));
-    const next = find('[data-graph-next]'); next.hidden = !nextCursor;
+    for (const edge of page?.edges || []) edges.append(element('li', `${edge.source} → ${edge.destination} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`));
   }
-
+  function clearEvidence() {
+    pages.clear(); page = null; nextCursor = null; selected = focused = null;
+    detailSequence++; detailRequest?.abort(); detailRequest = null;
+    details.replaceChildren(element('h2', 'Selected note'), element('p', 'Select a note to see its connections.'));
+    view?.setGraph({ nodes: [], edges: [] }, currentPath); view?.setSelection(null, null);
+    renderList(); controls();
+  }
+  function revokeEvidence() {
+    sequence++; request?.abort(); request = null; clearEvidence();
+  }
   function showDetails(path) {
     const ticket = ++detailSequence;
     detailRequest?.abort(); detailRequest = new AbortController();
     const node = page?.nodes.find(node => node.path === path);
     details.replaceChildren(element('h2', 'Selected note'));
-    if (!node) { details.append(element('p', 'No selection in this displayed graph. Select a note to inspect it.')); return; }
-    details.append(element('h3', node.title), element('p', path),
-      element('a', 'Open selected note', { href: node.href }), element('p', `Indexed revision ${node.revision}`));
+    if (!node) { details.append(element('p', 'Select a note to see its connections.')); return; }
+    details.append(element('h3', node.title), element('p', path), element('a', 'Open selected note', { href: node.href }));
     const centerButton = element('button', 'Center selected note', { type: 'button' });
-    listen(centerButton, 'click', () => center(path)); details.append(centerButton);
-    const freshness = element('p', 'Reading incoming and outgoing indexed evidence…'); details.append(freshness);
+    centerButton.addEventListener('click', () => center(path)); details.append(centerButton);
+    const freshness = element('p', 'Loading connections…'); details.append(freshness);
     const incoming = element('ul'), outgoing = element('ul');
-    details.append(element('h3', 'Incoming'), incoming, element('h3', 'Outgoing and references'), outgoing);
-    let displayed = 0;
+    const evidenceDetails = element('details'); evidenceDetails.append(element('summary', 'Technical evidence'));
+    const evidenceText = element('p'); evidenceDetails.append(evidenceText);
+    details.append(element('h3', 'Incoming'), incoming, element('h3', 'Outgoing and references'), outgoing, evidenceDetails);
+    const seen = new Set(); let evidenceLoading = false;
     async function loadEvidence(cursor) {
+      if (evidenceLoading) return; evidenceLoading = true;
       try {
         const query = new URLSearchParams({ path, direction: 'both', limit: '50', ...(cursor ? { cursor } : {}) });
         const evidence = await readJSON('/tools/links/?' + query, detailRequest.signal);
         if (closed || ticket !== detailSequence || selected !== path) return;
+        if (evidence.eligibility_version !== page?.eligibility_version ||
+            ['generation', 'mutation', 'relation_epoch'].some(key => evidence[key] !== page?.[key])) throw new Error('restart_required');
         if (!Array.isArray(evidence.items) || evidence.items.length > 100) throw new Error('invalid_response');
-        freshness.textContent = `Index ${evidence.freshness.state} · ${evidence.projection_complete ? 'completed relation epoch' : 'incomplete evidence'} ${evidence.relation_epoch} · observed ${evidence.observed_at}. Fragment existence is unchecked. Source locations are advisory.`;
+        freshness.textContent = evidence.projection_complete ? 'Saved connections' : 'Updating saved connections';
+        evidenceText.textContent = `Indexed revision ${node.revision} · relation epoch ${evidence.relation_epoch} · observed ${evidence.observed_at}. Source locations are advisory; fragments are unchecked.`;
         for (const item of evidence.items) {
+          if (seen.has(item.occurrence_id)) continue; seen.add(item.occurrence_id);
           const li = element('li');
-          li.append(element('span', `${item.source} → ${item.destination || item.target || '(same note)'} · ${item.state} · ${item.occurrence_kind}/${item.kind}`));
-          li.append(element('div', `Target: ${item.target}${item.fragment ? '#' + item.fragment : ''} · ${item.position_precision} line ${item.position[0] || '?'}, column ${item.position[1] || '?'}`));
-          li.append(element('code', item.source_revision));
-          if (item.source !== path) li.append(element('a', `Open source ${item.source}`, { href: linkTo(item.source) }));
-          if (item.destination && item.resource_type === 'note') li.append(element('a', `Open destination ${item.destination}`, { href: linkTo(item.destination) }));
-          if (item.choices?.length) li.append(element('p', `Eligible ambiguity choices: ${item.choices.join(', ')}`));
-          (item.source === path ? outgoing : incoming).append(li); displayed++;
+          li.append(element('span', `${item.source === path ? item.destination || item.target || '(same note)' : item.source}${item.state !== 'resolved' ? ' · ' + item.state : ''}`));
+          const sourceInfo = element('details'); sourceInfo.append(element('summary', 'Source evidence'),
+            element('p', `${item.source} · ${item.occurrence_kind}/${item.kind} · ${item.position_precision} line ${item.position?.[0] || '?'}, column ${item.position?.[1] || '?'}`), element('code', item.source_revision));
+          li.append(sourceInfo);
+          if (item.source !== path) li.append(element('a', 'Open source', { href: linkTo(item.source) }));
+          if (item.destination && item.resource_type === 'note') li.append(element('a', 'Open destination', { href: linkTo(item.destination) }));
+          if (item.choices?.length) li.append(element('p', `Possible matches: ${item.choices.join(', ')}`));
+          (item.source === path ? outgoing : incoming).append(li);
         }
-        if (!displayed) outgoing.append(element('li', 'No indexed connections observed in this page. This does not prove the disk is unchanged.'));
-        if (evidence.next_cursor && displayed < 200) {
-          const more = element('button', 'More connection evidence', { type: 'button' });
-          listen(more, 'click', () => { more.remove(); void loadEvidence(evidence.next_cursor); }); details.append(more);
-        } else if (evidence.next_cursor) details.append(element('p', 'Detail display limit reached. Use the paged links tool to continue.'));
+        if (evidence.next_cursor) {
+          const more = element('button', 'More connections', { type: 'button' });
+          more.addEventListener('click', () => { more.remove(); void loadEvidence(evidence.next_cursor); }); details.append(more);
+        } else if (!seen.size) outgoing.append(element('li', evidence.projection_complete ? 'No saved connections.' : 'Connections are still updating.'));
       } catch (error) {
-        if (!closed && ticket === detailSequence && error.name !== 'AbortError') freshness.textContent = `Connection evidence unavailable (${error.message}). Refresh or sign in again; your editor remains unchanged.`;
-      }
+        if (!closed && ticket === detailSequence && error.name !== 'AbortError') {
+          // A denied endpoint, expired session or changed policy must not leave
+          // old node titles, counts or details available in retained client UI.
+          if (error.message !== 'graph_query_limited') revokeEvidence();
+          say(error.message === 'authentication_required' ? 'Session expired. Sign in again to load connections.' : 'Connections changed or are unavailable. Refresh to try again.');
+        }
+      } finally { evidenceLoading = false; }
     }
     void loadEvidence();
   }
-
   function select(path, takeFocus) {
     if (!page?.nodes.some(node => node.path === path)) return;
-    selected = path;
-    if (takeFocus) focused = path;
+    selected = path; if (takeFocus) focused = path;
     view?.setSelection(selected, focused);
-    renderList(); showDetails(path);
-    say(`Selected ${path}. Inspecting saved links; Enter on the map opens it.`);
+    renderList(); showDetails(path); controls(); say(`Selected ${path}. Enter on the map opens it.`);
   }
-
-  function accept(data, fit = false) {
+  function accept(data, { append = false, fit = false } = {}) {
     if (!safePage(data)) throw new Error('invalid_response');
-    page = data; nextCursor = data.next_cursor;
+    if (!pages.accept(data, append)) { controls(); say('View limit reached. Continue in a new view or narrow your filters.'); return; }
+    page = pages.data; nextCursor = page.next_cursor;
     if (!page.nodes.some(node => node.path === selected)) selected = null;
     if (!page.nodes.some(node => node.path === focused)) focused = page.nodes[0]?.path || null;
     view?.setGraph(page, currentPath); view?.setSelection(selected, focused);
     if (fit) view?.fit();
-    renderList(); showDetails(selected); presentation();
-    find('[data-graph-summary]').textContent = `${page.nodes.length} notes · ${page.edges.length} directed links · Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · ${page.projection_complete ? 'projection complete' : 'incomplete evidence'} · observed ${page.observed_at}.${page.limiting_reasons.length ? ' Limits: ' + page.limiting_reasons.join(', ') + '.' : ''}${page.boundary_connections ? ' Some eligible connections are outside these filters.' : ''} Limits: 200 notes / 500 edges. Indexed saved content; unsaved source excluded. Not a disk snapshot.`;
-    say(`${page.nodes.length} indexed notes loaded${page.projection_complete ? '' : '; evidence is incomplete'}. ${selected ? `Selected ${selected}.` : 'Select a note to inspect it.'}`);
+    if (!nextCursor && activeParams?.path) expanded.add(activeParams.path);
+    renderList(); if (!append || selected && !details.textContent.includes(selected)) showDetails(selected);
+    presentation(); controls();
+    find('[data-graph-diagnostics]').textContent = `Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. ${page.limiting_reasons?.join(', ') || ''} Indexed saved content, not a disk snapshot. Hops refer to loaded edges; unsaved edits are excluded.`;
+    say('');
   }
-
-  async function load({ cursor, fit = false } = {}) {
+  async function load({ cursor, fit = false, append = false, params = null } = {}) {
     clearTimeout(debounce); const ticket = ++sequence;
-    request?.abort(); request = new AbortController(); say('Loading saved relationship evidence…');
-    try {
-      const params = parameters(); if (cursor) params.cursor = cursor;
-      const data = await readJSON('/tools/graph/?' + new URLSearchParams(params), request.signal);
-      if (!closed && ticket === sequence) accept(data, fit);
-    } catch (error) {
-      if (!closed && ticket === sequence && error.name !== 'AbortError') say(`Graph unavailable (${error.message}). Refresh evidence or sign in again. Existing editor source is retained.`);
+    const retainedPositions = !append && page && view ? new Map(view.simulation.nodes) : null;
+    const retainedVersion = page?.eligibility_version;
+    request?.abort(); request = new AbortController();
+    if (!append) {
+      const priorSelected = selected, priorFocused = focused;
+      clearEvidence(); selected = priorSelected; focused = priorFocused;
+      expanded.clear(); windowed = false;
     }
+    activeParams = params || (cursor ? activeParams : parameters());
+    if (!activeParams) activeParams = parameters();
+    say(page ? 'Updating connections…' : 'Loading connections…'); controls();
+    try {
+      const query = { ...activeParams, ...(cursor ? { cursor } : {}) };
+      const data = await readJSON('/tools/graph/?' + new URLSearchParams(query), request.signal);
+      if (!closed && ticket === sequence) {
+        // Coordinates alone can survive a successful revalidation in the same
+        // eligibility namespace. Failed/obsolete requests drop this local copy.
+        if (retainedPositions && retainedVersion === data.eligibility_version && view) view.simulation.nodes = retainedPositions;
+        accept(data, { append, fit });
+      }
+    } catch (error) {
+      if (!closed && ticket === sequence && error.name !== 'AbortError') {
+        clearEvidence();
+        say(error.message === 'authentication_required' ? 'Session expired. Sign in again to load the graph.' :
+          error.message === 'restart_required' ? 'Connections changed. Refresh to restart this view.' : 'Unable to load connections. Refresh to try again.');
+      }
+    } finally { if (ticket === sequence) { request = null; controls(); } }
   }
-
   function center(path) {
     if (!path) return;
     const previous = input('path').value;
-    if (previous !== path) { if (previous) trail.push(previous); trail = trail.slice(-20); }
-    input('path').value = path; find('[data-graph-back]').disabled = !trail.length;
-    void load({ fit: true });
+    if (previous !== path && previous) trail.push(previous);
+    trail = trail.slice(-20); input('path').value = path;
+    find('[data-graph-back]').disabled = !trail.length; void load({ fit: true });
   }
-
-  listen(form, 'submit', event => { event.preventDefault(); void load(); });
-  listen(input('query'), 'input', () => { clearTimeout(debounce); debounce = setTimeout(() => { void load(); }, 180); });
+  listen(form, 'submit', event => { event.preventDefault(); void load({ fit: true }); });
+  listen(input('query'), 'input', () => { clearTimeout(debounce); sequence++; request?.abort(); request = null; clearEvidence(); debounce = setTimeout(() => void load(), 180); });
   listen(root, 'keydown', event => {
     if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
     if (!find('[data-graph-help]').hidden) { event.preventDefault(); event.stopImmediatePropagation(); toggleHelp(); return; }
     if (form.contains(event.target)) {
-      event.preventDefault(); event.stopImmediatePropagation(); clearTimeout(debounce); sequence++; request?.abort();
-      if (matchMedia('(max-width: 650px)').matches) find('[data-graph-filter-options]').open = false;
+      event.preventDefault(); event.stopImmediatePropagation(); clearTimeout(debounce); sequence++; request?.abort(); request = null; controls();
+      find('[data-graph-filter-options]').open = false;
       if (listMode) find('[data-graph-list-toggle]').focus(); else map.focus({ preventScroll: true });
-      say('Search focus ended. Selection retained. Escape closes the graph.');
+      say('Search closed. Escape returns to your note.');
     } else if (event.target !== map) { event.preventDefault(); event.stopImmediatePropagation(); escape(); }
   });
   listen(find('[data-graph-clear]'), 'click', () => { input('query').value = ''; void load(); });
   listen(find('[data-graph-local]'), 'click', () => center(selected || currentPath));
   listen(find('[data-graph-global]'), 'click', () => { input('path').value = ''; void load({ fit: true }); });
   listen(find('[data-graph-back]'), 'click', () => { input('path').value = trail.pop() || currentPath; find('[data-graph-back]').disabled = !trail.length; void load({ fit: true }); });
-  listen(find('[data-graph-list-toggle]'), 'click', () => { listMode = !listMode || !view; presentation(); });
+  listen(find('[data-graph-list-toggle]'), 'click', () => { listMode = !listMode || !graphicsAvailable; if (graphicsAvailable) preferredList = listMode; presentation(); });
   listen(find('[data-graph-fit]'), 'click', () => view?.fit());
+  listen(find('[data-graph-reset]'), 'click', () => view?.resetOrientation());
+  for (const button of root.querySelectorAll('[data-graph-orbit]')) listen(button, 'click', () => view?.orbit(Number(button.dataset.graphOrbit), 0));
   for (const button of root.querySelectorAll('[data-graph-zoom]')) listen(button, 'click', () => view?.zoom(Number(button.dataset.graphZoom)));
   const pans = { left: [-80, 0], right: [80, 0], up: [0, -80], down: [0, 80] };
   for (const button of root.querySelectorAll('[data-graph-pan]')) listen(button, 'click', () => view?.pan(...pans[button.dataset.graphPan]));
   listen(find('[data-graph-pause]'), 'click', () => view?.setPaused(!view.paused));
-  listen(find('[data-graph-bloom]'), 'input', event => {
-    view?.setBloom(event.target.value); find('[data-graph-bloom-value]').textContent = ['Off', 'Restrained', 'High'][Number(event.target.value)];
-  });
+  listen(find('[data-graph-bloom]'), 'input', event => { view?.setBloom(event.target.value); find('[data-graph-bloom-value]').textContent = ['Off', 'Default', 'High'][Number(event.target.value)]; });
   listen(find('[data-graph-refresh]'), 'click', () => { void load(); });
-  listen(find('[data-graph-next]'), 'click', () => { if (nextCursor) void load({ cursor: nextCursor }); });
+  listen(find('[data-graph-next]'), 'click', () => { if (nextCursor) void load({ cursor: nextCursor, append: true }); });
+  listen(find('[data-graph-cancel]'), 'click', () => { sequence++; request?.abort(); request = null; controls(); say('Loading paused. Load more to resume, or refresh.'); });
+  listen(find('[data-graph-window]'), 'click', () => {
+    const cursor = nextCursor, params = activeParams;
+    clearEvidence(); windowed = true; void load({ cursor, params, append: true, fit: true });
+  });
+  listen(find('[data-graph-expand]'), 'click', () => {
+    if (!selected || nextCursor) return;
+    void load({ params: { ...parameters(), path: selected, depth: '1' }, append: true });
+  });
+  listen(find('[data-graph-graphics-retry]'), 'click', () => {
+    view?.destroy(); view = null; createView();
+    if (!graphicsAvailable) return;
+    find('[data-graph-graphics-retry]').hidden = true; listMode = false;
+    if (page) { view.setGraph(page, currentPath); view.setSelection(selected, focused); view.fit(); }
+    presentation();
+  });
   listen(find('[data-graph-help-toggle]'), 'click', toggleHelp);
+  // Returning from a hidden tab must revalidate retained private evidence.
+  listen(document, 'visibilitychange', () => { if (document.hidden) { sequence++; request?.abort(); request = null; clearEvidence(); } else if (!closed) void load(); });
   find('[data-graph-controls]').hidden = false; find('[data-graph-clear]').hidden = false;
+  createView();
   find('[data-graph-pause]').setAttribute('aria-pressed', String(view?.paused || false));
   view?.setBloom(find('[data-graph-bloom]').value); presentation();
-  if (initial) accept(initial); else void load();
+  activeParams = parameters();
+  if (initial) accept(initial, { fit: true }); else void load({ fit: true });
   return {
     focusSearch,
     focusNavigation() { if (listMode) find('[data-graph-list-toggle]').focus({ preventScroll: true }); else map.focus({ preventScroll: true }); },
-    destroy() { closed = true; sequence++; detailSequence++; clearTimeout(debounce); request?.abort(); detailRequest?.abort(); life.abort(); view?.destroy(); },
+    destroy() { closed = true; sequence++; detailSequence++; clearTimeout(debounce); request?.abort(); detailRequest?.abort(); life.abort(); view?.destroy(); pages.clear(); page = null; nextCursor = null;
+      find('[data-graph-nodes]').replaceChildren(); find('[data-graph-edges]').replaceChildren();
+      details.replaceChildren(); find('[data-graph-summary]').textContent = ''; say('');
+    },
   };
 }
-
 const direct = document.querySelector('[data-graph-page]');
 if (direct) {
   try {
     mountGraph(direct, { currentPath: direct.dataset.graphPath, initial: JSON.parse(document.querySelector('#graph-initial-data').textContent),
-      onClose: () => { const path = direct.dataset.graphPath; if (path) location.assign(linkTo(path)); else location.assign('/'); } });
+      onClose: () => { const path = direct.dataset.graphPath; location.assign(path ? linkTo(path) : '/'); } });
     direct.querySelector('[data-graph-server-list]').hidden = true;
-  } catch { /* The server-rendered connection list remains fully usable. */ }
+  } catch { /* Keep the server-rendered connection list. */ }
 }

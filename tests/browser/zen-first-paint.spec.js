@@ -71,5 +71,5 @@ test('delayed shell initializes with chrome still closed', async ({ page }) => {
   await expect(page.locator('[data-navigation-fallback]')).toBeHidden();
   await menu.click();
   await expect(page.locator('#site-navigation')).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Backstory', exact: true })).toBeFocused();
+  await expect(page.getByRole('link', { name: 'Home', exact: true })).toBeFocused();
 });

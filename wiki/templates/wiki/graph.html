@@ -3,7 +3,7 @@
 {% block content %}
 <section data-graph-page data-graph-path="{{ graph_params.path|default:'' }}">
 <h1>Graph</h1>
-<p>Indexed saved content · unsaved editor buffers are excluded. Relationships are explicit textual links, not agreement or importance.</p>
+<p>Explore connections between saved notes.</p>
 {% include 'wiki/graph-panel.html' %}
 <div data-graph-server-list>
 <p>At most 200 notes and 500 directed edges per response. {% if graph.limiting_reasons %}Limits: {{ graph.limiting_reasons|join:', ' }}.{% endif %} For a one-note cap, use connection details or a larger limit to inspect edges.</p>

@@ -33,3 +33,22 @@ export function nearestNode(positions, current, direction) {
   }
   return best;
 }
+
+// Six slow frames to degrade, ninety good frames to recover. Never discard
+// graph records to reduce rendering work: only halos, labels and DPR change.
+export class AdaptiveQuality {
+  constructor() { this.level = 0; this.slow = 0; this.good = 0; }
+  sample(elapsed) {
+    if (!Number.isFinite(elapsed) || elapsed <= 0) return false;
+    const previous = this.level;
+    if (elapsed > .04) { this.slow++; this.good = 0; }
+    else if (elapsed < .025) { this.good++; this.slow = 0; }
+    else { this.good = this.slow = 0; }
+    if (this.slow >= 6) { this.level = Math.min(2, this.level + 1); this.slow = 0; }
+    if (this.good >= 90) { this.level = Math.max(0, this.level - 1); this.good = 0; }
+    return previous !== this.level;
+  }
+  bloom(intensity, forcedColors = false) { return forcedColors ? 0 : intensity * [1, .5, 0][this.level]; }
+  get labels() { return [48, 28, 12][this.level]; }
+  get dpr() { return [1.5, 1.25, 1][this.level]; }
+}
