@@ -137,6 +137,95 @@ def test_unchanged_verification_preserves_occurrences_epoch_cursor_and_does_no_r
     assert second.items[0].occurrence_id != first.items[0].occurrence_id
 
 
+@pytest.mark.parametrize('scan', ['incremental', 'verify', 'scheduled'])
+def test_unchanged_scans_keep_links_backlinks_graph_and_pagination(wiki, monkeypatch, scan):
+    from indexing import worker
+    from indexing.models import ScanState
+    from indexing.queue import request_scan
+
+    graph = build_graph(wiki, {'a.md': '[[b]] [[c]]', 'b.md': '# B', 'c.md': '# C'})
+    before = relation_identity()
+    first_link = graph.query_links('a.md', 'outgoing', limit=1)
+    first_graph = graph.query_graph(node_limit=2)
+    assert first_link.next_cursor and first_graph.next_cursor
+    calls = count_resolutions(monkeypatch)
+    now = ScanState.objects.get(pk=1).last_completed + 1
+    ScanState.objects.filter(pk=1).update(next_incremental=now + 300, next_verify=now + 86400)
+
+    def check(freshness):
+        links = graph.query_links('a.md', 'outgoing')
+        backlinks = graph.query_links('b.md', 'incoming')
+        pages = [links, backlinks, graph.query_graph('a.md'), graph.query_graph()]
+        assert destinations(links) == ['b.md', 'c.md']
+        assert [item.source for item in backlinks.items] == ['a.md']
+        for page in pages[2:]:
+            assert {(edge.source, edge.destination) for edge in page.edges} == {
+                ('a.md', 'b.md'), ('a.md', 'c.md')}
+        for page in pages:
+            assert page.freshness['state'] == freshness
+            assert page.projection_complete is (freshness == 'ready')
+            assert page.state == ('ok' if freshness == 'ready' else 'incomplete')
+        continuation = graph.query_links('a.md', 'outgoing', limit=1, cursor=first_link.next_cursor)
+        assert destinations(continuation) == ['c.md']
+        continued_graph = graph.query_graph(node_limit=2, cursor=first_graph.next_cursor)
+        assert [(edge.source, edge.destination) for edge in continued_graph.edges] == [('a.md', 'c.md')]
+        assert relation_identity() == before
+        assert calls == []
+
+    check('ready')
+    if scan == 'scheduled':
+        now += 300
+    else:
+        request_scan(scan)
+        check('stale')
+    assert worker.run_batch(now=now).pending
+    assert ScanState.objects.get(pk=1).checkpoint['kind'] == ('incremental' if scan == 'scheduled' else scan)
+    check('partial')
+    drain(worker)
+    check('ready')
+
+
+def test_scheduler_transition_during_query_keeps_safe_relations(wiki, monkeypatch):
+    from indexing.queue import request_scan
+    graph = build_graph(wiki, {'a.md': '[[b]]', 'b.md': '# B'})
+    original = graph.Query.check_row
+
+    def queue_scan(query, row):
+        request_scan('incremental')
+        return original(query, row)
+
+    monkeypatch.setattr(graph.Query, 'check_row', queue_scan)
+    page = graph.query_links('a.md', 'outgoing')
+    assert destinations(page) == ['b.md']
+    assert page.freshness['state'] == 'stale'
+    assert not page.projection_complete and page.state == 'incomplete'
+
+
+@pytest.mark.parametrize('kind', ['links', 'missing', 'ambiguous', 'isolated'])
+def test_scheduler_transition_during_query_withholds_absence_claims(wiki, monkeypatch, kind):
+    from indexing.queue import request_scan
+    graph = build_graph(wiki, {'a.md': '[[absent]] [[Alias]] [[target]]',
+                               'b.md': '---\naliases: [Alias]\n---\n# B',
+                               'c.md': '---\naliases: [Alias]\n---\n# C',
+                               'target.md': '# Target', 'isolated.md': '# Isolated'})
+    original = graph.Query.check_row
+
+    def queue_scan(query, row):
+        request_scan('incremental')
+        return original(query, row)
+
+    monkeypatch.setattr(graph.Query, 'check_row', queue_scan)
+    if kind == 'links':
+        page = graph.query_links('a.md', 'outgoing')
+        assert [item.state for item in page.items] == ['unconfirmed', 'unconfirmed', 'resolved']
+        assert destinations(page) == ['target.md']
+    else:
+        page = graph.query_link_issues(issue=kind)
+        assert not page.items and page.next_cursor is None
+    assert page.freshness['state'] == 'stale'
+    assert not page.projection_complete and page.state == 'incomplete'
+
+
 def test_body_only_refresh_preserves_relations_and_updates_revision_and_positions(wiki, monkeypatch):
     graph = build_graph(wiki, {'a.md': '[[b]]', 'b.md': '# B'})
     before = relation_identity()

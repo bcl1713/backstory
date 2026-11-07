@@ -63,13 +63,17 @@ class Query:
         self.generation = IndexGeneration.objects.filter(pk=self.index.generation).first()
         self.relations = RelationState.objects.filter(generation=self.generation).first() if self.generation else None
         self.namespace = namespace_version() if self.index.state != 'unavailable' else ''
-        self.valid = bool(self.generation and self.relations
+        # Scan freshness does not revoke independently published clean sources.
+        self.valid = bool(self.index.state != 'unavailable' and self.generation and self.relations
                           and self.relations.mutation == self.generation.mutation
-                          and self.relations.namespace == self.namespace and self.index.state == 'ready')
+                          and self.relations.namespace == self.namespace)
         self.complete = self.valid and self.relations.complete and self.relations.evidence_complete
         self.reasons = set()
         if not self.complete:
             self.reasons.add('projection_incomplete')
+        if self.index.state != 'ready':
+            self.complete = False
+            self.reasons.add('index_updating')
         self.cache = {}
         self.rows = {}
         self.examined = 0
@@ -92,7 +96,7 @@ class Query:
     def _stamp(self):
         return [self.generation.pk if self.generation else None,
                 self.generation.mutation if self.generation else 0,
-                self.relations.epoch if self.relations else 0, self.namespace, self.index.state,
+                self.relations.epoch if self.relations else 0, self.namespace,
                 bool(self.relations and self.relations.complete), bool(self.relations and self.relations.evidence_complete),
                 self.relations.publication if self.relations else 0]
 
@@ -226,10 +230,23 @@ class Query:
             relations = RelationState.objects.filter(generation=generation).first() if generation else None
             relation_stamp = [relations.epoch if relations else 0, bool(relations and relations.complete),
                               bool(relations and relations.evidence_complete), relations.publication if relations else 0]
-            if (generation.pk if generation else None) != self.stamp[0] or (generation.mutation if generation else 0) != self.stamp[1] or namespace_version() != self.namespace or current.state != self.index.state:
+            if (generation.pk if generation else None) != self.stamp[0] or (generation.mutation if generation else 0) != self.stamp[1] or namespace_version() != self.namespace:
                 raise StorageError('graph_cursor_expired', 409)
-            if relation_stamp != [self.stamp[2], self.stamp[5], self.stamp[6], self.stamp[7]]:
+            if relation_stamp != [self.stamp[2], self.stamp[4], self.stamp[5], self.stamp[6]]:
                 raise StorageError('graph_cursor_expired', 409)
+            if current.state != 'ready':
+                self.complete = False
+                self.reasons.add('index_updating')
+        # Completeness can change after occurrences/diagnostics were collected.
+        # Reconcile absence claims with the final observation, retaining links.
+        if not self.complete:
+            if cls is LinkIssuePage:
+                data['items'] = ()
+                next_cursor = None
+            elif cls is LinkPage:
+                data['items'] = tuple(replace(item, state='unconfirmed')
+                                      if item.state in {'missing', 'ambiguous'} else item
+                                      for item in data['items'])
         metadata = dict(state='unavailable' if current.state == 'unavailable' else 'ok' if self.complete else 'incomplete',
                         freshness={'state': current.state, 'last_completed': current.last_completed,
                                    'next_scheduled': current.next_scheduled,
