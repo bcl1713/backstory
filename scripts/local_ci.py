@@ -10,7 +10,6 @@ import json
 import os
 from pathlib import Path
 import platform
-import shlex
 import shutil
 import signal
 import subprocess
@@ -20,6 +19,7 @@ import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
+RECEIPT_SCHEMA = 2
 
 
 def branch_policy(base, head):
@@ -34,7 +34,6 @@ def build_plan(report, port):
     def browser(name):
         return dict(BACKSTORY_BROWSER_RUNTIME=str(report / name),
                     BACKSTORY_BROWSER_PORT=str(port))
-    stock = report / 'stock-firefox-tools'
     container = '''
 uv run python -m tests.fixtures.generate "$LOCAL_REPORT/container-fixture" --profile small --for-containers
 set -a
@@ -60,10 +59,6 @@ docker compose --env-file "$LOCAL_REPORT/container-fixture/fixture.env" -f compo
         step('browser-install', 'npx playwright install firefox'),
         step('firefox-code', 'npx playwright test --config=playwright.code.config.js', browser('firefox-code')),
         step('firefox-renderers', 'npx playwright test --config=playwright.firefox.config.js', browser('firefox-renderers')),
-        step('stock-firefox-install', 'bash scripts/install-stock-firefox.sh ' + shlex.quote(str(stock))),
-        step('stock-firefox', 'uv run --no-project --with selenium==4.52.0 python tests/browser/support/stock_firefox.py',
-             {**browser('stock-firefox'), 'STOCK_FIREFOX_BINARY': str(stock / 'firefox/firefox'),
-              'GECKODRIVER_BINARY': str(stock / 'geckodriver')}),
         step('container', container),
     ]
 
@@ -79,7 +74,7 @@ def source_identity(root):
 
 def validate_receipt(receipt, source_sha, source_tree):
     gates = {step['name'] for step in build_plan(Path('/tmp/unused'), 18765)}
-    if (receipt.get('schema') != 1 or receipt.get('source_sha') != source_sha
+    if (receipt.get('schema') != RECEIPT_SCHEMA or receipt.get('source_sha') != source_sha
             or receipt.get('source_tree') != source_tree
             or set(receipt.get('gates', {})) != gates
             or any(value != 'passed' for value in receipt['gates'].values())):
@@ -185,7 +180,7 @@ def run_step(step, root, report):
 
 def run_suite(root, report, port):
     source_sha, source_tree = source_identity(root)
-    record = dict(schema=1, source_sha=source_sha, source_tree=source_tree,
+    record = dict(schema=RECEIPT_SCHEMA, source_sha=source_sha, source_tree=source_tree,
                   started_at=datetime.now(timezone.utc).isoformat(), gates={})
     for step in build_plan(report, port):
         print('Running ' + step['name'], flush=True)
@@ -209,7 +204,7 @@ def run_suite(root, report, port):
 
 def preflight():
     if platform.system() != 'Linux' or platform.machine() != 'x86_64':
-        raise ValueError('Full parity currently requires Linux x86_64 for pinned stock Firefox.')
+        raise ValueError('Full parity currently requires Linux x86_64 for the pinned Playwright Firefox runtime.')
     if not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'):
         raise ValueError('Use Python 3.9+ with Linux pidfd support for scoped process cleanup.')
     try:

@@ -19,22 +19,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 ROOT = Path(__file__).resolve().parents[3]
 RUNTIME = Path(os.environ['BACKSTORY_BROWSER_RUNTIME'])
 ORIGIN = 'http://127.0.0.1:' + os.environ['BACKSTORY_BROWSER_PORT']
-DECISION = '''flowchart TD
-A[Initial demonstration and external archive] --> B{First checkpoint complete}
-B -->|No| H[Pause and resolve the test condition]
-B -->|Yes| C[Apply the first sample change and restart]
-C --> D{All sample checks complete}
-D -->|No| R[Stop and inspect the synthetic recovery point]
-D -->|Yes| E[Save the verified sample checkpoint]
-E --> J{Reviewer confirms next stage and checks pass}
-J -->|Not now| K[Keep the intermediate sample]
-J -->|Yes| F[Apply the second sample change and restart]
-F --> G{All sample checks complete}
-G -->|No| R
-G -->|Yes| I[Resume sample tasks and retain the archive]'''
-FIXTURES = [('mermaid', DECISION, 'Mermaid flowchart.'),
-            ('graphviz', 'digraph { a -> b; b -> c; a -> c; }', 'Graphviz diagram.'),
-            ('vega-lite', json.dumps({'data': {'values': [{'category': 'A', 'value': 2}, {'category': 'B', 'value': 4}]}, 'mark': 'bar', 'encoding': {'x': {'field': 'category', 'type': 'nominal'}, 'y': {'field': 'value', 'type': 'quantitative'}}}), 'Vega-Lite chart.')]
+FIXTURES = [(f['engine'], f['source'], f['ready']) for f in json.loads(
+    (ROOT / 'tests/fixtures/firefox-renderers.json').read_text())]
 RUNTIME.mkdir(parents=True, exist_ok=True)
 REPORTS = RUNTIME / 'reports'
 REPORTS.mkdir(exist_ok=True)
@@ -62,14 +48,9 @@ try:
         (RUNTIME / 'wiki' / f'Stock-{engine}.md').write_text(f'Before\n\n```{engine}\n{source}\n```\n\nAfter\n')
     results = []
     failures = []
-    # Synthetic rendering probes, not assumptions about the reporter's settings.
-    # The scale preferences exercise browser device-pixel geometry; they are not
-    # CSS zoom or a claim to reproduce the user's page-zoom setting.
-    profiles = [('default', {}, [390, 1180, 2000]),
-                ('scale125', {'layout.css.devPixelsPerPx': '1.25'}, [1180]),
-                ('scale150', {'layout.css.devPixelsPerPx': '1.5'}, [1180, 2000]),
-                ('scale200', {'layout.css.devPixelsPerPx': '2.0'}, [1180]),
-                ('document-fonts-off', {'browser.display.use_document_fonts': 0}, [1180])]
+    # Optional unpatched-browser smoke. The full scale/font/width/zoom matrix
+    # belongs to the mandatory Playwright Firefox lane (firefox-profiles.spec.js).
+    profiles = [('compatibility', {}, [1180])]
     diagnostics = (ROOT / 'tests/browser/support/mermaid-diagnostics.js').read_text()
     diagnostics = diagnostics.replace('export function ', 'function ', 1)
     for profile, preferences, widths in profiles:
@@ -102,7 +83,7 @@ try:
         WebDriverWait(driver, 10).until(lambda d: '/accounts/login/' not in d.current_url)
         for width in widths:
             driver.set_window_size(width, 1000)
-            for css_zoom in [1, .9, .8, .7]:
+            for css_zoom in [.7]:
                 # WebDriver content key events cannot operate Firefox chrome
                 # zoom. Exercise explicitly labeled CSS effective zoom instead;
                 # do not enable privileged browser/system access to emulate it.
@@ -110,7 +91,7 @@ try:
                     f'const zoom={json.dumps(str(css_zoom))};' +
                     'const apply=()=>{if(!document.documentElement)return false;document.documentElement.style.zoom=zoom;return true;};' +
                     'if(!apply()){const observer=new MutationObserver(()=>{if(apply())observer.disconnect();});observer.observe(document,{childList:true});}}')
-                fixtures = FIXTURES if profile == 'default' and width == 1180 and css_zoom == 1 else FIXTURES[:1]
+                fixtures = FIXTURES
                 for engine, _, ready in fixtures:
                     driver.get(ORIGIN + f'/notes/Stock-{engine}.md')
                     WebDriverWait(driver, 20).until(lambda d: d.execute_script("return /flowchart\\.|diagram\\.|chart\\.|unavailable|Unsupported/.test(document.querySelector('.lp-diagram-status')?.textContent||'')"))

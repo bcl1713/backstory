@@ -62,8 +62,8 @@ def release_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(m, 'ROOT', root)
     sha, tree = 'a' * 40, 'b' * 40
     receipt = tmp_path / 'receipt.json'
-    from local_ci import build_plan
-    receipt.write_text(json.dumps(dict(schema=1, source_sha=sha, source_tree=tree,
+    from local_ci import RECEIPT_SCHEMA, build_plan
+    receipt.write_text(json.dumps(dict(schema=RECEIPT_SCHEMA, source_sha=sha, source_tree=tree,
                                       gates={s['name']: 'passed' for s in build_plan(tmp_path, 18765)})))
     monkeypatch.setattr(m, 'source_identity', lambda root: (sha, tree))
     commands, builds = [], []

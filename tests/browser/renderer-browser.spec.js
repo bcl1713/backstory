@@ -1,23 +1,12 @@
 import {test,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {runtime} from './support/server.js';
+import {firefoxRendererFixtures} from './support/firefox-renderers.js';
 const mermaid='flowchart TD\n'+Array.from({length:18},(_,i)=>`N${i}[Stage ${i+1}]`).join('\n')+'\n'+Array.from({length:17},(_,i)=>`N${i} --> N${i+1}`).join('\n');
 const graphviz='digraph { '+Array.from({length:18},(_,i)=>`n${i}[label="Stage ${i+1}"];`).join(' ')+Array.from({length:17},(_,i)=>`n${i}->n${i+1};`).join(' ')+' }';
 const chart=JSON.stringify({data:{values:[{category:'A',value:2},{category:'B',value:4}]},mark:'bar',encoding:{x:{field:'category',type:'nominal'},y:{field:'value',type:'quantitative'}}});
 const branching='flowchart TD\nA[Review the synthetic service maintenance plan] --> B{Are the test prerequisites complete?}\nB -->|Yes| C[Continue with the scheduled maintenance procedure]\nB -->|No| D[Keep the current synthetic configuration unchanged]\nC --> E{Did the synthetic verification complete?}\nE -->|Yes| F[Update the demonstration record]\nE -->|No| G[Keep the previous demonstration record]';
-const converging=`flowchart TD
-A[Initial demonstration and external archive] --> B{First checkpoint complete}
-B -->|No| H[Pause and resolve the test condition]
-B -->|Yes| C[Apply the first sample change and restart]
-C --> D{All sample checks complete}
-D -->|No| R[Stop and inspect the synthetic recovery point]
-D -->|Yes| E[Save the verified sample checkpoint]
-E --> J{Reviewer confirms next stage and checks pass}
-J -->|Not now| K[Keep the intermediate sample]
-J -->|Yes| F[Apply the second sample change and restart]
-F --> G{All sample checks complete}
-G -->|No| R
-G -->|Yes| I[Resume sample tasks and retain the archive]`;
+const converging=firefoxRendererFixtures[0].source;
 const fixtures=[['mermaid',mermaid,'Mermaid flowchart.'],['mermaid-tiny','flowchart TD\nA','Mermaid flowchart.'],['mermaid-branching',branching,'Mermaid flowchart.'],['mermaid-converging',converging,'Mermaid flowchart.'],['graphviz',graphviz,'Graphviz diagram.'],['graphviz-tiny','digraph { a; }','Graphviz diagram.'],['vega-lite',chart,'Vega-Lite chart.']];
 test.beforeAll(async()=>{await mkdir(`${runtime}/reports`,{recursive:true});for(const [engine,body]of fixtures)await writeFile(`${runtime}/wiki/Browser-${engine}.md`,'Before\n\n```'+(engine.startsWith('mermaid-')?'mermaid':engine.startsWith('graphviz-')?'graphviz':engine)+'\n'+body+'\n```\n\nFollowing paragraph.\n');});
 for(const [engine,,ready]of fixtures)test(`${engine} renders through isolated browser protocol`,async({page,browserName},info)=>{
