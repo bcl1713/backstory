@@ -9,11 +9,10 @@
 <button type="submit">Apply filters</button><button type="button" data-graph-clear hidden>Clear search</button>
 </form>
 </details>
+<details class="graph-control-options" data-graph-control-options open><summary>Graph controls</summary>
 <div class="graph-controls" data-graph-controls hidden>
 <button type="button" data-graph-local aria-pressed="true">Local</button><button type="button" data-graph-global aria-pressed="false">All notes</button>
-<span data-graph-scope></span>
 <div class="graph-depth-controls" data-graph-depth-controls><button type="button" data-graph-depth-down aria-label="Decrease hop depth">[ −</button><output data-graph-depth-value aria-live="polite">2 hops</output><button type="button" data-graph-depth-up aria-label="Increase hop depth">+ ]</button><small>1–8 hops · bounded by query resources</small></div>
-<button type="button" data-graph-list-toggle aria-pressed="false">Connection list</button>
 
 <button type="button" data-graph-next hidden>Load more</button><button type="button" data-graph-cancel hidden>Pause loading</button><button type="button" data-graph-resume hidden>Resume loading</button><button type="button" data-graph-restart hidden>Restart loading</button>
 <button type="button" data-graph-pause aria-pressed="false">Pause motion</button>
@@ -28,7 +27,8 @@
 <label>Bloom intensity <input data-graph-bloom type="range" min="0" max="2" step="1" value="1"></label><output data-graph-bloom-value>Default</output>
 </div></details>
 
-</div>
+</div></details>
+<div class="graph-scope-bar"><p data-graph-scope></p><button type="button" data-graph-list-toggle aria-pressed="false" hidden>Connection list</button></div>
 <p data-graph-status role="status" aria-live="polite" aria-atomic="true"></p>
 <p class="graph-caption" data-graph-summary role="status" aria-live="polite"></p>
 <p data-graph-help hidden>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space centers; / focuses search; +/− zoom; ? toggles help. Escape leaves search first, then closes the graph. Tab leaves the map. Drag a node to tug its links; drag the background to orbit. Shift-drag or two fingers pans; pinch or the wheel zooms. Scroll outside the map to scroll the page. Fit and Reset orientation recover your view. [ and ] decrease/increase local depth from the same center (1–8 hops, with resource limits reported). All notes loads the whole eligible wiki automatically; Pause loading and Resume are separate from Pause motion. Active filters narrow either scope. Bloom describes this displayed graph only.</p>

@@ -347,3 +347,24 @@ def test_depth_traverses_filtered_bridge_and_revalidates_it(wiki):
     revoked = graph.query_graph('a.md', depth=3)
     assert {n.path for n in revoked.nodes} == {'a.md'}
     assert not revoked.projection_complete
+
+
+def test_two_hop_linked_neighborhood_works_with_small_response_limits(wiki):
+    # Membership expansion must fit the same SQL budget as a one-hop page;
+    # shrinking the response alone cannot repair an expensive traversal plan.
+    files = {f'n{i:03}.md': '\n'.join(f'[[n{(i + step) % 290:03}]]' for step in range(1, 9))
+             for i in range(290)}
+    files['hub.md'] = '\n'.join(f'[[n{i:03}]]' for i in range(290))
+    # This second-hop endpoint sorts beyond the bounded incident-pair window.
+    files['n289.md'] += '\n[[far]]'
+    files['far.md'] = '# Far'
+    graph = build_graph(wiki, files)
+    page = graph.query_graph('hub.md', depth=2, node_limit=2, edge_limit=1)
+    assert page.nodes and len(page.nodes) <= 2
+    assert page.edges and len(page.edges) <= 1
+    assert page.next_cursor
+    assert page.limits['examined'] <= 300
+    default = graph.query_graph('hub.md', depth=2)
+    assert default.nodes and default.edges
+    assert default.state == 'incomplete'
+    assert 'neighborhood_limit' in default.limiting_reasons

@@ -108,6 +108,46 @@ def test_search_database_failure_is_not_budget_exhaustion(wiki, caplog):
     assert 'private' not in json.dumps(event) and 'nonexistent' not in json.dumps(event)
 
 
+def test_graph_budget_has_source_free_diagnostic(wiki, monkeypatch, caplog):
+    from indexing import search
+    from tests.integration.test_graph_index import build_graph
+    from wiki.contracts import StorageError
+    graph = build_graph(wiki, {'private-name.md': '[[target]]', 'target.md': '# Secret title'})
+    with monkeypatch.context() as patch:
+        patch.setattr(search, 'SQLITE_VM_STEPS', 1)
+        with pytest.raises(StorageError, match='graph_query_limited'):
+            graph.query_graph('private-name.md', depth=2)
+    event, = events(caplog)
+    assert event['operation'] == 'graph'
+    assert event['reason_code'] == 'graph_budget_exceeded'
+    assert event['budget_triggered'] is True
+    assert event['sqlite_errorcode'] == sqlite3.SQLITE_INTERRUPT
+    assert 'private-name' not in json.dumps(event) and 'Secret' not in json.dumps(event)
+    assert graph.query_graph('private-name.md', depth=2).edges
+
+
+def test_graph_database_failure_is_not_budget_exhaustion(wiki, caplog):
+    from tests.integration.test_graph_index import build_graph
+    from wiki.contracts import StorageError
+    graph = build_graph(wiki, {'private-name.md': '[[target]]', 'target.md': '# Secret title'})
+    def fail_query(execute, sql, params, many, context):
+        if 'indexing_resolvedrelation' in sql:
+            try:
+                connection.connection.execute('SELECT * FROM nonexistent_synthetic_table')
+            except sqlite3.OperationalError as cause:
+                raise OperationalError('private query') from cause
+        return execute(sql, params, many, context)
+    with connection.execute_wrapper(fail_query):
+        with pytest.raises(StorageError, match='graph_database_error'):
+            graph.query_graph('private-name.md', depth=2)
+    event, = events(caplog)
+    assert event['operation'] == 'graph'
+    assert event['reason_code'] == 'index_database_error'
+    assert event['budget_triggered'] is False
+    assert event['sqlite_errorcode'] == sqlite3.SQLITE_ERROR
+    assert 'private' not in json.dumps(event) and 'nonexistent' not in json.dumps(event)
+
+
 @pytest.fixture
 def file_database(tmp_path):
     """Copy the disposable test schema; restore Django's test connection afterward."""

@@ -21,7 +21,8 @@ from .graph_contracts import GraphNode, LinkOccurrence, GraphEdge, LinkPage, Gra
 from .graph_projection import namespace_version
 from .models import IndexGeneration, IndexedNote, LinkEdge, RelationState, ResolvedRelation
 from .scanner import file_stat
-from .search import sqlite_budget
+from .search import QueryBudget, sqlite_budget
+from .diagnostics import record_failure
 
 CANDIDATE_LIMIT = 300
 MAX_PAYLOAD = 512 * 1024
@@ -269,11 +270,13 @@ class Query:
 
 def _bounded(function):
     def wrapped(*args, **kwargs):
+        budget = QueryBudget()
         try:
-            with sqlite_budget():
+            with sqlite_budget() as budget:
                 return function(*args, **kwargs)
-        except OperationalError:
-            raise StorageError('graph_query_limited', 503) from None
+        except OperationalError as error:
+            record_failure('graph', error, budget_triggered=budget.triggered)
+            raise StorageError('graph_query_limited' if budget.triggered else 'graph_database_error', 503) from None
     return wrapped
 
 
@@ -423,12 +426,21 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
                             following.add(node.path)
                             neighborhood.add(node.path)
                 frontier = following
+                if 'edge_candidate_limit' in context.reasons:
+                    # Omitted pairs may lead to further members at this depth.
+                    # Occurrence pagination cannot recover omitted membership.
+                    context.complete = False
+                    context.reasons.add('neighborhood_limit')
                 if 'candidate_limit' in context.reasons:
                     # Traversal membership itself is incomplete; unlike a page
                     # limit, later occurrence pages cannot recover these nodes.
                     context.reasons.add('neighborhood_limit')
                     break
-            neighborhood = {p for p in neighborhood if _matches(p, folder, tag, query).filter(generation=context.generation).exists()}
+            # Apply display filters in one indexed query after traversal. An
+            # existence query per visited endpoint consumes the shared SQL
+            # deadline before even a tiny response can be assembled.
+            neighborhood = set(_filtered_nodes(context.generation, folder, tag, query)
+                               .filter(path__in=neighborhood).values_list('path', flat=True))
         if not _matches(path, folder, tag, query).filter(generation=context.generation).exists():
             center = None
     eligible_rows = _filtered_nodes(context.generation, folder, tag, query)

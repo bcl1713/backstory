@@ -29,7 +29,7 @@ async function readJSON(url, signal) {
   const data = await response.json();
   if (!response.ok) throw new Error(response.status === 401 ? 'authentication_required' : data.restart ? 'restart_required' : data.reason_code || 'graph_unavailable');
   if (data.untrusted_content !== true) throw new Error('invalid_response');
-  if (data.state === 'unavailable' || data.freshness?.state === 'unavailable') throw new Error('storage_unavailable');
+  if (data.state === 'unavailable' || data.freshness?.state === 'unavailable') throw new Error(data.reason_code || 'storage_unavailable');
   return data;
 }
 
@@ -49,7 +49,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   let page = null, selected = currentPath || null, focused = currentPath || null;
   let listMode = preferredList, graphicsAvailable = true, trail = [], nextCursor = null, activeParams = null;
   let pendingPositions = null, pendingVersion = null;
-  let view = null, windowed = false, loadingPaused = false, loadingError = false, autoTimer;
+  let view = null, windowed = false, loadingPaused = false, loadingError = false, loadingReason = '', autoTimer;
   let storage; try { storage = window.localStorage; } catch { /* Preferences remain page-local. */ }
   let forces = loadForces(storage);
   const cancelAutomatic = () => { clearTimeout(autoTimer); autoTimer = null; };
@@ -66,6 +66,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   find('[data-graph-map-options]').open = false;
   find('[data-graph-settings]').open = false;
   find('[data-graph-forces]').open = false;
+  find('[data-graph-control-options]').open = !matchMedia('(max-width: 650px), (max-height: 500px)').matches;
   const focusSearch = () => { find('[data-graph-filter-options]').open = true; input('query').focus({ preventScroll: true }); };
   const parameters = () => {
     const values = { ...Object.fromEntries(new FormData(form)), depth: input('depth').value };
@@ -84,7 +85,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   };
   const unavailable = () => {
     graphicsAvailable = false; listMode = true; presentation();
-    say('Map unavailable. Use the connection list, or retry the map.');
+    if (!loadingError) say('Map unavailable. Use the connection list, or retry the map.');
     find('[data-graph-graphics-retry]').hidden = false;
   };
   function createView() {
@@ -124,7 +125,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     find('[data-graph-depth-value]').textContent = `${depth} hop${depth === 1 ? '' : 's'}`;
     find('[data-graph-local]').setAttribute('aria-pressed', String(!global));
     find('[data-graph-global]').setAttribute('aria-pressed', String(global));
-    find('[data-graph-scope]').textContent = `${global ? 'Whole wiki' : `Local · ${activeParams?.path || input('path').value}`}${filters.length ? ` · Filtered by ${filters.map(name => `${name}: ${activeParams[name]}`).join(', ')}` : ''}`;
+    find('[data-graph-scope]').textContent = `${global ? 'Whole wiki' : `Local · ${depth} hop${depth === 1 ? '' : 's'} · ${activeParams?.path || input('path').value}`}${filters.length ? ` · Filtered by ${filters.map(name => `${name}: ${activeParams[name]}`).join(', ')}` : ''}`;
     const state = pages.limited ? 'Partial — view limit reached' : loadingError ? 'Partial — loading stopped' :
       loadingPaused ? 'Loading paused · Partial' : nextCursor ? global ? 'Loading…' : 'More to load' :
       pages.complete && !windowed ? 'Complete' : 'Partial — updating or limited';
@@ -145,7 +146,9 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
       li.append(element('strong', node.title), element('div', node.path), inspect, openLink); list.append(li);
       if (activePath === node.path) inspect.focus({ preventScroll: true });
     }
-    if (!page?.nodes.length) list.append(element('li', page && pages.complete ? 'No notes match this scope.' : 'Relationships are still being prepared. Refresh to try again.'));
+    if (!page?.nodes.length) list.append(element('li', loadingError ?
+      loadingReason === 'graph_query_limited' ? 'The graph query limit was reached. Try fewer hops or narrower filters.' : 'Loading stopped. Check the graph status for recovery options.' :
+      page && pages.complete ? 'No notes match this scope.' : 'Relationships are still being prepared. Refresh to try again.'));
     const edges = find('[data-graph-edges]'); edges.replaceChildren();
     for (const edge of page?.edges || []) edges.append(element('li', `${edge.source} → ${edge.destination} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`));
   }
@@ -218,6 +221,12 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     view?.setSelection(selected, focused);
     renderList(); showDetails(path); controls(); say(`Selected ${path}. Enter on the map opens it.`);
   }
+  function offerOneHop() {
+    if (!activeParams?.path || Number(activeParams.depth) <= 1) return;
+    const recover = element('button', 'Try one hop', { type: 'button' });
+    recover.addEventListener('click', () => { input('depth').value = '1'; loadingPaused = false; void load({ fit: true }); });
+    status.append(' ', recover);
+  }
   function accept(data, { append = false, fit = false } = {}) {
     if (!safePage(data)) throw new Error('invalid_response');
     if (!pages.accept(data, append)) { controls(); say('View limit reached. Continue in a new view or narrow your filters.'); return; }
@@ -229,7 +238,10 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     renderList(); if (!append || selected && !details.textContent.includes(selected)) showDetails(selected);
     presentation(); controls();
     find('[data-graph-diagnostics]').textContent = `Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. ${page.limiting_reasons?.join(', ') || ''} Indexed saved content, not a disk snapshot. Hops refer to loaded edges; unsaved edits are excluded.`;
-    say('');
+    if (page.limiting_reasons?.includes('neighborhood_limit')) {
+      say('Partial graph: the neighborhood limit was reached. Try fewer hops or narrower filters.');
+      offerOneHop();
+    } else say('');
   }
   async function load({ cursor, fit = false, append = false, params = null } = {}) {
     clearTimeout(debounce); debounce = null; cancelAutomatic(); const ticket = ++sequence;
@@ -237,13 +249,13 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     const retainedVersion = page ? page.eligibility_version : pendingVersion;
     if (!append) { pendingPositions = retainedPositions; pendingVersion = retainedVersion; }
     request?.abort(); request = new AbortController();
+    loadingError = false; loadingReason = '';
     if (!append) {
       const priorSelected = selected, priorFocused = focused;
       clearEvidence(); selected = priorSelected; focused = priorFocused;
       windowed = false;
     }
     activeParams = params || (cursor ? activeParams : parameters());
-    loadingError = false;
     if (!activeParams) activeParams = parameters();
     say(page ? 'Updating connections…' : 'Loading connections…'); controls();
     try {
@@ -257,11 +269,15 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
       }
     } catch (error) {
       if (!closed && ticket === sequence && error.name !== 'AbortError') {
-        loadingError = true;
+        loadingError = true; loadingReason = error.message;
         if (error.message !== 'continuation_stalled' && error.message !== 'graph_query_limited') { pendingPositions = pendingVersion = null; clearEvidence(); }
         say(error.message === 'authentication_required' ? 'Session expired. Sign in again to load the graph.' :
           error.message === 'restart_required' ? 'Connections changed. Restart loading to revalidate this view.' :
+          error.message === 'graph_query_limited' ? 'The graph query limit was reached. Try fewer hops or narrower filters.' :
+          error.message === 'graph_database_error' ? 'Connections could not load because of a database error. Refresh to try again.' :
           error.message === 'continuation_stalled' ? 'Loading stopped because the continuation did not advance. Restart loading or narrow your filters.' : 'Unable to load connections. Restart loading to try again.');
+        renderList();
+        if (error.message === 'graph_query_limited') offerOneHop();
       }
     } finally { if (ticket === sequence) { request = null; controls(); automaticallyContinue(); } }
   }
@@ -346,6 +362,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   listen(window, 'pagehide', () => { sequence++; cancelAutomatic(); clearTimeout(debounce); debounce = null; request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence(); view?.stop(); });
   listen(window, 'pageshow', event => { if (event.persisted && !closed && !loadingPaused) void load(); });
   find('[data-graph-controls]').hidden = false; find('[data-graph-clear]').hidden = false;
+  find('[data-graph-list-toggle]').hidden = false;
   createView();
   find('[data-graph-pause]').setAttribute('aria-pressed', String(view?.paused || false));
   view?.setBloom(find('[data-graph-bloom]').value); presentation();

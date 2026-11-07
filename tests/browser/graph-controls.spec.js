@@ -26,6 +26,8 @@ async function open(page) {
   await page.locator('.cm-content').focus(); await page.keyboard.type('g/');
   await expect(panel(page).getByRole('searchbox', { name: 'Graph search' })).toBeFocused();
   await expect(panel(page).locator('[data-graph-summary]')).toContainText('3 notes');
+  // Mobile entry gives the map priority; these scenarios exercise its controls.
+  await panel(page).locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
 }
 
 test('current-note two-hop entry, bracket depth, stable scope/camera and typing guards', async ({ page }) => {
