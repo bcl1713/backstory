@@ -93,7 +93,8 @@ The full gate runs there before either release branch advances. Dependencies and
 the pinned browser install first; runtime provenance is captured before checks
 and must still match when the receipt is written and reused. It includes source
 SHA/tree, complete gate contract/schema, Python/Node/npm/uv/Docker versions,
-Firefox executable hash, OS and installed package hashes, selected font/config
+installed Python package and npm dependency-tree hashes, Firefox executable
+hash, OS package hashes, selected font/config
 hashes, and hashed relevant environment selectors. No token values are recorded.
 Changing the toolchain, packages, font configuration or browser requires a new
 candidate gate, even with the same source. Use the same executor and interpreter

@@ -91,6 +91,17 @@ def browser_identity(root):
     return file_digest(path)
 
 
+def dependency_inputs(root):
+    """Hash installed package identities; never persist listings or local URLs."""
+    python = tool_identity(['uv', 'pip', 'freeze', '--no-cache', '--python',
+                            str(Path(root) / '.venv/bin/python')], cwd=root)
+    python = '\n'.join(sorted(line.strip() for line in python.splitlines() if line.strip()))
+    npm = json.loads(tool_identity(['npm', 'ls', '--all', '--json'], cwd=root))
+    npm = json.dumps(npm, sort_keys=True, separators=(',', ':'))
+    return {'python_packages_sha256': hashlib.sha256(python.encode()).hexdigest(),
+            'npm_packages_sha256': hashlib.sha256(npm.encode()).hexdigest()}
+
+
 def runtime_inputs(root):
     """Conservative local provenance; hashes selectors, never stores credentials.
 
@@ -105,6 +116,7 @@ def runtime_inputs(root):
         'python': [str(Path(root) / '.venv/bin/python'), '--version'],
     }
     result = {name: tool_identity(args, cwd=root) for name, args in tools.items()}
+    result.update(dependency_inputs(root))
     result.update(runner=sys.version, platform=platform.platform(), browser_sha256=browser_identity(root),
                   os_sha256=file_digest('/etc/os-release'))
     # Include installed OS libraries/fonts, without recording a package inventory.

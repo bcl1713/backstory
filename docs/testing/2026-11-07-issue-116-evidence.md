@@ -69,3 +69,22 @@ Integration notes:
   explicitly. Missing/legacy evidence fails closed; do not baseline it away.
 - Independent cross-review is arranged by the parent before integration. No live
   rollout of the new controller has been performed.
+
+## Review follow-up: installed dependency provenance
+
+The first implementation bound source lockfiles and runtime/tool versions but did
+not fingerprint installed ignored `.venv`/`node_modules` dependencies. Added
+normalized SHA256 fingerprints of `uv pip freeze --no-cache --python <candidate>/.venv/bin/python`
+and `npm ls --all --json` from the candidate root. Only digests enter receipts;
+raw package lists, URLs, paths and credential-like metadata are not persisted.
+Missing/incomplete installed dependency trees fail closed through the tool exit
+status; existing receipts missing either fingerprint no longer compare equal.
+
+The new Python/npm invalidation and ordering/privacy regressions first failed
+(3 expected missing-helper/key failures). Final affected command:
+`.venv/bin/python -m pytest tests/unit/test_receipt_inputs.py -q` passed 6 tests
+in **0.04s** after adding the no-cache guard; `git diff --check` also passed. A direct local `dependency_inputs(ROOT)` probe succeeded
+for both installed inventories (0.32s), without an install or network access.
+The initial uv probe failed because its default cache is read-only; `--no-cache`
+removes that unrelated cache-write requirement, verified by the successful probe.
+No application, browser, publisher, release or full-gate tests were repeated.
