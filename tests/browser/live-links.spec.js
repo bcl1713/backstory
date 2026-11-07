@@ -27,7 +27,7 @@ test.beforeAll(async () => {
     await writeFile(`${runtime}/wiki/${folder}/SharedLive.md`, '# Duplicate basename\n');
   }
   const env = { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings', BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`, BACKSTORY_IDENTITY_PATH: '.backstory-marker', BACKSTORY_COOKIE_MODE: 'localhost', BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' };
-  const result = spawnSync('.venv/bin/python', ['-c', "import django; django.setup(); from indexing.queue import request_scan; from indexing.worker import run_batch; request_scan('rebuild')\nfor n in range(500):\n r=run_batch(now=10000000000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)"], { env, encoding: 'utf8' });
+  const result = spawnSync('.venv/bin/python', ['-c', "import django; django.setup(); from indexing.queue import request_scan; from indexing.worker import run_batch; request_scan('rebuild')\nfor n in range(2000):\n r=run_batch(now=10000000000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)"], { env, encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);
 });
 

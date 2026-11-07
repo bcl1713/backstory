@@ -49,7 +49,7 @@ test('representative search reports partial state, then opens current disk conte
   await login(page);
   await page.goto('/search/?q=synthetic');
   await expect(page.getByRole('main').getByRole('status')).toContainText('partial');
-  await python("import django; django.setup(); from indexing.worker import run_batch\nfor n in range(500):\n r=run_batch(now=10000000000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)");
+  await python("import django; django.setup(); from indexing.worker import run_batch\nfor n in range(2000):\n r=run_batch(now=10000000000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)");
   await page.goto('/search/?q=synthetic');
   await expect(page.getByRole('main').getByRole('status')).toContainText('ready');
   const response = await page.request.get('/search/?q=synthetic');

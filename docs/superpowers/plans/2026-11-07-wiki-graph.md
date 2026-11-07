@@ -67,10 +67,10 @@ Interfaces: graph controller loads Task 3 results, keeps path-based focus/select
 
 Files: docs/graph.md, docs/editor.md, fixture/benchmark scripts and current test gates.
 
-- [ ] Measure bounded 100/1000/10000-note query fixtures and 200-node/500-edge layout/bloom costs, recording environment and actual values.
-- [ ] Run Python, Node, build, Chromium/Firefox and repository local-CI checks; inspect light/dark/mobile/reduced-motion evidence.
-- [ ] Independently review projection invalidation, privacy/completeness, keyboard/focus and tools. Fix substantive findings and rerun relevant checks.
-- [ ] Record actual-host acceptance as pending without authorized deployment/host access.
+- [x] Measure bounded 100/1000/10000-note query fixtures and 200-node/500-edge layout/bloom costs, recording environment and actual values.
+- [x] Run Python, Node, build, Chromium/Firefox and repository local-CI checks; inspect light/dark/mobile/reduced-motion evidence.
+- [x] Independently review projection invalidation, privacy/completeness, keyboard/focus and tools. Fix substantive findings and rerun relevant checks.
+- [x] Record actual-host acceptance as pending without authorized deployment/host access.
 
 ## Execution notes
 

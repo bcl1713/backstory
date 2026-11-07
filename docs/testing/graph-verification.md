@@ -15,17 +15,17 @@ Commands used for the final source verification:
 uv run pytest -n 2 --dist loadfile --durations=20
 npm run build
 npm run test:formatter
-BACKSTORY_BROWSER_RUNTIME=/tmp/graph-final-chromium-2 BACKSTORY_BROWSER_PORT=18765 npm run test:browser
+BACKSTORY_BROWSER_RUNTIME=/tmp/graph-final-chromium-3 BACKSTORY_BROWSER_PORT=18765 npm run test:browser
 BACKSTORY_BROWSER_RUNTIME=/tmp/graph-final-firefox BACKSTORY_BROWSER_PORT=18766 npx playwright test --config=playwright.firefox.config.js
 python scripts/benchmark_graph.py --output /tmp/graph-benchmark-final.json
-python scripts/local_ci.py --base dev --head codex/issue-107 --report /tmp/graph-exact-tree-ci-final
+python scripts/local_ci.py --base dev --head codex/issue-107 --report /tmp/graph-exact-tree-ci-reviewed
 ```
 
 Use the session's own rootless test daemon through its inherited
 `DOCKER_HOST=unix:///run/user/1002/docker.sock`. The default system daemon is not
 used. No socket permissions, security policy or service configuration were
 changed. The exact-tree runner writes its final source identity, per-gate logs
-and receipt outside the checkout at `/tmp/graph-exact-tree-ci-final`; this keeps the
+and receipt outside the checkout at `/tmp/graph-exact-tree-ci-reviewed`; this keeps the
 tested commit immutable. Individual gates are not a substitute for that receipt.
 Release publication and actual-host WebMCP acceptance require separate deployment
 authorization. No deployment was requested or performed.
@@ -48,9 +48,8 @@ and environment metadata are in `/tmp/graph-benchmark-final.json`.
 
 The standalone Node physics benchmark measured 288 ms for 240 fixed steps on
 200 nodes/500 edges. Nine graph/layout/theme tests passed; the complete Node
-gate passed 378 tests. The complete Python gate passed 1,524 tests before the
-additional projection-publication cursor regression; the exact-tree gate tests
-that final regression too. Eight focused Chromium graph tests passed, including
+gate passed 378 tests. The complete Python gate passed 1,527 tests, including projection-publication
+cursor and unindexed/denied requested-path regressions. Eight focused Chromium graph tests passed, including
 drag/cancel/sleep, g/ and Insert safety, draft guards, list/tool parity, theme
 updates, reduced motion, mobile/no-JavaScript, bfcache and Bloom Off.
 
@@ -86,3 +85,41 @@ Review scope exclusions are explicit: no deployed-host testing, no claim of
 detecting arbitrary external writes before reconciliation, and no general hardware performance guarantee from
 the synthetic reference environment. Visual and motion evidence uses synthetic
 labels only.
+
+## Chromium regression follow-up
+
+The complete Chromium run exposed an existing Graphviz typography failure:
+`tests/browser/graphviz-frame.spec.js:59` reports text x = -5.03125 where
+shape x + padding = 6. The identical failure was reproduced in an isolated
+checkout of unchanged `origin/dev` (`7bdc1a1`), using the same locked runtime and
+a fresh synthetic wiki. Baseline log: `/tmp/graphviz-dev-baseline.log`. Graphviz
+frame source and its tests are unchanged by issue 107.
+
+Three existing browser setup loops allowed only 500 worker batches. The shared
+representative wiki has about 1,060 notes and 8,000 occurrences: the new bounded
+20-occurrence relation phase needs about 400 additional batches after note
+discovery/validation. Those loops now allow 2,000 batches and retain their
+explicit completion assertion and timeout. Production query and worker limits
+are unchanged. All 15 affected search, live-link, representative-wiki and maximum-graph visual
+cases passed with `/tmp/graph-final-chromium-fixes` as their disposable runtime.
+
+The maximum renderer fixture became usable in 449 ms in the complete Chromium run.
+Mean/p95 frame times were 16.43/16.7 ms with Bloom Off, 26.89/49.9 ms at normal
+intensity and 28.16/49.9 ms at high intensity; reported JS heap was 16.1 MB
+for all three. This
+shared headless executor therefore measured about 60 fps with bloom off and
+35–37 fps with bloom enabled, below the 60 fps target. These browser timings
+include the headless compositor and shared-executor scheduling. Bloom Off and the
+connection list remain user controls; no 60 fps guarantee is claimed. The
+light/dark/forced-colors/mobile screenshots and drag/release recording were
+inspected, and raw values are in `graph-renderer-measurements.json` beside them.
+
+The catch-all Chromium run completed all 449 scheduled cases: 441 passed,
+three failed and five were blocked by the live-link setup failure. The focused
+15-case follow-up passed both corrected failures and all five blocked cases,
+leaving the reproduced baseline Graphviz typography failure as the only
+unresolved Chromium case. All eight graph navigation cases and the maximum
+visual fixture passed in the complete run. Full log:
+`/tmp/graph-chromium-final-3.log`; corrected-case log:
+`/tmp/graph-chromium-fixes.log`. This is not a claim of one uninterrupted green
+catch-all run. The current repository CI gate uses the focused Firefox suites.

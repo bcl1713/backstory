@@ -56,7 +56,7 @@ test('full generated corpus stays server-side during paused/resumed maintenance 
   await revealChrome(page);
   await page.getByRole('button', { name: 'Store protected draft', exact: true }).click();
   await expect(page.locator('[data-editor-status]')).toContainText('Protected draft stored');
-  await python("import django; django.setup(); from indexing.worker import run_batch\nfor n in range(500):\n r=run_batch(now=10000000000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)");
+  await python("import django; django.setup(); from indexing.worker import run_batch\nfor n in range(2000):\n r=run_batch(now=10000000000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)");
   expect(await source(page)).toBe(edited);
   expect(requests.some(p => /\/(index|backlinks|scan)\//.test(p))).toBe(false);
   expect(requests.filter(p => p.startsWith('/notes/'))).toEqual(['/notes/reference/Large.md']);
