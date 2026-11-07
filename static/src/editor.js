@@ -44,6 +44,7 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
   }, {
     follow: () => followLink(linkAtCaret(view), getPath(), { doc: view.state.doc, selection: view.state.selection, path: getPath() }),
     home: () => { followLink.cancel(); activateLink('/'); },
+    graph: () => { followLink.cancel(); document.dispatchEvent(new Event('backstory:open-graph')); },
   });
   const liveExtensions = () => [codePreview, codeHighlighting, tablePreview, mathPreview, ...((mermaidEnabled || graphvizEnabled || vegaLiteEnabled) ? [diagramEngines.of([...(mermaidEnabled?['mermaid']:[]),...(graphvizEnabled?['graphviz']:[]),...(vegaLiteEnabled?['vega-lite']:[])]),diagramPreview] : []), createLivePreviewExtension(), createLiveLinksExtension({ getPath }), createImagePreviewExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';

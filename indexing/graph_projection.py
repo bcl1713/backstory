@@ -17,7 +17,7 @@ from wiki.policy import policy_version
 from wiki.storage import open_directory, require_ready
 from .models import IndexGeneration, IndexedNote, LinkEdge, RelationState, ResolvedRelation, ScanState
 
-RESOLVER_VERSION = 'graph-1'
+RESOLVER_VERSION = 'graph-2'
 
 
 def namespace_version():
@@ -45,7 +45,7 @@ def run_relation_batch(limit=20):
             state.epoch += 1
             state.after = 0
             state.complete = False
-            state.evidence_complete = not IndexedNote.objects.filter(generation=generation).exclude(projection__diagnostics=[]).exists()
+            state.evidence_complete = not IndexedNote.objects.filter(generation=generation, relations_complete=False).exists()
             state.save()
         elif state.complete:
             return None
@@ -60,6 +60,7 @@ def run_relation_batch(limit=20):
         if result.state in {'unavailable', 'unconfirmed'}:
             state.evidence_complete = False
         rows.append(ResolvedRelation(occurrence=edge, generation=generation, epoch=state.epoch,
+                                    source=edge.note.path,
                                     destination=result.canonical_path or '', state=result.state,
                                     resource_type=result.resource_type, choices=list(result.choices[:100])))
     require_ready()
@@ -70,7 +71,7 @@ def run_relation_batch(limit=20):
                 not IndexGeneration.objects.filter(pk=generation.pk, state='active', mutation=state.mutation).exists()):
             return True
         ResolvedRelation.objects.bulk_create(rows, update_conflicts=True, unique_fields=['occurrence'],
-                                            update_fields=['epoch', 'destination', 'state', 'resource_type', 'choices'])
+                                            update_fields=['epoch', 'source', 'destination', 'state', 'resource_type', 'choices'])
         if edges:
             state.after = edges[-1].pk
         state.complete = len(edges) < max(1, min(20, limit))

@@ -188,7 +188,7 @@ def extract_links(source: str) -> list[LinkEdge]:
     which may be declared elsewhere. Tokens retain literal wiki spelling.
     """
     from .markdown import _parser
-    parser = _parser()
+    parser = _parser(wrapped_wiki_aliases=True)
     parser.validateLink = lambda value: True
     tokens = parser.parse(source, {})
     edges = []

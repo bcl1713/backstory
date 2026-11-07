@@ -76,3 +76,66 @@ def test_unavailable_storage_withholds_all_content(wiki):
     (wiki / '.backstory-marker').unlink()
     page = graph.query_graph('a.md')
     assert page.state == 'unavailable' and not page.nodes and not page.edges
+
+
+def test_graph_pages_include_cross_page_edge_endpoints_and_local_center(wiki):
+    graph = build_graph(wiki, {'z.md': '[[a]] [[b]]', 'a.md': '[[b]]', 'b.md': '# B'})
+    cursor = None
+    observed = set()
+    for _ in range(12):
+        page = graph.query_graph(node_limit=2, cursor=cursor)
+        paths = {node.path for node in page.nodes}
+        for edge in page.edges:
+            assert {edge.source, edge.destination} <= paths
+            observed.add((edge.source, edge.destination))
+        cursor = page.next_cursor
+        if not cursor:
+            break
+    assert observed == {('z.md', 'a.md'), ('z.md', 'b.md'), ('a.md', 'b.md')}
+    local = graph.query_graph('z.md', node_limit=1)
+    assert [node.path for node in local.nodes] == ['z.md']
+    assert 'node_limit' in local.limiting_reasons
+
+
+def test_known_unindexed_target_withholds_complete_absence(wiki, settings):
+    graph = build_graph(wiki, {'a.md': '[[b]]'})
+    (wiki / 'b.md').write_text('# New external target')
+    settings.BACKSTORY_EXCLUSIONS = ['unrelated.md']
+    from indexing import worker
+    from tests.integration.test_indexing import drain
+    drain(worker)
+    page = graph.query_links('a.md', 'outgoing')
+    assert not page.projection_complete
+
+
+def test_assets_and_isolation_recheck_all_incident_eligibility(wiki):
+    graph = build_graph(wiki, {'private/a.md': '[[public/b]] [asset](../images/photo.png)',
+                               'public/b.md': '# B', 'images/photo.png': 'inert'})
+    (wiki / 'images/photo.png').unlink()
+    page = graph.query_links('private/a.md', 'outgoing')
+    assert not page.projection_complete
+    assert not any(item.resource_type == 'asset' and item.state == 'resolved' for item in page.items)
+    (wiki / 'private/a.md').unlink()
+    isolated = graph.query_link_issues(folder='public', issue='isolated')
+    assert not isolated.projection_complete and not isolated.items
+
+
+def test_graph_cursor_stays_bounded_for_long_valid_paths(wiki):
+    import hashlib
+    folder = '/'.join(hashlib.sha256(str(i).encode()).hexdigest() * 3 for i in range(19))
+    path = folder + '/long.md'
+    graph = build_graph(wiki, {path: '[[short]]', 'short.md': '# Short'})
+    page = graph.query_graph(node_limit=1)
+    assert page.next_cursor and len(page.next_cursor) <= 4096
+    graph.query_graph(node_limit=1, cursor=page.next_cursor)
+
+
+def test_request_occurrence_select_excludes_unused_note_metadata(wiki, django_assert_num_queries):
+    graph = build_graph(wiki, {'a.md': '[[missing]]', 'b.md': '# B'})
+    from django.test.utils import CaptureQueriesContext
+    from django.db import connection
+    with CaptureQueriesContext(connection) as captured:
+        graph.query_link_issues()
+    occurrence_queries = [query['sql'] for query in captured if 'INNER JOIN "indexing_linkedge"' in query['sql'] and 'target_text' in query['sql']]
+    assert occurrence_queries
+    assert all('"indexing_indexednote"."body"' not in query and '"indexing_indexednote"."projection"' not in query for query in occurrence_queries)

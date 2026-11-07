@@ -9,7 +9,7 @@ import hashlib
 import json
 
 from django.core import signing
-from django.db import OperationalError
+from django.db import connection, OperationalError
 from django.db.models import Count, Min, Q
 from django.db.models.functions import Substr
 from django.urls import reverse
@@ -53,7 +53,7 @@ def _path(path):
 
 
 def _node_rows(queryset):
-    return queryset.annotate(short_title=Substr('title', 1, 512)).values('path', 'short_title', 'revision', 'stat')
+    return queryset.annotate(short_title=Substr('title', 1, 512)).values('pk', 'path', 'short_title', 'revision', 'stat')
 
 
 class Query:
@@ -76,12 +76,14 @@ class Query:
         self.boundary = False
         self.query_hash = hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest()
         self.stamp = self._stamp()
-        self.after = 0 if arguments['kind'] != 'graph' else ''
+        self.after = {'phase': 'edges', 'after': 0} if arguments['kind'] == 'graph' else 0
         if cursor is not None:
             try:
                 _string(cursor, 4096, 'graph_cursor_expired', empty=False)
                 data = signing.loads(cursor, salt='graph-v1', max_age=3600)
                 if data['q'] != self.query_hash or data['s'] != self.stamp or type(data['a']) is not type(self.after):
+                    raise ValueError
+                if isinstance(self.after, dict) and (set(data['a']) != {'phase', 'after'} or data['a']['phase'] not in {'edges', 'nodes'} or type(data['a']['after']) is not int or data['a']['after'] < 0):
                     raise ValueError
                 self.after = data['a']
             except (StorageError, signing.BadSignature, ValueError, TypeError, KeyError):
@@ -99,9 +101,13 @@ class Query:
             self.reasons.add('candidate_limit')
             self.complete = False
             return None
-        self.examined += 1
         row = self.rows.get(path) if path in self.rows else _node_rows(IndexedNote.objects.filter(generation=self.generation, path=path)).first()
-        return self.check_row(row) if row else self.cache.setdefault(path, None)
+        if row:
+            return self.check_row(row)
+        self.complete = False
+        self.examined += 1
+        self.reasons.add('unindexed_endpoint')
+        return self.cache.setdefault(path, None)
 
     def prime(self, paths):
         paths = sorted(set(paths) - self.cache.keys() - self.rows.keys())[:CANDIDATE_LIMIT - self.examined]
@@ -113,6 +119,11 @@ class Query:
         path = row['path']
         if path in self.cache:
             return self.cache[path]
+        if self.examined >= CANDIDATE_LIMIT:
+            self.reasons.add('candidate_limit')
+            self.complete = False
+            return None
+        self.examined += 1
         node = None
         try:
             _path(path)
@@ -128,6 +139,13 @@ class Query:
         self.cache[path] = node
         return node
 
+    def can_check(self, paths):
+        if len(set(paths) - self.cache.keys()) + self.examined <= CANDIDATE_LIMIT:
+            return True
+        self.reasons.add('candidate_limit')
+        self.complete = False
+        return False
+
     def cursor(self, after):
         return signing.dumps({'q': self.query_hash, 's': self.stamp, 'a': after}, salt='graph-v1', compress=True)
 
@@ -136,12 +154,43 @@ class Query:
             return ResolvedRelation.objects.none()
         return ResolvedRelation.objects.filter(generation=self.generation, epoch=self.relations.epoch)
 
+    def incident_pairs(self, paths):
+        # Separate indexed lookups avoid an OR spanning the raw-source join,
+        # which otherwise makes SQLite scan the whole relation generation.
+        pairs = {}
+        for column in ('source', 'destination'):
+            rows = list(_pairs(self.relation_rows().filter(**{column + '__in': paths}))[:501])
+            if len(rows) == 501:
+                self.reasons.add('edge_candidate_limit')
+            for row in rows:
+                pairs[row['source'], row['destination']] = row
+        return [pairs[key] for key in sorted(pairs)]
+
+    def occurrence_rows(self, rows):
+        # Bound large target spellings in SQL and do not multiply metadata/body
+        # memory by the number of occurrences from the same source note.
+        return rows.select_related('occurrence__note').annotate(
+            target_text=Substr('occurrence__target', 1, 4096),
+            fragment_text=Substr('occurrence__fragment', 1, 4096)).only(
+                'occurrence', 'generation', 'epoch', 'destination', 'state', 'resource_type', 'choices',
+                'occurrence__note', 'occurrence__note__path', 'occurrence__note__revision',
+                'occurrence__kind', 'occurrence__position', 'occurrence__position_precision',
+                'occurrence__occurrence_kind')
+
     def occurrence(self, relation):
         edge = relation.occurrence
         if not self.eligible(edge.note.path):
             return None
         if relation.resource_type in {'note', 'self'} and not self.eligible(relation.destination):
             return None
+        if relation.resource_type == 'asset':
+            try:
+                validate_path(relation.destination, 'content')
+                file_stat(relation.destination)
+            except (StorageError, OSError):
+                self.complete = False
+                self.reasons.add('eligibility_changed')
+                return None
         choices = []
         for path in relation.choices:
             if self.eligible(path):
@@ -151,8 +200,8 @@ class Query:
             state = 'unconfirmed'
         if not self.complete and state in {'missing', 'ambiguous'}:
             state = 'unconfirmed'
-        return LinkOccurrence(edge.pk, edge.note.path, edge.note.revision, edge.target[:4096], edge.kind,
-                              edge.fragment[:4096], tuple(edge.position), edge.position_precision,
+        return LinkOccurrence(edge.pk, edge.note.path, edge.note.revision, relation.target_text, edge.kind,
+                              relation.fragment_text, tuple(edge.position), edge.position_precision,
                               edge.occurrence_kind, state, relation.destination or None,
                               relation.resource_type, tuple(choices))
 
@@ -208,25 +257,31 @@ def query_links(path, direction, cursor=None, limit=50):
     _limit(limit, 100)
     query = Query({'kind': 'links', 'path': path, 'direction': direction, 'limit': limit}, cursor)
     rows = query.relation_rows()
-    conditions = Q(occurrence__note__path=path)
+    conditions = Q(source=path)
     if direction == 'incoming':
-        conditions = Q(destination=path, state='resolved', resource_type__in=['note', 'self'])
+        conditions = Q(destination=path, resource_type__in=['note', 'self'])
     elif direction == 'both':
-        conditions |= Q(destination=path, state='resolved', resource_type__in=['note', 'self'])
-    rows = list(rows.filter(conditions, occurrence_id__gt=query.after).select_related('occurrence__note')
-                .defer('occurrence__note__body', 'occurrence__note__projection', 'occurrence__note__ids',
-                       'occurrence__note__aliases', 'occurrence__note__tags')
+        # Both columns live on the same projection and have matching indexes.
+        conditions |= Q(destination=path, resource_type__in=['note', 'self'])
+    rows = list(query.occurrence_rows(rows.filter(conditions, occurrence_id__gt=query.after))
                 .order_by('occurrence_id')[:CANDIDATE_LIMIT])
     items = []
     after = query.after
+    capped = False
     for row in rows:
+        paths = [row.occurrence.note.path, *row.choices]
+        if row.resource_type in {'note', 'self'}:
+            paths.append(row.destination)
+        if not query.can_check(paths):
+            capped = True
+            break
         after = row.occurrence_id
         item = query.occurrence(row)
         if item:
             items.append(item)
         if len(items) >= limit:
             break
-    more = bool(rows and (after != rows[-1].occurrence_id or len(rows) == CANDIDATE_LIMIT))
+    more = bool(rows and (capped or after != rows[-1].occurrence_id or len(rows) == CANDIDATE_LIMIT))
     if more:
         query.reasons.add('page_limit')
     return query.finish(LinkPage, items=tuple(items), next_cursor=query.cursor(after) if more else None)
@@ -237,15 +292,55 @@ def _matches(path, folder, tag, text):
     if folder:
         rows = rows.filter(path__startswith=folder + '/')
     if tag:
-        rows = rows.extra(where=['EXISTS (SELECT 1 FROM json_each(indexing_indexednote.tags) WHERE value = %s)'], params=[tag])
+        rows = rows.extra(where=['EXISTS (SELECT 1 FROM json_each(tags) WHERE value = %s)'], params=[tag])
     if text:
         rows = rows.filter(Q(path__icontains=text) | Q(title__icontains=text) | Q(indexedname__name=text.casefold()))
     return rows
 
 
 def _pairs(rows):
-    return rows.filter(state='resolved', resource_type='note', occurrence__occurrence_kind='link').values(
-        'occurrence__note__path', 'destination').annotate(count=Count('pk'), first=Min('occurrence_id')).order_by('occurrence__note__path', 'destination')
+    # The projector assigns resource_type=note only to resolved canonical notes.
+    # Avoid a redundant state equality: SQLite's low-cardinality state index
+    # otherwise defeats the selective forward/inverse path indexes.
+    return rows.filter(resource_type='note', occurrence__occurrence_kind='link').values(
+        'source', 'destination').annotate(count=Count('pk'), first=Min('occurrence_id')).order_by('source', 'destination')
+
+
+def _filtered_nodes(generation, folder, tag, text):
+    rows = IndexedNote.objects.filter(generation=generation)
+    if folder:
+        rows = rows.filter(path__startswith=folder + '/')
+    if tag:
+        rows = rows.extra(where=['EXISTS (SELECT 1 FROM json_each(tags) WHERE value = %s)'], params=[tag])
+    if text:
+        rows = rows.filter(Q(path__icontains=text) | Q(title__icontains=text) | Q(indexedname__name=text.casefold())).distinct()
+    return rows
+
+
+def _selected_pairs(context, pairs):
+    """Count only already-eligible pairs with indexed, bounded point lookups.
+
+    A large OR makes SQLite evaluate every pair expression against every row.
+    A bounded VALUES table plus the four-column pair index avoids that quadratic
+    plan and does not change the SQL/candidate budgets. All values are bound.
+    """
+    if not pairs:
+        return []
+    ordered = sorted(pairs)
+    values = ','.join('(%s,%s)' for _ in ordered)
+    parameters = [p for pair in ordered for p in pair]
+    parameters += [context.generation.pk, context.relations.epoch]
+    sql = ('WITH wanted(source,destination) AS (VALUES ' + values + ') '
+           'SELECT r.source,r.destination,COUNT(*),MIN(r.occurrence_id) '
+           'FROM wanted w CROSS JOIN indexing_resolvedrelation r INDEXED BY relation_forward '
+           'CROSS JOIN indexing_linkedge e WHERE r.generation_id=%s AND r.epoch=%s '
+           'AND r.source=w.source AND r.destination=w.destination AND e.id=r.occurrence_id '
+           "AND r.state='resolved' AND r.resource_type='note' AND e.occurrence_kind='link' "
+           'GROUP BY r.source,r.destination ORDER BY r.source,r.destination')
+    with connection.cursor() as cursor:
+        cursor.execute(sql, parameters)
+        return [dict(source=source, destination=target, count=count, first=first)
+                for source, target, count, first in cursor.fetchall()]
 
 
 @_bounded
@@ -263,26 +358,27 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
                      'query': query, 'node_limit': node_limit, 'edge_limit': edge_limit}, cursor)
     if context.index.state == 'unavailable':
         return context.finish(GraphPage)
-    nodes = {}
+    neighborhood = None
+    center = None
     if path:
-        if context.eligible(path):
-            nodes[path] = context.cache[path]
-        frontier = set(nodes)
+        center = context.eligible(path)
+        neighborhood = {path} if center else set()
+        frontier = set(neighborhood)
         for _ in range(depth):
             if not frontier:
                 break
-            pairs = list(_pairs(context.relation_rows().filter(Q(occurrence__note__path__in=frontier) | Q(destination__in=frontier)))[:501])
-            context.prime([p for pair in pairs for p in [pair['occurrence__note__path'], pair['destination']]])
+            pairs = context.incident_pairs(frontier)
+            context.prime([p for pair in pairs for p in [pair['source'], pair['destination']]])
             following = set()
             for pair in pairs:
-                source, target = pair['occurrence__note__path'], pair['destination']
+                source, target = pair['source'], pair['destination']
                 a, b = context.eligible(source), context.eligible(target)
                 if not a or not b:
                     continue
                 for node in [a, b]:
                     if _matches(node.path, folder, tag, query).filter(generation=context.generation).exists():
                         following.add(node.path)
-                        nodes[node.path] = node
+                        neighborhood.add(node.path)
                     else:
                         context.boundary = True
             frontier = following
@@ -290,49 +386,106 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
                 context.reasons.add('edge_candidate_limit')
         # Filtering applies to the center too; a hidden center is not evidence
         # that all connections disappeared.
-        nodes = {p: n for p, n in nodes.items() if _matches(p, folder, tag, query).filter(generation=context.generation).exists()}
-    else:
-        rows = IndexedNote.objects.filter(generation=context.generation)
-        if folder:
-            rows = rows.filter(path__startswith=folder + '/')
-        if tag:
-            rows = rows.extra(where=['EXISTS (SELECT 1 FROM json_each(indexing_indexednote.tags) WHERE value = %s)'], params=[tag])
-        if query:
-            rows = rows.filter(Q(path__icontains=query) | Q(title__icontains=query) | Q(indexedname__name=query.casefold())).distinct()
-        candidates = list(_node_rows(rows.filter(path__gt=context.after)).order_by('path')[:CANDIDATE_LIMIT])
+        neighborhood = {p for p in neighborhood if _matches(p, folder, tag, query).filter(generation=context.generation).exists()}
+        if path not in neighborhood:
+            center = None
+    eligible_rows = _filtered_nodes(context.generation, folder, tag, query)
+    if neighborhood is not None:
+        eligible_rows = eligible_rows.filter(path__in=neighborhood)
+    relations = context.relation_rows().filter(resource_type='note', occurrence__occurrence_kind='link')
+    # Page occurrences rather than disjoint node windows. Every emitted visual
+    # edge carries both endpoints in this response, even across page boundaries.
+    # Numeric checkpoints keep cursors bounded for 4096-character Unicode paths.
+    if path or folder or tag or query:
+        relations = relations.filter(source__in=eligible_rows.values('path'), destination__in=eligible_rows.values('path'))
+    nodes = {path: center} if center else {}
+    phase, after = context.after['phase'], context.after['after']
+    next_checkpoint = None
+    selected_pairs = set()
+    if phase == 'edges' and node_limit >= 2:
+        candidate_relations = relations.filter(occurrence_id__gt=after)
+        if path:
+            # A local view must not walk the generation-wide occurrence order
+            # looking for a late source. Fetch bounded raw occurrence IDs from
+            # the source-note index, then use their unique projection lookup.
+            note_ids = list(eligible_rows.values_list('pk', flat=True)[:CANDIDATE_LIMIT])
+            raw_ids = list(LinkEdge.objects.filter(note_id__in=note_ids, pk__gt=after).order_by('pk')
+                           .values_list('pk', flat=True)[:CANDIDATE_LIMIT])
+            candidate_relations = context.relation_rows().filter(occurrence_id__in=raw_ids)
+        candidates = list(candidate_relations.order_by('occurrence_id').values(
+            'occurrence_id', 'source', 'destination')[:CANDIDATE_LIMIT])
+        if path:
+            candidates = [row for row in candidates if row['source'] in neighborhood and row['destination'] in neighborhood]
+        context.prime([p for row in candidates for p in [row['source'], row['destination']]])
         for row in candidates:
-            context.examined += 1
+            source, target = row['source'], row['destination']
+            if not context.can_check([source, target]):
+                next_checkpoint = {'phase': 'edges', 'after': after}
+                break
+            a, b = context.eligible(source), context.eligible(target)
+            if a and b:
+                additional = len({source, target} - nodes.keys())
+                if len(nodes) + additional > node_limit or len(selected_pairs) >= edge_limit and (source, target) not in selected_pairs:
+                    context.reasons.add('node_limit' if len(nodes) + additional > node_limit else 'edge_limit')
+                    next_checkpoint = {'phase': 'edges', 'after': after}
+                    break
+                nodes[source], nodes[target] = a, b
+                selected_pairs.add((source, target))
+            after = row['occurrence_id']
+        if next_checkpoint is None and len(candidates) == CANDIDATE_LIMIT:
+            next_checkpoint = {'phase': 'edges', 'after': after}
+            context.reasons.add('candidate_limit')
+        elif next_checkpoint is None:
+            phase, after = 'nodes', 0
+    elif phase == 'edges':
+        if relations.exists():
+            context.reasons.add('node_limit')
+            context.boundary = True
+        phase, after = 'nodes', 0
+    if next_checkpoint is None and phase == 'nodes':
+        node_rows = eligible_rows.filter(pk__gt=after)
+        if path:
+            local_ids = list(eligible_rows.values_list('pk', flat=True)[:CANDIDATE_LIMIT])
+            node_rows = IndexedNote.objects.filter(pk__in=local_ids, pk__gt=after)
+        candidates = list(_node_rows(node_rows).order_by('pk')[:CANDIDATE_LIMIT])
+        for row in candidates:
+            if row['path'] in nodes:
+                after = row['pk']
+                continue
+            if len(nodes) >= node_limit:
+                context.reasons.add('node_limit')
+                # A one-node local response always retains its center. It
+                # explicitly cannot represent edges; use a larger limit/links.
+                if not (center and node_limit == 1):
+                    next_checkpoint = {'phase': 'nodes', 'after': after}
+                break
+            if not context.can_check([row['path']]):
+                next_checkpoint = {'phase': 'nodes', 'after': after}
+                break
             node = context.check_row(row)
             if node:
                 nodes[node.path] = node
-            if len(nodes) > node_limit:
-                break
-    ordered = sorted(p for p in nodes if p > context.after)
-    more = len(ordered) > node_limit
-    selected = ordered[:node_limit]
-    if more:
-        context.reasons.add('node_limit')
-    if not path and len(candidates) == CANDIDATE_LIMIT:
-        more = True
-        context.reasons.add('candidate_limit')
+            after = row['pk']
+        if next_checkpoint is None and len(candidates) == CANDIDATE_LIMIT and not (center and node_limit == 1):
+            next_checkpoint = {'phase': 'nodes', 'after': after}
+            context.reasons.add('candidate_limit')
+    pairs = _selected_pairs(context, selected_pairs)
     edges = []
-    pairs = list(_pairs(context.relation_rows().filter(occurrence__note__path__in=selected, destination__in=selected))[:edge_limit + 1])
     samples = {row['pk']: row['position'] for row in LinkEdge.objects.filter(pk__in=[p['first'] for p in pairs[:edge_limit]]).values('pk', 'position')}
     for pair in pairs[:edge_limit]:
-        source = pair['occurrence__note__path']
+        source = pair['source']
         edges.append(GraphEdge(source, pair['destination'], pair['count'], nodes[source].revision,
                                pair['first'], tuple(samples[pair['first']])))
     if len(pairs) > edge_limit:
         context.reasons.add('edge_limit')
     if (folder or tag or query) and not context.boundary:
-        boundary = list(_pairs(context.relation_rows().filter(Q(occurrence__note__path__in=selected) | Q(destination__in=selected)))[:501])
+        boundary = context.incident_pairs(nodes)
         for pair in boundary:
-            for p in [pair['occurrence__note__path'], pair['destination']]:
+            for p in [pair['source'], pair['destination']]:
                 if p not in nodes and context.eligible(p) and not _matches(p, folder, tag, query).filter(generation=context.generation).exists():
                     context.boundary = True
-    after = selected[-1] if selected else candidates[-1]['path'] if not path and candidates else context.after
-    return context.finish(GraphPage, nodes=tuple(nodes[p] for p in selected), edges=tuple(edges),
-                          boundary_connections=context.boundary, next_cursor=context.cursor(after) if more and after else None)
+    return context.finish(GraphPage, nodes=tuple(nodes[p] for p in sorted(nodes)), edges=tuple(edges),
+                          boundary_connections=context.boundary, next_cursor=context.cursor(next_checkpoint) if next_checkpoint else None)
 
 
 @_bounded
@@ -351,25 +504,49 @@ def query_link_issues(folder='', issue='missing', cursor=None, limit=50):
         rows = IndexedNote.objects.filter(generation=query.generation, pk__gt=after)
         if folder:
             rows = rows.filter(path__startswith=folder + '/')
-        candidates = list(rows.values('pk', 'path').order_by('pk')[:CANDIDATE_LIMIT])
+        # Eligibility involves filesystem checks, so examine a small continuing
+        # note window rather than spending the whole SQL deadline on 300 notes.
+        note_window = 20
+        candidates = list(rows.values('pk', 'path').order_by('pk')[:note_window])
+        incident_examined = 0
         for row in candidates:
+            if not query.can_check([row['path']]) or incident_examined >= CANDIDATE_LIMIT:
+                more = True
+                query.reasons.add('candidate_limit')
+                break
             after = row['pk']
             node = query.eligible(row['path'])
             # Unconfirmed references and non-note outgoing references still
             # prevent an isolation claim; a self-heading does not.
-            connected = query.relation_rows().filter(Q(destination=row['path'], resource_type='note') |
-                (Q(occurrence__note__path=row['path']) & ~Q(resource_type='self'))).exists()
+            remaining = CANDIDATE_LIMIT - incident_examined
+            incident_ids = set(query.relation_rows().filter(destination=row['path'], resource_type='note')
+                               .values_list('pk', flat=True)[:remaining])
+            incident_ids.update(query.relation_rows().filter(source=row['path']).exclude(resource_type='self')
+                                .values_list('pk', flat=True)[:remaining])
+            # These IDs were already selected inside this epoch. Reapplying a
+            # generation predicate lets SQLite choose a broad generation index
+            # over the primary-key lookup. The final epoch check rejects races.
+            incident = list(query.occurrence_rows(ResolvedRelation.objects.filter(pk__in=sorted(incident_ids)[:remaining])))
+            incident_examined += len(incident)
+            connected = False
+            for relation in incident:
+                if query.occurrence(relation):
+                    connected = True
+                    break
+            if len(incident) == CANDIDATE_LIMIT:
+                query.complete = False
+                query.reasons.add('candidate_limit')
             if node and not connected:
                 items.append({'path': node.path, 'title': node.title, 'href': node.href,
                               'revision': node.revision, 'issue': 'no_indexed_connections_observed'})
             if len(items) == limit:
                 break
-        more = bool(candidates and (after != candidates[-1]['pk'] or len(candidates) == CANDIDATE_LIMIT))
+        more = more or bool(candidates and (after != candidates[-1]['pk'] or len(candidates) == note_window))
     else:
         rows = query.relation_rows().filter(state=issue, occurrence_id__gt=after)
         if folder:
-            rows = rows.filter(occurrence__note__path__startswith=folder + '/')
-        candidates = list(rows.select_related('occurrence__note').defer('occurrence__note__body').order_by('occurrence_id')[:CANDIDATE_LIMIT])
+            rows = rows.filter(source__startswith=folder + '/')
+        candidates = list(query.occurrence_rows(rows).order_by('occurrence_id')[:CANDIDATE_LIMIT])
         for row in candidates:
             after = row.occurrence_id
             item = query.occurrence(row)

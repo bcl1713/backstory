@@ -4,8 +4,10 @@ import { vim, getCM, Vim } from '@replit/codemirror-vim';
 const callbacks = new WeakMap();
 Vim.defineAction('backstoryFollowLink', cm => callbacks.get(cm)?.follow());
 Vim.defineAction('backstoryGoHome', cm => callbacks.get(cm)?.home());
+Vim.defineAction('backstoryGraph', cm => callbacks.get(cm)?.graph());
 Vim.mapCommand('gf', 'action', 'backstoryFollowLink', {}, { context: 'normal' });
 Vim.mapCommand('gh', 'action', 'backstoryGoHome', {}, { context: 'normal' });
+Vim.mapCommand('g/', 'action', 'backstoryGraph', {}, { context: 'normal' });
 
 const browserKeys = new Set(['l', 'f', 't', 'w', 'n', 'p']);
 function keepBrowserShortcut(event) {
@@ -37,7 +39,7 @@ export function createVimBindings(onModeChange, actions = {}) {
       adapter = enabled ? getCM(view) : null;
       adapter?.on('vim-mode-change', changed);
       if (adapter) {
-        callbacks.set(adapter, { follow: actions.follow || (() => {}), home: actions.home || (() => {}) });
+        callbacks.set(adapter, { follow: actions.follow || (() => {}), home: actions.home || (() => {}), graph: actions.graph || (() => {}) });
         view.dom.addEventListener('keydown', keepBrowserShortcut, true);
         removeGuards = () => view.dom.removeEventListener('keydown', keepBrowserShortcut, true);
       }

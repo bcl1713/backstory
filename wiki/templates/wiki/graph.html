@@ -1,0 +1,18 @@
+{% extends 'wiki/shell.html' %}{% load static %}
+{% block title %}Graph · Backstory{% endblock %}
+{% block content %}
+<section data-graph-page data-graph-path="{{ graph_params.path|default:'' }}">
+<h1>Graph</h1>
+<p>Indexed saved content · unsaved editor buffers are excluded. Relationships are explicit textual links, not agreement or importance.</p>
+{% include 'wiki/graph-panel.html' %}
+<div data-graph-server-list>
+<p>At most 200 notes and 500 directed edges per response. {% if graph.limiting_reasons %}Limits: {{ graph.limiting_reasons|join:', ' }}.{% endif %} For a one-note cap, use connection details or a larger limit to inspect edges.</p>
+<p>Index {{ graph.freshness.state }} · {% if graph.projection_complete %}Relation projection complete{% else %}Incomplete relationship evidence{% endif %}. This index is not an atomic disk snapshot.</p>
+<h2>Connections</h2><ul>{% for node in graph.nodes %}<li><a href="{{ node.href }}">{{ node.title }}</a> · {{ node.path }} · <a href="?path={{ node.path|urlencode }}">Center here</a></li>{% empty %}<li>No indexed connections observed in this response. Check freshness and limits before inferring absence.</li>{% endfor %}</ul>
+<h2>Directed links</h2><ul>{% for edge in graph.edges %}<li>{{ edge.source }} → {{ edge.destination }} · {{ edge.occurrence_count }} occurrence{{ edge.occurrence_count|pluralize }} · indexed revision {{ edge.source_revision }} · advisory line {{ edge.position.0 }}</li>{% empty %}<li>No directed links in this response.</li>{% endfor %}</ul>
+{% if graph_next_url %}<a href="{{ graph_next_url }}">Next graph page</a>{% endif %}
+</div>
+{{ graph_data|json_script:'graph-initial-data' }}{{ graph_params|json_script:'graph-initial-params' }}
+</section>
+<link rel="stylesheet" href="{% static 'graph.css' %}"><script type="module" src="{% static 'graph-controller.js' %}"></script>
+{% endblock %}

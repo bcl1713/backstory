@@ -78,6 +78,7 @@ def _commit_projection(snapshot, info, generations, token):
                 'ids': list(projection.ids), 'aliases': list(projection.aliases), 'tags': list(projection.tags),
                 'projection': {'metadata': _json_tree(projection.typed_metadata),
                                'diagnostics': [item.code for item in projection.diagnostics]},
+                'relations_complete': not projection.diagnostics,
                 'body': projection.body, 'seen': token,
             })
             from .names import note_names

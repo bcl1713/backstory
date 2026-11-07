@@ -20,6 +20,7 @@ export function installDraftGuards(isDirty, onLinkedNote = () => {}) {
   document.addEventListener('click', event => {
     const link = event.target.closest('a[href]');
     if (!link || link.hasAttribute('download') || link.target === '_blank' || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (link.matches('[data-graph-open]') && typeof HTMLDialogElement !== 'undefined') return;
     const url = new URL(link.href, location.href);
     if (url.origin === location.origin && url.pathname === location.pathname && url.search === location.search && url.hash) return;
     if (isDirty() && url.origin === location.origin && url.pathname === '/new/link/') {
@@ -89,6 +90,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     save: () => perform('save', { automatic: true }),
   });
   const needsAttention = message => { attention = message; idle.pause(); say(message); };
+  document.addEventListener('backstory:graph-opened', () => idle.cancel());
   const clearSyncFailure = () => {
     if (!syncAttention) return;
     syncAttention = null;

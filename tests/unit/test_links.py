@@ -15,3 +15,8 @@ def test_occurrence_classification_keeps_markdown_syntax_and_advisory_positions(
     assert [(e.kind, e.occurrence_kind) for e in edges] == [
         ('markdown', 'link'), ('markdown', 'image'), ('wiki', 'link')]
     assert all(e.position_precision == 'advisory' for e in edges)
+
+
+def test_wrapped_wiki_alias_remains_one_indexed_occurrence():
+    edges = links.extract_links('[[Target#Part|A label\ncontinued]] and `[[not a link]]`')
+    assert [(edge.target, edge.fragment) for edge in edges] == [('Target', 'Part')]

@@ -1,5 +1,8 @@
 import { mountQuickOpen } from './quick-open.js';
 import { mountFileTree } from './file-tree.js';
+import { mountGraphLauncher } from './graph-launcher.js';
+
+mountGraphLauncher();
 import { mountThemes } from './themes.js';
 import { ensureWikiTimezone } from './wiki-timezone.js';
 
@@ -31,6 +34,7 @@ if (zenToggle) {
   zenToggle.addEventListener('click', () => setChrome(zenToggle.getAttribute('aria-expanded') !== 'true'));
   document.addEventListener('keydown', event => {
     if (event.defaultPrevented) return;
+    if (document.querySelector('dialog[open]')) return;
     if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === 'Period') {
       event.preventDefault();
       event.stopPropagation();

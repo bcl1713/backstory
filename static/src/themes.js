@@ -12,6 +12,7 @@ export function mountThemes() {
   let applied = [];
   let revision = 0;
   const apply = palette => {
+    root.dataset.colorScheme = palette?.['color-scheme'] || 'dark';
     for (const token of applied) root.style.removeProperty(token === 'color-scheme' ? token : `--${token}`);
     applied = Object.keys(palette || {});
     for (const token of applied) root.style.setProperty(token === 'color-scheme' ? token : `--${token}`, palette[token]);

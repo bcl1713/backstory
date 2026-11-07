@@ -31,6 +31,10 @@ def status_snapshot():
               'application': application_identity(),
               'capabilities': {'contract_version': 1, 'note_max_bytes': settings.BACKSTORY_NOTE_MAX_BYTES,
                                'list_max_items': 100, 'folder_creation': True,
+                               'graph': {'tools': ['get_note_links', 'get_note_graph', 'find_link_issues'],
+                                         'max_nodes': 200, 'max_edges': 500, 'max_items': 100,
+                                         'max_depth': 2, 'max_payload_bytes': 524288,
+                                         'read_only': True, 'scope': 'indexed_saved_content'},
                                'read_many_max_paths': 8, 'read_many_max_source_bytes': 4194304,
                                'read_many_between_read_seconds': 2, 'save_serialization_scope': 'document'}}
     components = {

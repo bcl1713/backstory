@@ -1,0 +1,28 @@
+<div class="graph-panel" data-graph-panel>
+<form method="get" action="{% url 'wiki:graph' %}" data-graph-filters>
+<label>Center note <input name="path" maxlength="4096" value="{{ graph_params.path|default:'' }}" placeholder="Blank for overview"></label>
+<label>Graph search <input name="query" type="search" maxlength="256" value="{{ graph_params.query|default:'' }}" autocomplete="off"></label>
+<label>Folder <input name="folder" maxlength="4096" value="{{ graph_params.folder|default:'' }}"></label>
+<label>Tag <input name="tag" maxlength="256" value="{{ graph_params.tag|default:'' }}"></label>
+<label>Depth <select name="depth"><option value="1">One hop</option><option value="2" {% if graph_params.depth == 2 %}selected{% endif %}>Two hops</option></select></label>
+<button type="submit">Apply filters</button><button type="button" data-graph-clear hidden>Clear search</button>
+</form>
+<div class="graph-controls" data-graph-controls hidden>
+<button type="button" data-graph-local>Local</button><button type="button" data-graph-global>Overview</button>
+<button type="button" data-graph-back disabled>Previous center</button><button type="button" data-graph-list-toggle aria-pressed="false">Connection list</button>
+<button type="button" data-graph-fit>Fit</button><button type="button" data-graph-zoom="1.25" aria-label="Zoom in">+</button><button type="button" data-graph-zoom="0.8" aria-label="Zoom out">−</button>
+<button type="button" data-graph-pan="left" aria-label="Pan left">←</button><button type="button" data-graph-pan="right" aria-label="Pan right">→</button><button type="button" data-graph-pan="up" aria-label="Pan up">↑</button><button type="button" data-graph-pan="down" aria-label="Pan down">↓</button>
+<button type="button" data-graph-pause aria-pressed="false">Pause motion</button>
+<label>Bloom intensity <input data-graph-bloom type="range" min="0" max="2" step="1" value="1"></label><output data-graph-bloom-value>Restrained</output>
+<button type="button" data-graph-refresh>Refresh evidence</button><button type="button" data-graph-help-toggle>Help</button>
+</div>
+<p data-graph-status role="status" aria-live="polite" aria-atomic="true"></p>
+<p class="graph-caption" data-graph-summary></p>
+<p data-graph-help hidden>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space centers; / focuses search; +/− zoom; ? toggles help. Escape leaves search first, then closes the graph. Tab leaves the map. Drag a node to tug its links; drag the background to pan. On touch, scroll outside the map or use the pan/zoom buttons. Hops and bloom describe this displayed graph only.</p>
+<div class="graph-workspace">
+<div class="graph-map" data-graph-map tabindex="0" role="group" aria-label="Note relationship map" aria-describedby="graph-map-description" hidden></div>
+<div data-graph-list hidden><h2>Connections</h2><ul data-graph-nodes></ul><h2>Directed links</h2><ul data-graph-edges></ul><button type="button" data-graph-next hidden>Next graph page</button></div>
+<section class="graph-details" data-graph-details aria-label="Selected note"><h2>Selected note</h2><p>Select a note to inspect its saved relationship evidence.</p></section>
+</div>
+<p id="graph-map-description" class="graph-caption">□ current note · ◇ selected note · corner reticle focused note. Arrows show explicit link direction. Coordinates and node size do not measure meaning. Bloom fades with shortest link hops inside this displayed graph.</p>
+</div>

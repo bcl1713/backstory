@@ -18,12 +18,14 @@ class IndexedNote(models.Model):
     aliases = models.JSONField(default=list)
     tags = models.JSONField(default=list)
     projection = models.JSONField(default=dict)
+    relations_complete = models.BooleanField(default=False)
     seen = models.CharField(max_length=64, default='')
     body = models.TextField()
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['generation', 'path'], name='index_generation_path')]
-        indexes = [models.Index(fields=['generation', 'path'])]
+        indexes = [models.Index(fields=['generation', 'path']),
+                   models.Index(fields=['generation', 'relations_complete'], name='relation_parse_state')]
 
 
 class LinkEdge(models.Model):
@@ -50,14 +52,17 @@ class ResolvedRelation(models.Model):
     occurrence = models.OneToOneField(LinkEdge, on_delete=models.CASCADE)
     generation = models.ForeignKey(IndexGeneration, on_delete=models.CASCADE)
     epoch = models.PositiveBigIntegerField()
+    source = models.TextField(default='')
     destination = models.TextField(default='')
     state = models.CharField(max_length=16)
     resource_type = models.CharField(max_length=16, default='unknown')
     choices = models.JSONField(default=list)
 
     class Meta:
-        indexes = [models.Index(fields=['generation', 'epoch', 'destination'], name='relation_inverse'),
-                   models.Index(fields=['generation', 'epoch', 'state'], name='relation_issues')]
+        indexes = [models.Index(fields=['generation', 'epoch', 'destination', 'source'], name='relation_inverse'),
+                   models.Index(fields=['generation', 'epoch', 'state'], name='relation_issues'),
+                   models.Index(fields=['generation', 'epoch', 'source', 'destination'], name='relation_forward'),
+                   models.Index(fields=['generation', 'epoch', 'occurrence'], name='relation_page')]
 
 
 class IndexJob(models.Model):

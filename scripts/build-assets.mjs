@@ -4,7 +4,7 @@ await build({
   entryPoints: ['static/src/app.css', 'static/src/editor.js', 'static/src/editor-startup.js', 'static/src/shell.js', 'static/src/connectivity.js', 'static/src/wiki-tools.js', 'static/src/math-preview-page.js', 'static/src/diagram-preview-page.js'],
   outdir: 'static',
   bundle: true,
-  external: ['/static/math-renderer.js'],
+  external: ['/static/math-renderer.js', '/static/graph-controller.js'],
   loader: { '.woff2': 'file' },
   assetNames: 'fonts/[name]-[hash]',
   minify: true,
@@ -13,6 +13,7 @@ await build({
 
 // Separate ESM entry: the editor's IIFE import stays a real lazy local load.
 await build({ entryPoints: ['static/src/math-renderer.js'], outdir: 'static', bundle: true, format: 'esm', minify: true, logLevel: 'info' });
+await build({ entryPoints: ['static/src/graph-controller.js', 'static/src/graph.css'], outdir: 'static', bundle: true, format: 'esm', minify: true, logLevel: 'info' });
 
 await mkdir('static/fonts', { recursive: true });
 await copyFile('assets/fonts/OFL.txt', 'static/fonts/OFL.txt');

@@ -36,7 +36,7 @@ def _tool(view=None, *, methods=('GET',)):
             return _json({
                 'state': 'unavailable' if error.status == 503 else 'error',
                 'reason_code': error.reason_code,
-                'restart': error.reason_code in {'cursor_invalid', 'search_cursor_expired'},
+                'restart': error.reason_code in {'cursor_invalid', 'search_cursor_expired', 'graph_cursor_expired'},
             }, error.status)
     return boundary
 

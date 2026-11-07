@@ -63,7 +63,9 @@ def test_real_process_restart_resumes_full_representative_corpus(tmp_path):
         checkpoint = db.execute('SELECT checkpoint FROM indexing_scanstate').fetchone()[0]
         assert 'offset' in checkpoint
         assert 0 < db.execute('SELECT count(*) FROM indexing_indexednote').fetchone()[0] < 1000
-    second = 'import django; django.setup(); from indexing.worker import run_batch\nfor n in range(300):\n r=run_batch(now=10000010000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)\n'
+    # Source scanning and the new occurrence projection each resume in bounded
+    # batches. Allow both passes without increasing either batch's work cap.
+    second = 'import django; django.setup(); from indexing.worker import run_batch\nfor n in range(1000):\n r=run_batch(now=10000010000+n*400)\n if not r.pending: break\nelse: raise SystemExit(9)\n'
     subprocess.run([sys.executable, '-c', second], env=env, capture_output=True, check=True, timeout=120)
     with sqlite3.connect(database) as db:
         assert db.execute("SELECT count(*) FROM indexing_indexednote n JOIN indexing_indexgeneration g ON n.generation_id=g.id WHERE g.state='active'").fetchone()[0] == 1000

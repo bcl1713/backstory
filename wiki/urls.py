@@ -1,9 +1,10 @@
 from django.urls import include, path
-from . import views, relocation_views, creation, timezone_views
+from . import views, relocation_views, creation, timezone_views, graph_views
 from indexing import views as index_views
 
 app_name = "wiki"
 urlpatterns = [
+    path('graph/', graph_views.page, name='graph'),
     path("new-folder/", views.new_folder, name="new-folder"),
     path("settings/timezone/", timezone_views.timezone_settings, name="timezone-settings"),
     path("tools/", include("wiki.tool_urls")),

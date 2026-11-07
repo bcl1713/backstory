@@ -1,7 +1,10 @@
 from django.urls import path
-from . import tool_views, image_uploads
+from . import tool_views, image_uploads, graph_views
 
 urlpatterns = [
+    path('links/', graph_views.links, name='tool-links'),
+    path('graph/', graph_views.graph, name='tool-graph'),
+    path('link-issues/', graph_views.issues, name='tool-link-issues'),
     path('images/', image_uploads.upload_image, name='tool-images'),
     path('read-many/', tool_views.read_many, name='tool-read-many'),
     path('status/', tool_views.status, name='tool-status'),
