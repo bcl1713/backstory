@@ -8,21 +8,22 @@ a local test failure.
 
 ## Run the complete gate
 
-The automatic publisher owns this gate during ordinary releases. Development
-uses [focused checks](../development.md); do not routinely run the complete gate
-before merge and then repeat it through the publisher. Run it manually for
-manual release recovery or a specific integration risk that warrants it. Reuse
-a valid exact-commit receipt for subsequent manual publication attempts while
-the relevant inputs are unchanged. The publisher currently starts a new full
-gate for every automatic attempt; changing its retry/reuse behavior is separate
-work. See the [test review](../testing/2026-11-07-test-review.md).
+The local candidate queue owns the full release gate **before** a release branch
+advances. Development uses [focused checks](../development.md). Publication and
+upload retries reuse the candidate's exact receipt; the publisher never starts
+an unconditional second gate. See the [candidate sequence](#tested-merge-queue)
+and [test review](../testing/2026-11-07-test-review.md).
 
 Use a trusted Linux x86_64 machine with Linux pidfd support, Python 3.9+ for
-the runner, Docker Engine/Compose, a working browser sandbox, Node **22.23.4**, uv **0.12.19**, and Playwright's Linux OS dependencies.
+the runner, Docker Engine/Compose, `dpkg-query`, fontconfig (`fc-match`), a working browser sandbox, Node **22.23.4**, uv **0.12.19**, and Playwright's Linux OS dependencies.
 The runner installs the frozen application dependencies and browser binaries.
 Install OS packages separately on the intended test machine; the runner does not
-change system settings or install a Docker daemon. Stock Firefox stays pinned to
-155.0.1 and geckodriver to 0.37.1 with the original checksum verification.
+change system settings or install a Docker daemon. Both automatic browser lanes
+use Playwright's supported patched Firefox: exact `@playwright/test` **1.64.1**
+and the npm lockfile select Firefox **157.0**, revision **1555**. Install through
+Playwright; substituting a stock executable is unsupported. The separate pinned
+stock Firefox/geckodriver smoke is opt-in. See the [assertion inventory, measured
+baseline, browser update policy and compatibility command](../testing/2026-11-07-issue-117-evidence.md).
 
 Commit the reviewed candidate in a clean isolated checkout, then run:
 
@@ -47,8 +48,9 @@ to Firefox. Python retains its two
 isolated xdist workers. For individual issues, run the relevant tests directly.
 
 The full gate includes asset build, all Python and formatter tests,
-focused Firefox code blocks, Firefox renderer tests, pinned stock Firefox, Django
-deployment checks, Compose validation and a built-container Django check. A
+focused Firefox code blocks, Firefox renderer/profile projects including all 32
+synthetic viewport/scaling/font/child-CSS-zoom combinations, Django deployment
+checks, Compose validation and a built-container Django check. A
 missing tool or failed stage blocks success. There is no reduced-release or
 skip-tests mode. The runner creates only synthetic fixture data, uses a unique
 Compose project, and attempts cleanup of only that project's disposable volume
@@ -67,22 +69,98 @@ for changed UI flows before merging; automated passes do not replace UI review.
 All browser screenshots, traces and fixture roots are scoped to this run’s
 configured runtime directory.
 
-## Automatic publication on merge
+## Tested merge queue
+
+Use one trusted controller and private state directory on the capable gate
+executor. Keep GitHub Actions disabled. Update the clean controller before
+preparing candidates when the gate contract changes. Never copy another commit's
+receipt or synthesize a hosted check. A receipt is operator evidence, not a signed
+attestation; restrict write access to the state directory.
+
+Prepare a candidate from current same-repository PR metadata:
+
+```sh
+STATE="$HOME/.local/state/backstory-publisher"
+python3 scripts/local_candidate.py --state-dir "$STATE" prepare --pr 123
+# The command prints /.../candidates/<merge-sha>/candidate.json.
+CANDIDATE=/path/printed/by/prepare/candidate.json
+python3 scripts/local_candidate.py --state-dir "$STATE" test --candidate "$CANDIDATE"
+```
+
+Preparation creates a real two-parent merge in a disposable clone: current base
+first, current PR head second. The merge's SHA is the publication source identity.
+The full gate runs there before either release branch advances. Dependencies and
+the pinned browser install first; runtime provenance is captured before checks
+and must still match when the receipt is written and reused. It includes source
+SHA/tree, complete gate contract/schema, Python/Node/npm/uv/Docker versions,
+installed Python package and npm dependency-tree hashes, Firefox executable
+hash, OS package hashes, selected font/config
+hashes, and hashed relevant environment selectors. No token values are recorded.
+Changing the toolchain, packages, font configuration or browser requires a new
+candidate gate, even with the same source. Use the same executor and interpreter
+for testing, landing and publication; this conservative restriction can reject
+otherwise equivalent machines.
+
+Have an independent reviewer inspect the candidate merge result, relevant UI
+screenshots and retained logs. Retain a local JSON review record outside source:
+
+```json
+{"source_sha":"<exact-merge-sha>","status":"approved","reviewer":"independent reviewer","summary":"Code, merge result, UI and retained evidence reviewed; no blocking findings."}
+```
+
+An authorized operator acknowledges that exact review when landing:
+
+```sh
+python3 scripts/local_candidate.py --state-dir "$STATE" land \
+  --candidate "$CANDIDATE" --reviewed-candidate <exact-merge-sha> \
+  --review-record /path/to/independent-review.json
+```
+
+Landing revalidates the receipt, clean tree, PR state/repository/branch policy,
+head/base and current review requirements. Outstanding change requests or unmet
+required GitHub review decisions block it. When the repository has no required
+GitHub reviews, independent retained local review remains mandatory. This local
+record does not satisfy or bypass branch protection: a rejected remote push stops
+landing; ask the repository owner to select a compatible policy, never disable
+protection or forge a check. Use neither GitHub's merge button nor squash/rebase:
+those can generate a different, untested SHA. Landing sends one atomic Git push with explicit expected leases on **both**
+the target and PR source branches. Both refs advance to the same tested merge;
+its two parents make both updates fast-forwards. A changed head or base rejects
+the whole transaction. A server without atomic-push support fails closed. For a
+feature PR, this intentionally advances the feature branch to its reviewed merge
+result; continue new work from that result or create a new branch.
+
+For `dev` → `main`, this atomically synchronizes **both release branches** to the
+tested merge at landing. There is no later main-to-dev synchronization merge.
+The publisher serially processes dev prerelease publication first, then stable
+publication from the same source SHA, using one gate receipt with explicit
+`landed_branches: ["dev", "main"]`. Each channel records only its actual completed
+release; a stable upload failure does not undo the dev prerelease or retest it.
+Stable version tags remain protected by the release runner's existing version,
+source, registry and freshness validation. Coordinate one publisher executor.
+
+A changed base or head invalidates the candidate. Prepare, review and test its
+new merge result; receipts never transfer between commits. The queue serializes
+local candidate operations. A transport/crash after the atomic push leaves
+durable `landing` evidence. Repeating `land` recognizes both remote refs at the
+exact candidate and finalizes state without testing or pushing again. If either
+ref changed since then, inspect retained evidence and remote history; the tool
+fails closed rather than guessing whether a partial operation succeeded.
+
+## Automatic publication after landing
 
 The persistent `backstory-publisher` user service on **forge** watches `dev` and
-`main` every 30 seconds. A merge starts the complete local gate on the resulting
-exact commit, then automatically builds/uploads multiarch images, tags them and
-publishes the matching GitHub release. No post-merge publication command is
-required. Ordinary pushes to these release branches are detected too; PR review
-still happens before merging. GitHub Actions stays disabled.
+`main` every 30 seconds. It requires the release SHA's retained candidate store
+under the same state directory, validates its reviewed source and receipt, and
+runs only publication. Missing, failed, stale or changed evidence fails closed;
+ordinary direct pushes no longer trigger a compensating post-merge gate.
 
 Dev publishes prerelease version tags and only `:dev`. Main publishes stable
-version tags, minor/major aliases and `:latest`. Every attempt owns a private
-checkout and evidence/assets directories. A newer branch supersedes old work;
-the release runner checks freshness again before moving aliases. A failed gate
-never uploads an image. Failures retain logs and retry after five minutes; a
-new commit starts without waiting for an older failure's retry. Successful
-publication is recorded atomically and skipped across service restarts.
+version tags, minor/major aliases and `:latest`. Attempts own fresh asset/log
+directories and reuse the retained clean candidate checkout and receipt. A newer
+branch supersedes old work; the release runner checks freshness before build and
+again before moving aliases. Upload failures retry after five minutes without
+retesting. Successful publication is recorded atomically across restarts.
 
 ### Publisher setup and status
 
@@ -116,8 +194,17 @@ install -d -m 0700 "$DOCKER_CONFIG"
 docker buildx create --name backstory-publisher --driver docker-container --bootstrap
 ```
 
-At initial migration only, baseline the existing historical main revision without
-publishing it. Leave dev unbaselined so the service catches up the current merge:
+At initial installation, baseline historical revisions only when intentionally
+skipping their publication. Do not baseline an unpublished current release to
+hide missing evidence. During an upgrade, stop the old publisher and retain its
+state, receipts and assets first. Already published/baselined revisions remain
+unchanged. An unpublished revision without a reviewed candidate record fails
+closed under the new controller. Recover it manually with its same-commit valid
+schema/provenance receipt, or prepare and gate a new reviewed merge candidate;
+legacy receipts without runtime provenance require a real new gate. Do not copy
+a receipt to a different SHA or pretend a historical merge was tested premerge.
+The following baseline command is only for an intentionally ignored historical
+main revision:
 
 ```sh
 cd "$HOME/.local/share/backstory-publisher/controller"
@@ -150,8 +237,9 @@ are retained for review; remove old completed attempts only when no job uses the
 ### Manual recovery
 
 Manual publication remains available for operator recovery. Stop the automatic
-publisher first, use an isolated clean checkout and run the full exact-commit
-gate. The service already performs these steps during ordinary operation:
+publisher first and use the retained clean candidate checkout and valid receipt.
+Run the full gate only when evidence is absent or source/relevant inputs changed.
+Never rerun it solely because a publication or upload failed:
 
 ```sh
 python3 scripts/local_release.py --receipt /path/to/receipt.json \
@@ -159,7 +247,7 @@ python3 scripts/local_release.py --receipt /path/to/receipt.json \
 ```
 
 Use `--channel stable` only for the tested current `main` commit. The script
-validates the exact-commit receipt, clean checkout, expected repository and
+validates the exact-commit receipt and current runtime provenance, clean checkout, expected repository and
 current remote branch. It builds an immutable Git archive of that commit locally,
 publishes multi-platform version tags, then checks branch freshness again before
 moving channel aliases. Dev updates only `:dev`; stable updates minor, major and
@@ -178,7 +266,7 @@ version labels; it never rebuilds or overwrites existing version images. Registr
 lookup errors, conflicting metadata or a single partially pushed tag stop
 publication. For a single missing tag, inspect the existing digest and source
 before restoring only the missing tag from that digest; conflicting tags require
-operator investigation, never an overwrite. A newer source requires a new full local pass.
+operator investigation, never an overwrite. A newer source or changed runtime inputs requires a new tested candidate.
 
 ## Transition checks
 

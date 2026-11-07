@@ -1,0 +1,17 @@
+[
+  {
+    "engine": "mermaid",
+    "source": "flowchart TD\nA[Initial demonstration and external archive] --> B{First checkpoint complete}\nB -->|No| H[Pause and resolve the test condition]\nB -->|Yes| C[Apply the first sample change and restart]\nC --> D{All sample checks complete}\nD -->|No| R[Stop and inspect the synthetic recovery point]\nD -->|Yes| E[Save the verified sample checkpoint]\nE --> J{Reviewer confirms next stage and checks pass}\nJ -->|Not now| K[Keep the intermediate sample]\nJ -->|Yes| F[Apply the second sample change and restart]\nF --> G{All sample checks complete}\nG -->|No| R\nG -->|Yes| I[Resume sample tasks and retain the archive]",
+    "ready": "Mermaid flowchart."
+  },
+  {
+    "engine": "graphviz",
+    "source": "digraph { a -> b; b -> c; a -> c; }",
+    "ready": "Graphviz diagram."
+  },
+  {
+    "engine": "vega-lite",
+    "source": "{\"data\": {\"values\": [{\"category\": \"A\", \"value\": 2}, {\"category\": \"B\", \"value\": 4}]}, \"mark\": \"bar\", \"encoding\": {\"x\": {\"field\": \"category\", \"type\": \"nominal\"}, \"y\": {\"field\": \"value\", \"type\": \"quantitative\"}}}",
+    "ready": "Vega-Lite chart."
+  }
+]

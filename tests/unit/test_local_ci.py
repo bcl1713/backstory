@@ -31,15 +31,13 @@ def test_browser_specs_do_not_share_fixed_runtime_or_artifact_paths():
 def test_plan_uses_focused_browser_and_container_gates(tmp_path):
     plan = module().build_plan(tmp_path, 18765)
     assert [step['name'] for step in plan] == [
-        'dependencies', 'build', 'python', 'formatter', 'browser-install',
-        'firefox-code', 'firefox-renderers', 'stock-firefox-install',
-        'stock-firefox', 'container']
+        'dependencies', 'browser-install', 'build', 'python', 'formatter',
+        'firefox-code', 'firefox-renderers', 'container']
     commands = '\n'.join(step['command'] for step in plan)
     for expected in ['uv sync --frozen', 'npm ci', 'npm run build',
                      'pytest -n 2 --dist loadfile', 'npm run test:formatter',
                      'playwright.code.config.js',
-                     'playwright.firefox.config.js', 'selenium==4.52.0',
-                     'stock_firefox.py', 'docker build', 'check --deploy --fail-level WARNING',
+                     'playwright.firefox.config.js', 'docker build', 'check --deploy --fail-level WARNING',
                      'run --pull never --rm web', 'down --volumes']:
         assert expected in commands
     assert 'docker push' not in commands
@@ -48,29 +46,31 @@ def test_plan_uses_focused_browser_and_container_gates(tmp_path):
     assert 'npm run test:browser' not in commands
     assert next(step['command'] for step in plan if step['name'] == 'browser-install') == 'npx playwright install firefox'
     assert len({step['env']['BACKSTORY_BROWSER_RUNTIME'] for step in plan
-                if 'BACKSTORY_BROWSER_RUNTIME' in step['env']}) == 3
+                if 'BACKSTORY_BROWSER_RUNTIME' in step['env']}) == 2
+    assert 'selenium' not in commands and 'stock_firefox' not in commands
 
 
-def test_receipt_accepts_required_gates_without_full_chromium_suite():
-    receipt = {'schema': 1, 'source_sha': 'a' * 40, 'source_tree': 'b' * 40,
-               'gates': dict.fromkeys([
-                   'dependencies', 'build', 'python', 'formatter', 'browser-install',
-                   'firefox-code', 'firefox-renderers', 'stock-firefox-install',
-                   'stock-firefox', 'container',
-               ], 'passed')}
+def test_receipt_accepts_required_gates_without_full_chromium_suite(monkeypatch):
     m = module()
+    monkeypatch.setattr(m, 'runtime_inputs', lambda root: {'toolchain': 'test'})
+    receipt = {'schema': m.RECEIPT_SCHEMA, 'inputs': {'toolchain': 'test'}, 'source_sha': 'a' * 40, 'source_tree': 'b' * 40,
+               'gates': dict.fromkeys([
+                   'dependencies', 'browser-install', 'build', 'python', 'formatter',
+                   'firefox-code', 'firefox-renderers', 'container',
+               ], 'passed')}
     assert m.validate_receipt(receipt, 'a' * 40, 'b' * 40) is None
     del receipt['gates']['container']
     with pytest.raises(ValueError):
         m.validate_receipt(receipt, 'a' * 40, 'b' * 40)
 
 
-def test_receipt_rejects_incomplete_failed_and_wrong_source(tmp_path):
+def test_receipt_rejects_incomplete_failed_and_wrong_source(tmp_path, monkeypatch):
     m = module()
-    good = {'schema': 1, 'source_sha': 'a' * 40, 'source_tree': 'b' * 40,
+    monkeypatch.setattr(m, 'runtime_inputs', lambda root: {'toolchain': 'test'})
+    good = {'schema': m.RECEIPT_SCHEMA, 'inputs': {'toolchain': 'test'}, 'source_sha': 'a' * 40, 'source_tree': 'b' * 40,
             'gates': {step['name']: 'passed' for step in m.build_plan(tmp_path, 18765)}}
     assert m.validate_receipt(good, 'a' * 40, 'b' * 40) is None
-    for wrong in [dict(good, source_sha='c' * 40), dict(good, source_tree='c' * 40),
+    for wrong in [dict(good, schema=1), dict(good, schema=2), dict(good, source_sha='c' * 40), dict(good, source_tree='c' * 40),
                   dict(good, gates={}), dict(good, gates={**good['gates'], 'container': 'failed'})]:
         with pytest.raises(ValueError):
             m.validate_receipt(wrong, 'a' * 40, 'b' * 40)
@@ -110,10 +110,11 @@ def test_runner_stops_without_success_receipt_after_failure(tmp_path, monkeypatc
         if step['name'] == 'python':
             raise RuntimeError('test failure')
     monkeypatch.setattr(m, 'run_step', fail)
+    monkeypatch.setattr(m, 'runtime_inputs', lambda root: {'toolchain': 'test'})
     monkeypatch.setattr(m, 'source_identity', lambda root: ('a' * 40, 'b' * 40))
     with pytest.raises(RuntimeError):
         m.run_suite(ROOT, tmp_path, 18765)
-    assert calls == ['dependencies', 'build', 'python']
+    assert calls == ['dependencies', 'browser-install', 'build', 'python']
     assert not (tmp_path / 'receipt.json').exists()
     assert json.loads((tmp_path / 'status.json').read_text())['gates']['python'] == 'failed'
 

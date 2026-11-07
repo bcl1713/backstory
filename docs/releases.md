@@ -2,8 +2,9 @@
 
 All correctness tests and image builds now run locally. GitHub Actions is disabled
 repository-wide, and this branch has no active workflow files. The persistent
-publisher on forge detects merges/pushes to `dev` and `main`, runs the complete
-gate and automatically builds, tags and uploads images and GitHub releases.
+candidate queue runs the complete gate before landing the exact tested merge.
+The publisher on forge detects `dev` and `main` advancement and reuses retained
+candidate evidence to build, tag and upload images and GitHub releases.
 Publication does not redeploy a server.
 
 Follow the [local CI and release runbook](ci/README.md) for the complete test gate,
@@ -12,17 +13,21 @@ The former workflow definitions are retained only as inert migration references.
 
 ## Branch and release policy
 
-1. Feature/fix PRs target `dev`. Run focused checks for the affected behavior and
-   retain the test record plus code/UI review before merging. The publisher owns
-   the full release gate; do not routinely duplicate it before merge.
-2. The local service tests the resulting current `dev` commit and automatically
-   publishes its unique prerelease and `ghcr.io/bcl1713/backstory:dev` alias.
-3. Promote this repository's `dev` to `main` through a reviewed merge commit,
-   preserving Conventional Commit history. The publisher tests that resulting
-   commit separately.
-4. The service tests main and automatically publishes its stable release and
-   numbered/`:latest` aliases.
-5. Merge main back into dev after stable publication to retain tag ancestry.
+1. Feature/fix PRs target `dev`. Run focused checks, prepare the actual merge
+   candidate with `local_candidate.py`, and run its full gate before landing.
+2. Retain independent code/UI review of the exact candidate and current required
+   GitHub review. Land only the tested SHA after rechecking head/base and evidence.
+   A stale or failed candidate never advances either ref; rebuild/retest its new
+   result. Landing atomically advances both target and source to the tested merge.
+3. The local publisher validates and reuses the retained receipt and unchanged
+   runtime inputs to publish the dev prerelease and `:dev` alias without rerunning
+   application tests. A direct push without candidate evidence fails closed.
+4. Promote this repository's `dev` to `main` using a separately prepared, tested
+   and reviewed merge candidate. The same receipt reuse publishes its stable
+   release and numbered/`:latest` aliases.
+5. Main promotion atomically synchronizes `dev` and `main` at landing. The service
+   publishes dev first, then stable from this same tested SHA and receipt. No
+   subsequent main-to-dev merge is needed; channel failures retry independently.
 
 Keep test and production stacks, wiki directories, data directories and ports
 separate. Publication never redeploys a server. Operators choose when to pull and
@@ -93,13 +98,17 @@ operator-controlled upgrades and rollback.
 ## Failure and recovery
 
 Keep the complete local test receipt and review evidence. A failed or incomplete
-gate cannot publish. Current remote branch identity is checked before building
+gate cannot land or publish. Missing/changed runtime provenance also blocks reuse.
+The candidate gate owns testing once; upload retries retain its receipt.
+Current remote branch identity is checked before building
 and again before moving channel aliases. If source advances, retest the new
 commit rather than borrowing an earlier receipt.
 
 Image publication and GitHub release publication are separate operations. A
 partial failure can leave pinned image tags or a draft release. Fix the cause,
-verify the source is unchanged, and retry with a fresh assets directory. Published
+verify the source and relevant runtime inputs are unchanged, and retry with the
+same receipt and a fresh assets directory. The automatic publisher does this
+without rerunning tests. Published
 releases are not silently modified. Retries reuse matching existing version image
 digests after verifying source/version labels and both platforms. Incomplete or
 conflicting version tags and registry lookup failures block publication; follow

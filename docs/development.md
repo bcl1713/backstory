@@ -81,12 +81,15 @@ a reason to repeat them. See [project instructions](../AGENTS.md) for the testin
 checkpoint and [test review](testing/2026-11-07-test-review.md) for coverage and
 consolidation findings.
 
-Open ordinary PRs against `dev`. After review and focused local acceptance,
-merge; the local publisher on forge tests the resulting commit and automatically
-publishes its prerelease and `:dev` image. Promote through a `dev` → `main` merge
-PR for automatic stable publication after its own full gate. The publisher owns
-the full release gate; do not routinely duplicate it before merge. See
-[local releases](releases.md) for versioning and separate test/production stacks.
+Open ordinary PRs against `dev`. After focused checks, prepare the actual merge
+candidate with `scripts/local_candidate.py`, run its full gate, retain independent
+code/UI review of that exact result, and land its tested SHA. A changed head/base
+requires a new candidate. The local publisher reuses the receipt and runtime
+provenance without another test run. Promote `dev` to `main` through the same
+reviewed candidate sequence for stable publication. Landing atomically advances
+both PR source and target refs; promotion synchronizes dev/main before serial
+dev and stable publication, with one receipt and no later synchronization merge. See the [queue runbook](ci/README.md)
+and [local releases](releases.md); keep test/production stacks separate.
 
 Default production configuration is HTTPS with Secure cookies, HSTS and explicit
 hosts/origins. Local fixtures explicitly select localhost mode and proxy mode
