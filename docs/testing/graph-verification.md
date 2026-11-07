@@ -15,17 +15,17 @@ Commands used for the final source verification:
 uv run pytest -n 2 --dist loadfile --durations=20
 npm run build
 npm run test:formatter
-BACKSTORY_BROWSER_RUNTIME=/tmp/graph-final-chromium BACKSTORY_BROWSER_PORT=18765 npm run test:browser
+BACKSTORY_BROWSER_RUNTIME=/tmp/graph-final-chromium-2 BACKSTORY_BROWSER_PORT=18765 npm run test:browser
 BACKSTORY_BROWSER_RUNTIME=/tmp/graph-final-firefox BACKSTORY_BROWSER_PORT=18766 npx playwright test --config=playwright.firefox.config.js
 python scripts/benchmark_graph.py --output /tmp/graph-benchmark-final.json
-python scripts/local_ci.py --base dev --head codex/issue-107 --report /tmp/graph-exact-tree-ci
+python scripts/local_ci.py --base dev --head codex/issue-107 --report /tmp/graph-exact-tree-ci-final
 ```
 
 Use the session's own rootless test daemon through its inherited
 `DOCKER_HOST=unix:///run/user/1002/docker.sock`. The default system daemon is not
 used. No socket permissions, security policy or service configuration were
 changed. The exact-tree runner writes its final source identity, per-gate logs
-and receipt outside the checkout at `/tmp/graph-exact-tree-ci`; this keeps the
+and receipt outside the checkout at `/tmp/graph-exact-tree-ci-final`; this keeps the
 tested commit immutable. Individual gates are not a substitute for that receipt.
 Release publication and actual-host WebMCP acceptance require separate deployment
 authorization. No deployment was requested or performed.
@@ -78,7 +78,9 @@ state/lifecycle. Regressions cover cross-page edges and the local center,
 endpoint-aware isolation, unindexed/asset/symlink destinations, bounded indexed
 parse-completeness checks, long-path cursors, exclusion of unused metadata from
 occurrence selects, bfcache remount and persistent Bloom Off. Additional tests
-cover CR/LF front-matter source offsets and Menu/Escape focus ownership.
+cover CR/LF front-matter source offsets, Menu/Escape focus ownership and return
+to the visible plain-text fallback with its caret retained. Firefox no-script
+coverage transfers session cookies without initializing origin localStorage.
 
 Review scope exclusions are explicit: no deployed-host testing, no claim of
 detecting arbitrary external writes before reconciliation, and no general hardware performance guarantee from

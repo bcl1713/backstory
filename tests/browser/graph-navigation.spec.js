@@ -121,7 +121,10 @@ test('reduced motion, mobile list, direct URL and no-JavaScript evidence remain 
   await revealChrome(page); await page.getByRole('link', { name: 'Graph', exact: true }).click();
   await expect(panel(page).locator('[data-graph-list]')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  const context = await browser.newContext({ javaScriptEnabled: false, storageState: await page.context().storageState() });
+  // A no-script session needs cookies only. Importing origin localStorage asks
+  // Firefox's driver to execute storage initialization in a no-script context.
+  const context = await browser.newContext({ javaScriptEnabled: false,
+    storageState: { cookies: await page.context().cookies(), origins: [] } });
   const fallback = await context.newPage();
   await fallback.goto('/graph/?path=Graph%20A.md');
   await expect(fallback.getByRole('link', { name: 'Cluster B', exact: true })).toBeVisible();
@@ -164,4 +167,15 @@ test('Menu Escape belongs to graph before chrome; bloom Off and restored lifecyc
   await expect(map(page).locator('[data-node-path]')).toHaveCount(3);
   await panel(page).getByRole('button', { name: 'Connection list', exact: true }).click();
   await expect(panel(page).locator('[data-graph-list]')).toBeVisible();
+});
+
+test('closing graph restores the visible plain-text fallback and its caret', async ({ page }) => {
+  await setup(page); await revealChrome(page);
+  await page.getByRole('button', { name: 'Plain text fallback', exact: true }).click();
+  await page.locator('#source').evaluate(el => { el.focus(); el.setSelectionRange(4, 4); });
+  await page.getByRole('link', { name: 'Graph', exact: true }).click();
+  await expect(panel(page)).toBeVisible();
+  await panel(page).getByRole('button', { name: 'Close graph', exact: true }).click();
+  await expect(page.locator('#source')).toBeFocused();
+  expect(await page.locator('#source').evaluate(el => el.selectionStart)).toBe(4);
 });

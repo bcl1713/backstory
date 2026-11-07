@@ -10,8 +10,8 @@ export function mountGraphLauncher() {
     sequence++; controller?.destroy(); controller = null;
     if (dialog.open) dialog.close();
     document.dispatchEvent(new Event('backstory:graph-closed'));
-    const editor = document.querySelector('[data-markdown-editor]')?.markdownEditor;
-    if (editor) editor.focus();
+    const host = document.querySelector('[data-markdown-editor]');
+    if (host?.markdownEditor && !host.hidden) host.markdownEditor.focus();
     else if (document.querySelector('#source')) document.querySelector('#source').focus({ preventScroll: true });
     else if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   };
