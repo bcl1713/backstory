@@ -49,6 +49,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   let page = null, selected = currentPath || null, focused = currentPath || null;
   let listMode = preferredList, graphicsAvailable = true, trail = [], nextCursor = null, activeParams = null;
   let pendingPositions = null, pendingVersion = null;
+  const evidenceStamp = data => data && JSON.stringify([data.generation, data.mutation, data.relation_epoch, data.eligibility_version]);
   let view = null, loadingPaused = false, loadingError = false, loadingReason = '', autoTimer;
   let storage; try { storage = window.localStorage; } catch { /* Preferences remain page-local. */ }
   let forces = loadForces(storage);
@@ -255,13 +256,17 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     if (!safePage(data)) throw new Error('invalid_response');
     pages.accept(data, append);
     page = pages.data; nextCursor = page.next_cursor;
-    if (!page.nodes.some(node => node.path === selected)) selected = page.nodes.some(node => node.path === activeParams?.path) ? activeParams.path : null;
-    if (!page.nodes.some(node => node.path === focused)) focused = page.nodes[0]?.path || null;
+    if (!nextCursor && !page.nodes.some(node => node.path === selected)) selected = page.nodes.some(node => node.path === activeParams?.path) ? activeParams.path : null;
+    if (!nextCursor && !page.nodes.some(node => node.path === focused)) focused = page.nodes[0]?.path || null;
     let mapFailure = false;
-    try { view?.setGraph(page, currentPath); view?.setSelection(selected, focused); }
+    try {
+      if (pages.changed) view?.setGraph(page, currentPath);
+      if (pages.changed && page.nodes.length || !nextCursor && (selected !== view?.selected || focused !== view?.focused)) view?.setSelection(selected, focused);
+    }
     catch { mapFailure = true; unavailable(); }
-    if (fit && !mapFailure) view?.fit();
-    renderList(); if (!append || selected && !details.textContent.includes(selected)) showDetails(selected);
+    if (fit && page.nodes.length && !mapFailure && !view?.cameraControlled) view?.fit();
+    if (pages.changed || !append) renderList();
+    if (page.nodes.some(node => node.path === selected) && (!append || !details.textContent.includes(selected))) showDetails(selected);
     presentation(); controls();
     find('[data-graph-diagnostics]').textContent = `Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. ${page.limiting_reasons?.join(', ') || ''} Indexed saved content, not a disk snapshot. Hops refer to loaded edges; unsaved edits are excluded.`;
     if (page.limiting_reasons?.includes('neighborhood_limit')) {
@@ -271,8 +276,9 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   }
   async function load({ cursor, fit = false, append = false, params = null } = {}) {
     clearTimeout(debounce); debounce = null; cancelAutomatic(); const ticket = ++sequence;
-    const retainedPositions = !append ? page && view ? new Map(view.simulation.nodes) : pendingPositions : null;
-    const retainedVersion = page ? page.eligibility_version : pendingVersion;
+    const retainedPositions = !append && page?.nodes.length && view ?
+      new Map([...(pendingPositions || []), ...view.simulation.nodes]) : pendingPositions;
+    const retainedVersion = page ? evidenceStamp(page) : pendingVersion;
     if (!append) { pendingPositions = retainedPositions; pendingVersion = retainedVersion; }
     request?.abort(); request = new AbortController();
     loadingError = false; loadingReason = '';
@@ -289,8 +295,18 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
       if (!closed && ticket === sequence) {
         // Coordinates alone can survive a successful revalidation in the same
         // eligibility namespace. Failed/obsolete requests drop this local copy.
-        if (retainedPositions && retainedVersion === data.eligibility_version && view) view.simulation.nodes = retainedPositions;
+        if (retainedPositions && retainedVersion !== evidenceStamp(data)) {
+          pendingPositions = pendingVersion = null; selected = focused = null;
+        }
+        if (pendingPositions && pendingVersion === evidenceStamp(data) && view) {
+          // Restore only paths validated in this response. The remaining map
+          // contains coordinates only, never old graph evidence or titles.
+          for (const node of data.nodes || []) if (!view.simulation.nodes.has(node.path) && pendingPositions.has(node.path)) {
+            view.simulation.nodes.set(node.path, pendingPositions.get(node.path));
+          }
+        }
         accept(data, { append, fit });
+        if (!nextCursor) pendingPositions = pendingVersion = null;
       }
     } catch (error) {
       if (!closed && ticket === sequence && error.name !== 'AbortError') {
@@ -314,7 +330,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     loadingPaused = false; find('[data-graph-back]').disabled = !trail.length; void load({ fit: true });
   }
   listen(form, 'submit', event => { event.preventDefault(); loadingPaused = false; void load({ fit: true }); });
-  for (const name of ['query', 'path', 'folder', 'tag']) listen(input(name), 'input', () => { clearTimeout(debounce); cancelAutomatic(); sequence++; request?.abort(); request = null; loadingPaused = false; clearEvidence(); debounce = setTimeout(() => { debounce = null; void load(); }, 180); });
+  for (const name of ['query', 'path', 'folder', 'tag']) listen(input(name), 'input', () => { clearTimeout(debounce); cancelAutomatic(); sequence++; request?.abort(); request = null; loadingPaused = false; pendingPositions = pendingVersion = null; clearEvidence(); debounce = setTimeout(() => { debounce = null; void load(); }, 180); });
   listen(input('depth'), 'change', () => { loadingPaused = false; void load(); });
   function changeDepth(delta) {
     if (!input('path').value) { say('Hop depth applies to a local neighborhood. Choose Local first.'); return; }

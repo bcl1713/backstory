@@ -51,3 +51,35 @@ test('paused view refreshes spring roots and appended shortcuts without moving c
   assert.equal(view.simulation.active, false);
   view.batch.dispose();
 });
+
+test('empty checkpoints do not consume first fit and metadata leaves batches and drag alone', () => {
+  let fits=0, releases=0;
+  const view=Object.assign(Object.create(renderer.GraphView.prototype), {
+    data:{nodes:[],edges:[]}, simulation:new GraphPhysics(), camera:new GraphCamera(),
+    scene:new THREE.Scene(), selected:null, focused:null, paused:true,
+    container:{dataset:{},setAttribute(){}}, release(){releases++;}, draw(){},wake(){},
+  });
+  view.camera.fit=()=>fits++;
+  view.setGraph({nodes:[],edges:[]},'a');
+  assert.equal(fits,0); assert.equal(Boolean(view.loaded),false);
+  view.setGraph({nodes:[{path:'a',title:'A'}],edges:[]},'a');
+  assert.equal(fits,1); assert.equal(view.loaded,true);
+  const batch=view.batch, calls=releases; view.drag={path:'a'};
+  view.setGraph({nodes:[{path:'a',title:'Renamed'}],edges:[]},'a');
+  assert.equal(view.batch,batch); assert.equal(releases,calls);
+  assert.deepEqual(view.drag,{path:'a'}); assert.equal(fits,1);
+  view.batch.dispose();
+});
+
+test('camera control before first data suppresses automatic fit', () => {
+  let fits=0;
+  const view=Object.assign(Object.create(renderer.GraphView.prototype), {
+    data:{nodes:[],edges:[]}, simulation:new GraphPhysics(), camera:new GraphCamera(),
+    scene:new THREE.Scene(), selected:null, focused:null, paused:true,
+    container:{dataset:{},setAttribute(){}}, release(){},draw(){},wake(){},
+  });
+  view.camera.fit=()=>fits++;
+  view.pan(10,20);
+  view.setGraph({nodes:[{path:'a',title:'A'}],edges:[]},'a');
+  assert.equal(fits,0); view.batch.dispose();
+});

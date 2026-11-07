@@ -85,3 +85,17 @@ test('empty discovery work does not turn exhausted ready evidence into a permane
   assert.equal(pages.complete, true);
   assert.equal(pages.data.nodes[0].path, 'found');
 });
+
+test('progress and repeated evidence do not change presentation or topology', () => {
+  const pages = new GraphPages();
+  pages.accept(page(['a','b'], [edge('a','b')], 'two'));
+  assert.equal(pages.changed, true); assert.equal(pages.topologyChanged, true);
+  pages.accept(page([], [], 'three', { limiting_reasons: ['discovery_pending'] }), true);
+  assert.equal(pages.changed, false); assert.equal(pages.topologyChanged, false);
+  pages.accept(page(['a','b'], [edge('a','b')], 'four'), true);
+  assert.equal(pages.changed, false); assert.equal(pages.topologyChanged, false);
+  pages.accept(page(['a'], [edge('a','b', 2)], 'five'), true);
+  assert.equal(pages.changed, true); assert.equal(pages.topologyChanged, false);
+  pages.accept(page(['c'], [edge('b','c')]), true);
+  assert.equal(pages.changed, true); assert.equal(pages.topologyChanged, true);
+});

@@ -298,3 +298,67 @@ for (const width of [1180, 390]) test(`selected-root BFS retains dense links and
   await map(page).evaluate(el => el.graphView.actions.onSelect('Dense0.md', true));
   expect(await map(page).evaluate(el => el.graphView.paused)).toBe(true);
 });
+
+for (const width of [1180, 390]) test(`progress checkpoints keep frame and presentation stable at ${width}px`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: 900 });
+  const held = new Map();
+  await setup(page, async route => {
+    const q = new URL(route.request().url()).searchParams;
+    if (q.get('depth') !== '3') return route.fulfill({ json: payload(nodes.slice(0,3), edges.slice(0,2)) });
+    const key = q.get('cursor') || 'first';
+    const result = await new Promise(resolve => held.set(key, resolve));
+    await route.fulfill(result).catch(() => {});
+  });
+  await open(page); await page.keyboard.press('Escape');
+  await map(page).evaluate(el => {
+    const v = el.graphView; v.setPaused(true); v.orbit(.2,.1); v.actions.onSelect('B.md', true);
+    v.calls = { graph: 0, reheat: 0, release: 0 };
+    for (const [object, method, key] of [[v,'setGraph','graph'],[v.simulation,'reheat','reheat'],[v,'release','release']]) {
+      const original = object[method].bind(object); object[method] = (...args) => { v.calls[key]++; return original(...args); };
+    }
+  });
+  const frame = () => panel(page).locator('.graph-workspace').boundingBox();
+  const snapshot = () => map(page).evaluate(el => { const v=el.graphView; return { camera:v.snapshot().camera,
+    positions:v.simulation.all.slice(0,3).map(n=>[n.path,n.x,n.y,n.z]), selected:v.selected, focused:v.focused, paused:v.paused }; });
+  const before = await snapshot(), bounds = await frame();
+  const respond = async (key, result, next) => {
+    await expect.poll(()=>held.has(key)).toBe(true); held.get(key)(result); held.delete(key);
+    if (next) await expect.poll(()=>held.has(next)).toBe(true);
+  };
+  await panel(page).getByRole('button', { name:'Increase hop depth', exact:true }).click();
+  await expect.poll(()=>held.has('first')).toBe(true);
+  expect(await frame()).toEqual(bounds);
+  await respond('first', {json:payload([], [], 'empty', {limiting_reasons:['discovery_pending']})}, 'empty');
+  const calls = await map(page).evaluate(el=>({...el.graphView.calls}));
+  expect(await frame()).toEqual(bounds);
+  await respond('empty', {json:payload([], [], 'populated', {limiting_reasons:['discovery_pending']})}, 'populated');
+  expect(await map(page).evaluate(el=>el.graphView.calls)).toEqual(calls);
+  await respond('populated', {json:payload(nodes.slice(0,3), edges.slice(0,2), 'repeat')}, 'repeat');
+  expect(await snapshot()).toEqual(before);
+  await map(page).evaluate(el => { el.graphView.savedBatch=el.graphView.batch; el.graphView.savedRow=document.querySelector('[data-graph-nodes]').firstElementChild; });
+  const populatedCalls = await map(page).evaluate(el=>({...el.graphView.calls}));
+  await respond('repeat', {json:payload(nodes.slice(0,3), edges.slice(0,2), 'last')}, 'last');
+  expect(await map(page).evaluate(el=>el.graphView.calls)).toEqual(populatedCalls);
+  expect(await map(page).evaluate(el=>el.graphView.savedBatch===el.graphView.batch && el.graphView.savedRow===document.querySelector('[data-graph-nodes]').firstElementChild)).toBe(true);
+  expect(await frame()).toEqual(bounds);
+  await panel(page).getByRole('button', {name:'Pause loading',exact:true}).click();
+  expect(await frame()).toEqual(bounds);
+  await respond('last', {json:payload(nodes.slice(0,4), edges)});
+  await panel(page).getByRole('button', {name:'Resume loading',exact:true}).click();
+  await respond('last', {json:payload(nodes.slice(0,4), edges)});
+  await expect(panel(page).locator('[data-graph-summary]')).toContainText('Complete');
+  expect(await snapshot()).toEqual(before); expect(await frame()).toEqual(bounds);
+  await map(page).evaluate(el=>el.graphView.setPaused(false));
+  await page.screenshot({path:info.outputPath(`stable-loading-${width}-normal.png`),fullPage:true});
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await panel(page).getByRole('button', {name:'Refresh',exact:true}).click();
+  await respond('first', {json:payload([], [], 'revoked')}, 'revoked');
+  expect(await frame()).toEqual(bounds);
+  await page.screenshot({path:info.outputPath(`stable-loading-${width}-reduced.png`),fullPage:true});
+  await respond('revoked', {status:401,json:{untrusted_content:true,reason_code:'authentication_required'}});
+  await expect(panel(page).locator('[data-graph-status]')).toContainText('Session expired');
+  await expect(map(page)).toHaveAttribute('data-node-count','0');
+  await expect(panel(page).locator('[data-graph-nodes] > li strong')).toHaveCount(0);
+  expect(await frame()).toEqual(bounds);
+  expect(await map(page).evaluate(el=>el.graphView.simulation.nodes.size)).toBe(0);
+});

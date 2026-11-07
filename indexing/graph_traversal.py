@@ -91,7 +91,7 @@ def _session(context):
             database.executescript('''
                 CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1), query TEXT,
                     stamp TEXT, revision INTEGER, phase TEXT, after INTEGER,
-                    incomplete INTEGER, reasons TEXT, boundary INTEGER, replay TEXT);
+                    incomplete INTEGER, reasons TEXT, boundary INTEGER, replay TEXT, emitted INTEGER DEFAULT 0);
                 CREATE TABLE members (id INTEGER PRIMARY KEY, path TEXT UNIQUE,
                     depth INTEGER, ancestors TEXT, display INTEGER,
                     after INTEGER DEFAULT 0, done INTEGER DEFAULT 0);
@@ -99,7 +99,7 @@ def _session(context):
                 CREATE TABLE pairs (id INTEGER PRIMARY KEY, source TEXT, destination TEXT,
                     count INTEGER, first INTEGER, position TEXT, UNIQUE(source,destination));
             ''')
-            database.execute('INSERT INTO metadata VALUES(1,?,?,0,\'discover\',0,0,\'[]\',0,NULL)',
+            database.execute('INSERT INTO metadata(id,query,stamp,revision,phase,after,incomplete,reasons,boundary,replay) VALUES(1,?,?,0,\'discover\',0,0,\'[]\',0,NULL)',
                              (context.query_hash, json.dumps(context.stamp)))
             database.commit()
         database.execute('BEGIN IMMEDIATE')
@@ -177,6 +177,10 @@ def _discover(context, database, meta, depth, folder, tag, text):
             return
         window = WORK_ROWS - consumed
         ids, rows = _adjacent(context, front['path'], front['after'], window)
+        if front['depth'] == depth:
+            # Membership is settled before final-layer scans. Unrelated targets
+            # cannot join; do not spend filesystem eligibility on them.
+            rows = [row for row in rows if _member(database, row['destination']) is not None]
         paths = {p for row in rows for p in (row['source'], row['destination'])}
         context.prime(paths)
         display = set(_filtered_nodes(context.generation, folder, tag, text).filter(path__in=paths)
@@ -271,6 +275,58 @@ def _emit(context, database, meta, node_limit, edge_limit):
     return nodes, edges
 
 
+# This is an optimization threshold, never a membership limit. Larger/raw-heavy
+# neighborhoods fall through to the resumable query with the same eligibility
+# cache. Pair seeks avoid scanning a last-layer hub's unrelated destinations.
+SMALL_MEMBERS = 32
+
+
+def small_page(context, path, depth, folder, tag, text, node_limit, edge_limit):
+    from .graph import _filtered_nodes, _selected_pairs
+    from .models import LinkEdge
+    deadline = time.monotonic() + WORK_SECONDS
+    root = context.eligible(path)
+    if root is None:
+        return context.finish(GraphPage)
+    members, queue, consumed = {path: root}, [(path, 0)], 0
+    for source, distance in queue:
+        if distance == depth:
+            continue
+        if time.monotonic() >= deadline or consumed >= WORK_ROWS:
+            return None
+        ids, rows = _adjacent(context, source, 0, WORK_ROWS - consumed + 1)
+        consumed += len(ids)
+        if consumed > WORK_ROWS:
+            return None
+        context.prime(row['destination'] for row in rows)
+        for row in rows:
+            target = row['destination']
+            node = context.eligible(target)
+            if node and target not in members:
+                members[target] = node
+                queue.append((target, distance + 1))
+                if len(members) > SMALL_MEMBERS:
+                    return None
+    display = set(_filtered_nodes(context.generation, folder, tag, text).filter(path__in=members)
+                  .values_list('path', flat=True))
+    if len(display) > node_limit or time.monotonic() >= deadline:
+        return None
+    # A fixed-size VALUES table drives exact indexed pair lookups. Never walk
+    # generation order or eligibility-check out-of-scope last-layer targets.
+    pairs = _selected_pairs(context, {(a, b) for a in members for b in members if a != b})
+    shown = [row for row in pairs if row['source'] in display and row['destination'] in display]
+    if len(shown) > edge_limit:
+        return None
+    positions = dict(LinkEdge.objects.filter(pk__in=[row['first'] for row in shown])
+                     .values_list('pk', 'position'))
+    edges = tuple(GraphEdge(row['source'], row['destination'], row['count'],
+                            members[row['source']].revision, row['first'], tuple(positions[row['first']]))
+                  for row in shown)
+    return context.finish(GraphPage, nodes=tuple(members[p] for p in sorted(display)), edges=edges,
+                          boundary_connections=any((row['source'] in display) != (row['destination'] in display)
+                                                   for row in pairs))
+
+
 def local_page(context, path, depth, folder, tag, text, node_limit, edge_limit):
     try:
         return _local_page(context, path, depth, folder, tag, text, node_limit, edge_limit)
@@ -311,6 +367,18 @@ def _local_page(context, path, depth, folder, tag, text, node_limit, edge_limit)
             _discover(context, database, meta, depth, folder, tag, text)
         nodes, edges = _emit(context, database, meta, node_limit, edge_limit)
         if meta['phase'] == 'discover':
+            # A safe shortest-hop witness is useful before every frontier has
+            # finished. Emit bounded validated membership, without partial edge
+            # aggregates; edge counts are published only after discovery.
+            for member in database.execute('SELECT * FROM members WHERE id>? ORDER BY id LIMIT ?',
+                                           (meta['emitted'], min(node_limit, WORK_ROWS))).fetchall():
+                node = _witness(context, member) if member['display'] else None
+                if member['display'] and node is None:
+                    break
+                if node:
+                    nodes[node.path] = node
+                meta['emitted'] = member['id']
+            database.execute('UPDATE metadata SET emitted=? WHERE id=1', (meta['emitted'],))
             context.reasons.add('discovery_pending')
         more = meta['phase'] != 'done'
         checkpoint = {'phase': 'traversal', 'session': token, 'after': meta['revision'] + 1}

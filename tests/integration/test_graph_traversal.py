@@ -177,7 +177,7 @@ def test_private_state_io_failure_is_explicit_and_redacted(wiki, monkeypatch, ca
         raise OSError('synthetic private path and secret source')
     monkeypatch.setattr(graph_traversal, '_cleanup', fail_cleanup)
     with pytest.raises(StorageError, match='graph_traversal_unavailable'):
-        graph.query_graph('root.md', depth=2)
+        graph.query_graph('root.md', depth=2, node_limit=1)
     events = [record.index_event for record in caplog.records if hasattr(record, 'index_event')]
     assert events[-1]['reason_code'] == 'index_io_error'
     assert 'secret source' not in str(events)
@@ -273,3 +273,70 @@ def test_legacy_undirected_local_cursor_requires_restart(wiki, depth):
     legacy_cursor = signing.dumps(data, salt='graph-v1', compress=True)
     with pytest.raises(StorageError, match='graph_cursor_expired'):
         graph.query_graph('r.md', depth=depth, node_limit=2, edge_limit=1, cursor=legacy_cursor)
+
+
+@pytest.mark.parametrize('depth', [1, 2, 3])
+def test_small_neighborhood_ignores_busy_last_layer_and_returns_first_usable_page(wiki, monkeypatch, depth, record_property):
+    import time
+    from django.db import connection
+    files = {f'outside{i:03}.md': '# Outside' for i in range(400)}
+    files.update({'r.md': '[[a]]', 'a.md': '[[b]]', 'b.md': '[[c]]', 'c.md': '# C'})
+    last = ['a.md', 'b.md', 'c.md'][depth - 1]
+    files[last] = '[[r]] [[r#Again]] ' + ' '.join(f'[[outside{i:03}]]' for i in range(400))
+    graph = build_graph(wiki, files)
+    checked, statements = [], []
+    original = graph.file_stat
+    def stat(path):
+        checked.append(path)
+        return original(path)
+    monkeypatch.setattr(graph, 'file_stat', stat)
+    def count(execute, sql, params, many, context):
+        statements.append(sql.split()[0])
+        return execute(sql, params, many, context)
+    started = time.monotonic()
+    with connection.execute_wrapper(count):
+        first = graph.query_graph('r.md', depth=depth)
+    elapsed = time.monotonic() - started
+    metrics = {'requests_to_usable_complete': 1 if first.nodes and not first.next_cursor else None,
+               'sql_statements': len(statements), 'eligibility_operations': len(checked),
+               'first_response_seconds': elapsed}
+    record_property('last_layer_hub', json.dumps(metrics))
+    print('synthetic_last_layer_hub', depth, metrics)
+    assert first.nodes and first.next_cursor is None
+    assert first.projection_complete
+    expected = {'r.md', *['a.md', 'b.md', 'c.md'][:depth]}
+    assert {node.path for node in first.nodes} == expected
+    assert set(checked) <= expected
+    assert len(checked) == len(expected)
+    assert {(edge.source, edge.destination): edge.occurrence_count for edge in first.edges} == {
+        **{(a, b): 1 for a, b in zip(['r.md', 'a.md', 'b.md'], ['a.md', 'b.md', 'c.md']) if b in expected},
+        (last, 'r.md'): 2}
+
+
+def test_resumable_discovery_emits_progress_and_skips_outside_last_layer_eligibility(wiki, monkeypatch):
+    files = {f'leaf{i}.md': '# Leaf' for i in range(35)}
+    files.update({f'outside{i}.md': '# Outside' for i in range(110)})
+    files['r.md'] = ' '.join(f'[[leaf{i}]]' for i in range(35))
+    files['leaf34.md'] = '[[leaf0]] ' + ' '.join(f'[[outside{i}]]' for i in range(110))
+    graph = build_graph(wiki, files)
+    checked = []
+    original = graph.file_stat
+    def stat(path):
+        checked.append(path)
+        return original(path)
+    monkeypatch.setattr(graph, 'file_stat', stat)
+    # Depth two with a one-hop center above the fixture makes the busy leaf
+    # final-layer work go through the persisted traversal rather than SQL one-hop.
+    (wiki / 'root.md').write_text('[[r]]')
+    from indexing.queue import request_scan
+    from indexing.worker import run_batch
+    request_scan('verify')
+    for n in range(1000):
+        if not run_batch(now=10000000000+n).pending:
+            break
+    nodes, edges, pages = collect(graph, 'root.md', depth=2)
+    assert pages[0].nodes and pages[0].next_cursor
+    assert nodes == {'root.md', 'r.md'} | {f'leaf{i}.md' for i in range(35)}
+    assert edges['leaf34.md', 'leaf0.md'] == 1
+    assert not any(path.startswith('outside') for path in checked)
+    assert pages[-1].projection_complete
