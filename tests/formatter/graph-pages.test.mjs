@@ -25,14 +25,16 @@ test('reject mixed epochs atomically and explicit scopes replace accumulated res
   pages.accept(page(['b'], [], null, { relation_epoch: 2 }));
   assert.deepEqual(pages.data.nodes.map(n => n.path), ['b']);
 });
-test('client budget preserves the unconsumed continuation and never calls a partial window complete', () => {
-  const pages = new GraphPages({ maxNodes: 2, maxEdges: 2 });
-  pages.accept(page(['a'], [], 'two'));
-  assert.equal(pages.accept(page(['b', 'c']), true), false);
-  assert.equal(pages.data.next_cursor, 'two');
-  assert.equal(pages.limited, true);
-  assert.equal(pages.complete, false);
-  assert.deepEqual(pages.data.nodes.map(n => n.path), ['a']);
+test('accumulation exceeds former product ceilings without discarding records or continuation', () => {
+  const pages = new GraphPages();
+  for (let i = 0; i < 101; i++) {
+    const paths = Array.from({ length: 100 }, (_, j) => `n${i * 100 + j}`);
+    const links = paths.flatMap((path, j) => [edge(path, paths[(j+1)%100]), edge(path, paths[(j+2)%100]), edge(path, paths[(j+3)%100])]);
+    assert.equal(pages.accept(page(paths, links, i < 100 ? `p${i+1}` : null), i > 0), true);
+  }
+  assert.equal(pages.data.nodes.length, 10100);
+  assert.equal(pages.data.edges.length, 30300);
+  assert.equal(pages.complete, true);
 });
 test('more pages, unavailable evidence and non-pagination limits cannot report complete', () => {
   const pages = new GraphPages();
@@ -66,11 +68,20 @@ test('non-advancing and cyclic continuations fail before changing accumulated ev
   assert.equal(pages.data.nodes.length, 1);
 });
 
-test('continuing empty pages have an explicit resource bound and keep the unconsumed cursor', () => {
-  const pages = new GraphPages({ maxPages: 2 });
-  pages.accept(page(['a'], [], 'two'));
-  pages.accept(page([], [], 'three'), true);
-  assert.equal(pages.accept(page([], [], 'four'), true), false);
-  assert.equal(pages.data.next_cursor, 'three'); assert.equal(pages.complete, false);
-  assert.equal(pages.limited, true);
+test('empty discovery work can exceed the former page ceiling and still complete', () => {
+  const pages = new GraphPages();
+  pages.accept(page(['a'], [], 'p0'));
+  for (let i = 1; i <= 10001; i++) pages.accept(page([], [], `p${i}`), true);
+  pages.accept(page(['b']), true);
+  assert.equal(pages.complete, true);
+  assert.deepEqual(pages.data.nodes.map(n => n.path), ['a', 'b']);
+});
+
+test('empty discovery work does not turn exhausted ready evidence into a permanent partial graph', () => {
+  const pages = new GraphPages();
+  pages.accept(page([], [], 'discover', { projection_complete: false, limiting_reasons: ['discovery_pending'] }));
+  assert.equal(pages.complete, false);
+  pages.accept(page(['found']), true);
+  assert.equal(pages.complete, true);
+  assert.equal(pages.data.nodes[0].path, 'found');
 });

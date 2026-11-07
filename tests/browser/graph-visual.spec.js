@@ -22,8 +22,9 @@ async function login(page) {
   await page.getByLabel('Password', { exact: true }).fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
-async function stub(page) {
+async function stub(page, holdContinuation = false) {
   const data = fixture();
+  const continuation = holdContinuation ? new Promise(resolve => { data.resume = resolve; }) : Promise.resolve();
   const slice = (start, end, next_cursor) => {
     const edges = data.edges.slice(start, end), wanted = new Set(edges.flatMap(e => [e.source, e.destination]));
     return { ...data.meta, nodes: data.nodes.filter(n => wanted.has(n.path)), edges, next_cursor };
@@ -31,13 +32,17 @@ async function stub(page) {
   // Every individual page obeys the existing API caps; the accumulated scope exceeds both.
   const pages = { '': slice(0, 190, 'two'), two: slice(190, 238, 'empty'), empty: { ...data.meta, nodes: [], edges: [], next_cursor: 'four' },
     four: slice(238, 430, 'five'), five: (() => { const part = slice(430, data.edges.length, null); return { ...part, nodes: [...part.nodes, data.nodes[239]] }; })() };
-  await page.route(/\/tools\/graph\//, route => route.fulfill({ json: pages[new URL(route.request().url()).searchParams.get('cursor') || ''] }));
+  await page.route(/\/tools\/graph\//, async route => {
+    const cursor = new URL(route.request().url()).searchParams.get('cursor') || '';
+    if (cursor) await continuation;
+    return route.fulfill({ json: pages[cursor] });
+  });
   await page.route(/\/tools\/links\//, route => route.fulfill({ json: { ...data.meta, items: [], next_cursor: null } }));
   return data;
 }
 
 test('progressive 3D graph retains pages, selection and camera, with theme, phone and context recovery evidence', async ({ page }, info) => {
-  test.setTimeout(60000); await login(page); const data = await stub(page);
+  test.setTimeout(60000); await login(page); const data = await stub(page, true);
   const external = []; page.on('request', r => { if (new URL(r.url()).origin !== new URL(page.url()).origin) external.push(r.url()); });
   await page.goto('/notes/Slice.md'); await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
   await page.evaluate(() => document.dispatchEvent(new Event('backstory:open-graph')));
@@ -51,10 +56,7 @@ test('progressive 3D graph retains pages, selection and camera, with theme, phon
   await panel.getByRole('button', { name: 'Inspect Synthetic 000', exact: true }).click();
   await panel.getByRole('button', { name: 'Connection list', exact: true }).click();
   const camera = await map.getAttribute('data-camera-yaw'), selection = await map.getAttribute('data-selected');
-  for (let i = 0; i < 4; i++) {
-    const more = panel.getByRole('button', { name: 'Load more', exact: true });
-    await more.click(); await expect(more).toBeEnabled().catch(async () => { await expect(more).toBeHidden(); });
-  }
+  data.resume();
   await expect(panel.locator('[data-graph-summary]')).toContainText('240 notes');
   await expect(panel.locator('[data-graph-summary]')).toContainText('Complete');
   await expect(map).toHaveAttribute('data-node-count', '240');
@@ -141,7 +143,6 @@ for (const fault of ['session', 'unavailable', 'policy']) test(`retained graph i
   if (!await panel.locator('[data-graph-list]').isVisible()) await panel.getByRole('button', { name: 'Connection list', exact: true }).click();
   await panel.getByRole('button', { name: 'Inspect Synthetic 000', exact: true }).click();
   await expect.poll(() => Boolean(releaseDetail)).toBe(true);
-  await panel.getByRole('button', { name: 'Load more', exact: true }).click();
   await expect.poll(() => Boolean(releaseGraph)).toBe(true);
   releaseDetail(); await expect(panel.locator('[data-graph-nodes] > li strong')).toHaveCount(0);
   releaseGraph(); await expect(panel.locator('[data-graph-nodes] > li strong')).toHaveCount(0);

@@ -77,7 +77,7 @@
 .graph-details > h3 { margin-block: .4rem; }
 .graph-details > p { margin-block: .4rem; }
 .graph-details details { margin-block: .5rem; }
-.graph-controls > [data-graph-next] { border-color: var(--focus); }
+[data-graph-notes-navigation], [data-graph-links-navigation] { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 .graph-panel [hidden] { display: none !important; }
 @media (max-width: 650px) {
   [data-graph-dialog] { width: 100%; max-width: 100%; max-height: 100dvh; padding: max(.5rem, env(safe-area-inset-top)) max(.5rem, env(safe-area-inset-right)) max(.5rem, env(safe-area-inset-bottom)) max(.5rem, env(safe-area-inset-left)); }

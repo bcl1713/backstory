@@ -193,3 +193,108 @@ test('superseded depth requests retain surviving coordinates and camera until re
   expect(after).toEqual(before);
   await expect(panel(page).locator('[data-graph-depth-value]')).toContainText('4 hops');
 });
+
+for (const width of [1180, 390]) test(`local scope automatically loads empty pages, retains every record and windows the list at ${width}px`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: 900 });
+  const all = [node('Slice.md'), ...Array.from({ length: 320 }, (_, i) => node(`N${String(i).padStart(3, '0')}.md`))];
+  const links = all.slice(1).map(n => ({ source: 'Slice.md', destination: n.path, occurrence_count: 2 }));
+  const requests = [];
+  await setup(page, route => {
+    const cursor = new URL(route.request().url()).searchParams.get('cursor') || '';
+    requests.push(cursor);
+    const pages = {
+      '': payload(all.slice(0,3), links.slice(0,2), 'empty'),
+      empty: payload([], [], 'middle'),
+      middle: payload([all[0], ...all.slice(3,160)], links.slice(2,159), 'last'),
+      last: payload([all[0], ...all.slice(160)], links.slice(159), null, { projection_complete: false, limiting_reasons: ['index_updating', 'projection_incomplete'] }),
+    };
+    return route.fulfill({ json: pages[cursor] });
+  });
+  await page.evaluate(() => document.dispatchEvent(new Event('backstory:open-graph')));
+  const dialog = panel(page);
+  await expect(dialog.locator('[data-graph-summary]')).toContainText('321 notes · 320 directed links · Loaded available results · Index updating');
+  expect(requests).toEqual(['', 'empty', 'middle', 'last']);
+  await expect(dialog.getByRole('button', { name: 'Load more', exact: true })).toHaveCount(0);
+  if (!await dialog.locator('[data-graph-list]').isVisible()) await dialog.getByRole('button', { name: 'Connection list', exact: true }).click();
+  await expect(dialog.locator('[data-graph-nodes] > li')).toHaveCount(250);
+  await dialog.getByRole('button', { name: 'Next notes', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'Previous notes', exact: true })).toBeFocused();
+  await expect(dialog.locator('[data-graph-nodes]')).toContainText('Slice.md');
+  await expect(dialog.locator('[data-graph-nodes] > li')).toHaveCount(71);
+  await dialog.getByRole('button', { name: 'Next links', exact: true }).click();
+  await expect(dialog.locator('[data-graph-edges]')).toContainText('N319.md');
+  expect(requests).toHaveLength(4); // List navigation never starts server loading.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath(`automatic-local-${width}.png`), fullPage: true });
+});
+
+test('local loading pause preserves motion state and a changed depth rejects an obsolete continuation', async ({ page }) => {
+  let phase = 'initial', release;
+  await setup(page, async route => {
+    const q = new URL(route.request().url()).searchParams;
+    if (phase === 'initial' || q.get('depth') === '3') return route.fulfill({ json: payload(nodes.slice(0,3), edges.slice(0,2)) });
+    if (!q.has('cursor')) return route.fulfill({ json: payload(nodes.slice(0,2), [edges[0]], 'two') });
+    await new Promise(resolve => { release = resolve; });
+    return route.fulfill({ json: payload([node('Obsolete.md')], [], null) }).catch(() => {});
+  });
+  await open(page); await page.keyboard.press('Escape');
+  phase = 'continuing'; await panel(page).getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await map(page).evaluate(el => { el.graphView.setPaused(true); el.graphView.orbit(.2,.1); });
+  const camera = await map(page).evaluate(el => el.graphView.snapshot().camera);
+  await panel(page).getByRole('button', { name: 'Pause loading', exact: true }).click(); release(); release = null;
+  await expect(panel(page).locator('[data-graph-summary]')).toContainText('Loading paused');
+  await expect(map(page)).toHaveAttribute('data-node-count', '2');
+  await panel(page).getByRole('button', { name: 'Resume loading', exact: true }).click();
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await panel(page).getByRole('button', { name: 'Increase hop depth', exact: true }).click(); release();
+  await expect(map(page)).toHaveAttribute('data-node-count', '3');
+  await expect(panel(page).locator('[data-graph-nodes]')).not.toContainText('Obsolete.md');
+  expect(await map(page).evaluate(el => el.graphView.snapshot().camera)).toEqual(camera);
+  expect(await map(page).evaluate(el => el.graphView.paused)).toBe(true);
+});
+
+for (const width of [1180, 390]) test(`selected-root BFS retains dense links and camera through reselection at ${width}px`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: 900 });
+  const all = [node('Slice.md'), ...Array.from({ length: 119 }, (_, i) => node(`Dense${i}.md`))];
+  const links = [0, 1].flatMap(hub => all.slice(2).map(n => ({ source: all[hub].path, destination: n.path, occurrence_count: 3 })));
+  links.push({ source: all[0].path, destination: all[1].path, occurrence_count: 1 });
+  await setup(page, route => route.fulfill({ json: payload(all, links) }));
+  await page.evaluate(() => document.dispatchEvent(new Event('backstory:open-graph')));
+  await expect(map(page)).toHaveAttribute('data-node-count', '120');
+  await map(page).evaluate(el => {
+    const view = el.graphView; view.setPaused(true); view.orbit(.3,.1);
+    view.actions.onSelect('Slice.md', true);
+  });
+  const before = await map(page).evaluate(el => ({ camera: el.graphView.snapshot().camera, positions: el.graphView.simulation.all.map(n => [n.path,n.x,n.y,n.z]) }));
+  expect(await map(page).evaluate(el => el.graphView.simulation.springs.length)).toBe(119);
+  await map(page).evaluate(el => el.graphView.actions.onSelect('Dense0.md', true));
+  expect(await map(page).evaluate(el => el.graphView.simulation.springs.length)).toBe(118);
+  const after = await map(page).evaluate(el => ({ camera: el.graphView.snapshot().camera, positions: el.graphView.simulation.all.map(n => [n.path,n.x,n.y,n.z]) }));
+  expect(after).toEqual(before);
+  expect(await map(page).evaluate(el => el.graphView.data.edges.length)).toBe(237);
+  expect(await map(page).evaluate(el => el.graphView.paused)).toBe(true);
+  await panel(page).locator('[data-graph-filter-options]').evaluate(el => { el.open = false; });
+  await panel(page).locator('[data-graph-control-options]').evaluate(el => { el.open = false; });
+  await map(page).evaluate(el => {
+    const view = el.graphView, sim = view.simulation;
+    view.actions.onSelect('Slice.md', true);
+    sim.settle(240); view.fit(); view.draw();
+  });
+  await page.screenshot({ path: info.outputPath(`dense-bfs-${width}.png`), fullPage: true });
+  // Comparison uses the same synthetic topology with the previous all-pairs rule.
+  await map(page).evaluate(el => {
+    const view = el.graphView, sim = view.simulation, seen = new Set();
+    sim.springs = [];
+    for (const edge of view.data.edges) {
+      const key = JSON.stringify([edge.source, edge.destination].sort());
+      if (seen.has(key)) continue; seen.add(key);
+      sim.springs.push([sim.nodes.get(edge.source), sim.nodes.get(edge.destination)]);
+    }
+    sim.reheat(); sim.settle(240); view.fit(); view.draw();
+  });
+  await page.screenshot({ path: info.outputPath(`dense-all-pairs-comparison-${width}.png`), fullPage: true });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await map(page).evaluate(el => el.graphView.actions.onSelect('Dense0.md', true));
+  expect(await map(page).evaluate(el => el.graphView.paused)).toBe(true);
+});

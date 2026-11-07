@@ -88,8 +88,15 @@ class Query:
                 data = signing.loads(cursor, salt='graph-v1', max_age=3600)
                 if data['q'] != self.query_hash or data['s'] != self.stamp or type(data['a']) is not type(self.after):
                     raise ValueError
-                if isinstance(self.after, dict) and (set(data['a']) != {'phase', 'after'} or data['a']['phase'] not in {'edges', 'nodes'} or type(data['a']['after']) is not int or data['a']['after'] < 0):
-                    raise ValueError
+                if isinstance(self.after, dict):
+                    checkpoint = data['a']
+                    if checkpoint.get('phase') == 'traversal':
+                        from .graph_traversal import valid_checkpoint
+                        if not valid_checkpoint(checkpoint):
+                            raise ValueError
+                    elif (set(checkpoint) != {'phase', 'after'} or checkpoint['phase'] not in {'edges', 'nodes'}
+                          or type(checkpoint['after']) is not int or checkpoint['after'] < 0):
+                        raise ValueError
                 self.after = data['a']
             except (StorageError, signing.BadSignature, ValueError, TypeError, KeyError):
                 raise StorageError('graph_cursor_expired', 409) from None
@@ -393,60 +400,24 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
                      'query': query, 'node_limit': node_limit, 'edge_limit': edge_limit}, cursor)
     if context.index.state == 'unavailable':
         return context.finish(GraphPage)
-    neighborhood = None
+    if path and depth > 1:
+        from .graph_traversal import local_page
+        return local_page(context, path, depth, folder, tag, query, node_limit, edge_limit)
     center = None
     indexed_neighborhood = None
     if path:
         center = context.eligible(path)
         center_eligible = center is not None
-        if depth == 1:
-            # Keep the complete one-hop membership in indexed SQL. Preloading
-            # and checking its first 300 endpoints on every request prevents a
-            # high-degree neighborhood from ever advancing to later neighbors.
-            direct = context.relation_rows().filter(resource_type='note', occurrence__occurrence_kind='link')
-            indexed_neighborhood = (Q(path=path) |
-                                    Q(path__in=direct.filter(source=path).values('destination')) |
-                                    Q(path__in=direct.filter(destination=path).values('source')))
-        else:
-            neighborhood = {path} if center else set()
-            frontier = set(neighborhood)
-            for _ in range(depth):
-                if not frontier:
-                    break
-                pairs = context.incident_pairs(frontier)
-                context.prime([p for pair in pairs for p in [pair['source'], pair['destination']]])
-                following = set()
-                for pair in pairs:
-                    source, target = pair['source'], pair['destination']
-                    a, b = context.eligible(source), context.eligible(target)
-                    if not a or not b:
-                        continue
-                    for node in [a, b]:
-                        if node.path not in neighborhood:
-                            following.add(node.path)
-                            neighborhood.add(node.path)
-                frontier = following
-                if 'edge_candidate_limit' in context.reasons:
-                    # Omitted pairs may lead to further members at this depth.
-                    # Occurrence pagination cannot recover omitted membership.
-                    context.complete = False
-                    context.reasons.add('neighborhood_limit')
-                if 'candidate_limit' in context.reasons:
-                    # Traversal membership itself is incomplete; unlike a page
-                    # limit, later occurrence pages cannot recover these nodes.
-                    context.reasons.add('neighborhood_limit')
-                    break
-            # Apply display filters in one indexed query after traversal. An
-            # existence query per visited endpoint consumes the shared SQL
-            # deadline before even a tiny response can be assembled.
-            neighborhood = set(_filtered_nodes(context.generation, folder, tag, query)
-                               .filter(path__in=neighborhood).values_list('path', flat=True))
+        # Keep one-hop membership in indexed SQL; unlike deeper BFS it needs
+        # no persisted frontier and can seek directly to later neighbors.
+        direct = context.relation_rows().filter(resource_type='note', occurrence__occurrence_kind='link')
+        indexed_neighborhood = (Q(path=path) |
+                                Q(path__in=direct.filter(source=path).values('destination')) |
+                                Q(path__in=direct.filter(destination=path).values('source')))
         if not _matches(path, folder, tag, query).filter(generation=context.generation).exists():
             center = None
     eligible_rows = _filtered_nodes(context.generation, folder, tag, query)
-    if neighborhood is not None:
-        eligible_rows = eligible_rows.filter(path__in=neighborhood)
-    elif indexed_neighborhood is not None:
+    if indexed_neighborhood is not None:
         eligible_rows = eligible_rows.filter(indexed_neighborhood) if center_eligible else eligible_rows.none()
     relations = context.relation_rows().filter(resource_type='note', occurrence__occurrence_kind='link')
     # Page occurrences rather than disjoint node windows. Every emitted visual
@@ -465,7 +436,7 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
             # A local view must not walk the generation-wide occurrence order
             # looking for a late source. Fetch bounded raw occurrence IDs from
             # the source-note index, then use their unique projection lookup.
-            note_ids = eligible_rows.values('pk') if indexed_neighborhood is not None else list(eligible_rows.values_list('pk', flat=True)[:CANDIDATE_LIMIT])
+            note_ids = eligible_rows.values('pk')
             raw_ids = list(LinkEdge.objects.filter(note_id__in=note_ids, pk__gt=after).order_by('pk')
                            .values_list('pk', flat=True)[:CANDIDATE_LIMIT])
             candidate_relations = context.relation_rows().filter(occurrence_id__in=raw_ids)
@@ -478,8 +449,7 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
         for row in candidates:
             source, target = row['source'], row['destination']
             if (row['state'] != 'resolved' or row['resource_type'] != 'note' or row['occurrence__occurrence_kind'] != 'link'
-                    or path and (source not in (allowed_paths if allowed_paths is not None else neighborhood)
-                                 or target not in (allowed_paths if allowed_paths is not None else neighborhood))):
+                    or path and (source not in allowed_paths or target not in allowed_paths)):
                 after = row['occurrence_id']
                 continue
             if not context.can_check([source, target]):
@@ -487,6 +457,11 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
                 break
             a, b = context.eligible(source), context.eligible(target)
             if a and b:
+                # Two-node pages must also fit edges between two neighbors.
+                # Keeping an otherwise unused center would repeat this cursor
+                # forever; the center is included on its own incident pages.
+                if node_limit == 2 and center and not selected_pairs and path not in {source, target}:
+                    nodes.pop(path, None)
                 additional = len({source, target} - nodes.keys())
                 if len(nodes) + additional > node_limit or len(selected_pairs) >= edge_limit and (source, target) not in selected_pairs:
                     context.reasons.add('node_limit' if len(nodes) + additional > node_limit else 'edge_limit')
@@ -511,9 +486,6 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
         phase, after = 'nodes', 0
     if next_checkpoint is None and phase == 'nodes':
         node_rows = eligible_rows.filter(pk__gt=after)
-        if path and indexed_neighborhood is None:
-            local_ids = list(eligible_rows.values_list('pk', flat=True)[:CANDIDATE_LIMIT])
-            node_rows = IndexedNote.objects.filter(pk__in=local_ids, pk__gt=after)
         candidates = list(_node_rows(node_rows).order_by('pk')[:CANDIDATE_LIMIT])
         for row in candidates:
             if row['path'] in nodes:

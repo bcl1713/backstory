@@ -112,7 +112,9 @@ export class GraphView {
     this.release(null, true); this.data = data; this.current = current;
     this.simulation.setGraph(data.nodes, data.edges);
     if (!this.loaded) {
-      for (let i = 0; i < (data.nodes.length > 256 ? 2 : 12); i++) this.simulation.step();
+      // Large layouts warm up through resumable animation work, never a
+      // synchronous whole-graph step while a new page is being installed.
+      if (data.nodes.length <= 256) for (let i = 0; i < 12; i++) this.simulation.step();
       this.camera.fit(this.simulation.nodes, true); this.loaded = true;
     }
     if (this.paused) this.simulation.settle(0);
@@ -123,11 +125,13 @@ export class GraphView {
   }
   setSelection(selected, focused) {
     this.selected = selected; this.focused = focused;
+    this.simulation.setSelection(selected);
+    if (this.paused) this.simulation.settle(0);
     this.tiers = hopTiers(this.data.nodes, this.data.edges, selected); this.themeDirty = true;
     this.container.dataset.selected = selected || ''; this.container.dataset.focused = focused || '';
     const node = this.data.nodes.find(n => n.path === focused);
     this.container.setAttribute('aria-label', `3D note relationship map${node ? ` · Focused ${node.title}, ${node.path}` : ''}`);
-    this.draw();
+    this.draw(); this.wake();
   }
   setForces(value) {
     this.simulation.setForces(value);
@@ -312,8 +316,8 @@ export class GraphView {
     this.frame = null; if (this.destroyed || this.unavailable || document.hidden || this.container.hidden || this.paused) return;
     const elapsed = Math.max(0, (time - this.lastTime) / 1000); this.lastTime = time;
     if (this.quality.sample(elapsed)) { this.themeDirty = true; this.syncSize(); }
-    // Large layouts get one bounded spatial step per frame; small ones retain
-    // fixed-time catch-up. No elapsed pause produces unbounded work.
+    // Large layouts resume a time-sliced spatial step; small ones retain fixed
+    // catch-up. No elapsed pause produces unbounded work.
     this.simulation.advance(this.data.nodes.length > 256 ? Math.min(elapsed, 1 / 60) : elapsed);
     const moving = this.camera.tick(elapsed); this.draw();
     if (this.simulation.active || moving) this.frame = requestAnimationFrame(next => this.tick(next));

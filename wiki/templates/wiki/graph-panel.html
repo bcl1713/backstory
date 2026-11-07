@@ -12,11 +12,10 @@
 <details class="graph-control-options" data-graph-control-options open><summary>Graph controls</summary>
 <div class="graph-controls" data-graph-controls hidden>
 <button type="button" data-graph-local aria-pressed="true">Local</button><button type="button" data-graph-global aria-pressed="false">All notes</button>
-<div class="graph-depth-controls" data-graph-depth-controls><button type="button" data-graph-depth-down aria-label="Decrease hop depth">[ −</button><output data-graph-depth-value aria-live="polite">2 hops</output><button type="button" data-graph-depth-up aria-label="Increase hop depth">+ ]</button><small>1–8 hops · bounded by query resources</small></div>
+<div class="graph-depth-controls" data-graph-depth-controls><button type="button" data-graph-depth-down aria-label="Decrease hop depth">[ −</button><output data-graph-depth-value aria-live="polite">2 hops</output><button type="button" data-graph-depth-up aria-label="Increase hop depth">+ ]</button><small>1–8 hops · loads automatically</small></div>
 
-<button type="button" data-graph-next hidden>Load more</button><button type="button" data-graph-cancel hidden>Pause loading</button><button type="button" data-graph-resume hidden>Resume loading</button><button type="button" data-graph-restart hidden>Restart loading</button>
+<button type="button" data-graph-cancel hidden>Pause loading</button><button type="button" data-graph-resume hidden>Resume loading</button><button type="button" data-graph-restart hidden>Restart loading</button>
 <button type="button" data-graph-pause aria-pressed="false">Pause motion</button>
-<button type="button" data-graph-window hidden>Continue in a new view</button>
 <button type="button" data-graph-graphics-retry hidden>Retry map</button>
 
 <button type="button" data-graph-refresh>Refresh</button>
@@ -31,16 +30,16 @@
 <div class="graph-scope-bar"><p data-graph-scope></p><button type="button" data-graph-list-toggle aria-pressed="false" hidden>Connection list</button></div>
 <p data-graph-status role="status" aria-live="polite" aria-atomic="true"></p>
 <p class="graph-caption" data-graph-summary role="status" aria-live="polite"></p>
-<p data-graph-help hidden>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space centers; / focuses search; +/− zoom; ? toggles help. Escape leaves search first, then closes the graph. Tab leaves the map. Drag a node to tug its links; drag the background to orbit. Shift-drag or two fingers pans; pinch or the wheel zooms. Scroll outside the map to scroll the page. Fit and Reset orientation recover your view. [ and ] decrease/increase local depth from the same center (1–8 hops, with resource limits reported). All notes loads the whole eligible wiki automatically; Pause loading and Resume are separate from Pause motion. Active filters narrow either scope. Bloom describes this displayed graph only.</p>
+<p data-graph-help hidden>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space centers; / focuses search; +/− zoom; ? toggles help. Escape leaves search first, then closes the graph. Tab leaves the map. Drag a node to tug its links; drag the background to orbit. Shift-drag or two fingers pans; pinch or the wheel zooms. Scroll outside the map to scroll the page. Fit and Reset orientation recover your view. [ and ] decrease/increase local depth from the same center (1–8 hops, with resource limits reported). Every selected hop scope and All notes load automatically; Pause loading and Resume are separate from Pause motion. Active filters narrow either scope. Bloom describes this displayed graph only.</p>
 <div class="graph-workspace">
 <div class="graph-map" data-graph-map tabindex="0" role="group" aria-label="Note relationship map" aria-describedby="graph-map-description" hidden></div>
-<div data-graph-list hidden><h2>Connections</h2><ul data-graph-nodes></ul><h2>Directed links</h2><ul data-graph-edges></ul></div>
+<div data-graph-list hidden><h2>Connections</h2><nav data-graph-notes-navigation aria-label="Loaded notes" hidden></nav><ul data-graph-nodes></ul><h2>Directed links</h2><nav data-graph-links-navigation aria-label="Loaded links" hidden></nav><ul data-graph-edges></ul></div>
 <aside class="graph-sidebar">
 <details data-graph-settings><summary>Graph settings</summary>
 <details data-graph-forces><summary>Forces</summary><div class="graph-force-settings">
 <p class="graph-force-scope">Saved in this browser for this site. Only force settings are stored.</p>
 <div class="graph-force-group"><label>Spring strength <output data-graph-force-value="spring">1×</output><input data-graph-force="spring" aria-label="Spring strength" type="range" min="0.25" max="4" step="0.25" value="1" aria-describedby="graph-spring-help"></label>
-<p id="graph-spring-help">How strongly linked notes pull toward their preferred distance. Every unique linked pair has equal strength.</p></div>
+<p id="graph-spring-help">How strongly linked notes pull toward their preferred distance. Equal springs follow every shortest outgoing path from the selected note. Other links remain visible.</p></div>
 <div class="graph-force-group"><label>Repulsion <output data-graph-force-value="repulsion">1×</output><input data-graph-force="repulsion" aria-label="Repulsion" type="range" min="0.25" max="4" step="0.25" value="1" aria-describedby="graph-repulsion-help"></label>
 <p id="graph-repulsion-help">How strongly notes push apart.</p></div>
 <div class="graph-force-group"><label>Gravity <output data-graph-force-value="gravity">1×</output><input data-graph-force="gravity" aria-label="Gravity" type="range" min="0.25" max="4" step="0.25" value="1" aria-describedby="graph-gravity-help"></label>

@@ -90,6 +90,8 @@ class ResolvedRelation(models.Model):
         indexes = [models.Index(fields=['generation', 'epoch', 'destination', 'source'], name='relation_inverse'),
                    models.Index(fields=['generation', 'epoch', 'state'], name='relation_issues'),
                    models.Index(fields=['generation', 'epoch', 'source', 'destination'], name='relation_forward'),
+                   models.Index(fields=['generation', 'epoch', 'source', 'occurrence'], name='relation_source_page'),
+                   models.Index(fields=['generation', 'epoch', 'destination', 'occurrence'], name='relation_target_page'),
                    models.Index(fields=['generation', 'epoch', 'occurrence'], name='relation_page')]
 
 
