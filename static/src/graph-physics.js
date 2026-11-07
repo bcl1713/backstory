@@ -1,3 +1,4 @@
+import { DEFAULT_FORCES, validateForces } from './graph-preferences.js';
 // Presentation-only forces; topology and occurrence counts carry no weights.
 export const PHYSICS = Object.freeze({ step: 1 / 60, catchUp: 4, restLength: 90,
   stiffness: 8, repulsion: 1200000, softening: 144, forceCap: 300,
@@ -38,7 +39,7 @@ function treeFor(all) {
   return root;
 }
 export class GraphPhysics {
-  constructor(nodes = [], edges = []) { this.nodes = new Map(); this.setGraph(nodes, edges); }
+  constructor(nodes = [], edges = []) { this.nodes = new Map(); this.forces = { ...DEFAULT_FORCES }; this.setGraph(nodes, edges); }
   setGraph(nodes, edges) {
     if (nodes.length > PHYSICS.nodeBudget || edges.length > PHYSICS.edgeBudget) throw new RangeError('Graph budget exceeded');
     const previous = this.nodes;
@@ -59,6 +60,7 @@ export class GraphPhysics {
     }
     this.all = [...this.nodes.values()]; this.reheat();
   }
+  setForces(value) { this.forces = validateForces(value); this.reheat(); }
   reheat() { this.active = true; this.steps = 0; this.quiet = 0; this.accumulator = 0; this.limitReached = false; }
   pin(path, x, y, z = this.nodes.get(path)?.z ?? 0) {
     const node = this.nodes.get(path);
@@ -70,11 +72,11 @@ export class GraphPhysics {
   step() {
     if (!this.active) return;
     const all = this.all; this.interactions = 0;
-    for (const n of all) { n.fx = -n.x * PHYSICS.center; n.fy = -n.y * PHYSICS.center; n.fz = -n.z * PHYSICS.center; }
+    for (const n of all) { n.fx = -n.x * PHYSICS.center * this.forces.gravity; n.fy = -n.y * PHYSICS.center * this.forces.gravity; n.fz = -n.z * PHYSICS.center * this.forces.gravity; }
     const repel = (a, x, y, z, count, salt) => {
       let dx = x - a.x, dy = y - a.y, dz = z - a.z, distance = Math.hypot(dx, dy, dz);
       if (distance < .01) { const offset = seed(a.path + '\0' + salt); dx = offset.x; dy = offset.y; dz = offset.z; distance = Math.hypot(dx, dy, dz); }
-      const force = Math.min(PHYSICS.forceCap * Math.sqrt(count), PHYSICS.repulsion * count / (distance * distance + PHYSICS.softening)) + Math.max(0, PHYSICS.collisionRadius * 2 - distance) * PHYSICS.collisionStrength;
+      const force = Math.min(PHYSICS.forceCap * Math.sqrt(count), PHYSICS.repulsion * this.forces.repulsion * count / (distance * distance + PHYSICS.softening)) + Math.max(0, PHYSICS.collisionRadius * 2 - distance) * PHYSICS.collisionStrength;
       a.fx -= dx / distance * force; a.fy -= dy / distance * force; a.fz -= dz / distance * force;
       this.interactions++;
     };
@@ -102,7 +104,7 @@ export class GraphPhysics {
     }
     for (const [a, b] of this.springs) {
       const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, distance = Math.max(.01, Math.hypot(dx, dy, dz));
-      const spring = PHYSICS.stiffness * (distance - PHYSICS.restLength) / distance;
+      const spring = PHYSICS.stiffness * this.forces.spring * (distance - PHYSICS.restLength) / distance;
       a.fx += dx * spring; a.fy += dy * spring; a.fz += dz * spring;
       b.fx -= dx * spring; b.fy -= dy * spring; b.fz -= dz * spring;
     }

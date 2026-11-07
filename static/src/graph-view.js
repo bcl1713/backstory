@@ -129,6 +129,12 @@ export class GraphView {
     this.container.setAttribute('aria-label', `3D note relationship map${node ? ` · Focused ${node.title}, ${node.path}` : ''}`);
     this.draw();
   }
+  setForces(value) {
+    this.simulation.setForces(value);
+    // Updating presentation never overrides deliberate pause or reduced motion.
+    if (this.paused) this.simulation.settle(0);
+    this.draw(); this.wake();
+  }
   setBloom(value) { this.intensity = Math.min(2, Math.max(0, Number(value) || 0)); this.container.dataset.bloom = String(this.intensity); this.themeDirty = true; this.draw(); }
   setPaused(value) {
     this.paused = !!value || this.reduced.matches; this.release(null, true);

@@ -22,6 +22,8 @@ export function mountGraphLauncher() {
     returnFocus = document.activeElement;
     const path = currentPath();
     dialog.querySelector('[name=path]').value = path;
+    dialog.querySelector('[name=depth]').value = '2';
+    for (const name of ['query', 'folder', 'tag']) dialog.querySelector(`[name=${name}]`).value = '';
     dialog.showModal();
     history.pushState({ ...history.state, backstoryGraph: true }, '');
     document.dispatchEvent(new Event('backstory:graph-opened'));

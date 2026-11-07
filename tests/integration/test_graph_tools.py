@@ -31,7 +31,7 @@ def test_graph_tools_share_bounded_service_and_private_session(reader, client, w
 
 
 @pytest.mark.parametrize('endpoint,params', [
-    ('graph', {'node_limit': 201}), ('graph', {'depth': 3}), ('graph', {'query': 'x' * 257}),
+    ('graph', {'node_limit': 201}), ('graph', {'depth': 9}), ('graph', {'depth': 0}), ('graph', {'query': 'x' * 257}),
     ('graph', {'unknown': 1}), ('graph', {'path': '../outside.md'}),
     ('links', {'path': 'a.md', 'direction': 'sideways'}), ('links', {'path': 'a.md', 'limit': 'true'}),
     ('link-issues', {'issue': 'fix'}), ('graph', {'edge_limit': 0}),
@@ -62,3 +62,12 @@ def test_server_filter_form_can_submit_blank_center_for_overview(reader, wiki):
     assert b'/notes/b.md' in response.content
     # The tool's exact-path schema still rejects an explicitly empty path.
     assert reader.get('/tools/graph/', {'path': ''}).status_code == 404
+
+
+def test_graph_depth_http_bounds_and_tool_schema(reader, wiki):
+    build_graph(wiki, {'a.md': '[[b]]', 'b.md': '[[c]]', 'c.md': '[[d]]', 'd.md': '# D'})
+    for depth in (1, 3, 8):
+        response = reader.get('/tools/graph/', {'path': 'a.md', 'depth': depth})
+        assert response.status_code == 200
+        assert len(response.json()['nodes']) == min(depth + 1, 4)
+        assert response.json()['limits']['depth'] == 8

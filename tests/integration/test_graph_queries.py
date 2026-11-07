@@ -66,7 +66,7 @@ def test_local_depth_filters_boundary_and_global_caps(wiki):
     bounded = graph.query_graph(node_limit=1)
     assert len(bounded.nodes) == 1 and bounded.next_cursor and bounded.limiting_reasons
     assert [n.path for n in graph.query_graph(node_limit=1, cursor=bounded.next_cursor).nodes] != [n.path for n in bounded.nodes]
-    for kwargs in [{'depth': 3}, {'node_limit': 201}, {'edge_limit': 501}, {'query': 'x' * 257}]:
+    for kwargs in [{'depth': 9}, {'node_limit': 201}, {'edge_limit': 501}, {'query': 'x' * 257}]:
         with pytest.raises(StorageError):
             graph.query_graph(**kwargs)
 
@@ -324,3 +324,26 @@ def test_cursor_restarts_on_individual_source_publication_before_global_completi
     assert worker.run_batch().pending
     with pytest.raises(StorageError, match='graph_cursor_expired'):
         graph.query_graph(node_limit=1, cursor=first.next_cursor)
+
+
+def test_local_depth_traverses_shortest_eligible_links_and_shrinks_cycles(wiki):
+    graph = build_graph(wiki, {'a.md': '[[b]]', 'b.md': '[[c]]', 'c.md': '[[b]] [[d]]',
+                               'd.md': '[[e]]', 'e.md': '# E', 'alone.md': '# Alone'})
+    two = graph.query_graph('a.md', depth=2)
+    three = graph.query_graph('a.md', depth=3)
+    assert {n.path for n in two.nodes} == {'a.md', 'b.md', 'c.md'}
+    assert {n.path for n in three.nodes} == {'a.md', 'b.md', 'c.md', 'd.md'}
+    assert {(e.source, e.destination) for e in three.edges} == {('a.md', 'b.md'), ('b.md', 'c.md'), ('c.md', 'b.md'), ('c.md', 'd.md')}
+    assert {n.path for n in graph.query_graph('a.md', depth=1).nodes} == {'a.md', 'b.md'}
+    assert {n.path for n in graph.query_graph('a.md', depth=8).nodes} == {'a.md', 'b.md', 'c.md', 'd.md', 'e.md'}
+    assert three.limits['depth'] == 8 and three.projection_complete
+
+
+def test_depth_traverses_filtered_bridge_and_revalidates_it(wiki):
+    graph = build_graph(wiki, {'a.md': '[[bridge]]', 'bridge.md': '[[far]]', 'far.md': '# Far'})
+    filtered = graph.query_graph('a.md', depth=2, query='far')
+    assert {n.path for n in filtered.nodes} == {'far.md'}
+    (wiki / 'bridge.md').unlink()
+    revoked = graph.query_graph('a.md', depth=3)
+    assert {n.path for n in revoked.nodes} == {'a.md'}
+    assert not revoked.projection_complete
