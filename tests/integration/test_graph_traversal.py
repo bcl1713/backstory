@@ -34,16 +34,21 @@ def collect(graph, path, **kwargs):
 
 
 @pytest.mark.parametrize('bounds', [{}, {'node_limit': 4, 'edge_limit': 2}])
-def test_high_degree_intermediate_resumes_all_members_and_induced_edges(wiki, bounds):
+@pytest.mark.parametrize('depth', [1, 2])
+def test_high_degree_intermediate_resumes_all_members_and_induced_edges(wiki, bounds, depth):
     files = {f'leaf{i:03}.md': '# Leaf' for i in range(620)}
     files.update({'root.md': '[[bridge]]',
                   'bridge.md': '\n'.join(f'[[leaf{i:03}]]' for i in range(620)),
                   'leaf619.md': '[[leaf618]] [[leaf618#Again]] [[outside]]',
                   'outside.md': '# Beyond two hops'})
+    files.update({f'incoming{i:03}.md': '[[root]] [[bridge]] [[incoming-hub]]' for i in range(40)})
+    files['incoming-hub.md'] = '[[incoming-leaf]]'
+    files['incoming-leaf.md'] = '# Incoming only'
     graph = build_graph(wiki, files)
-    nodes, edges, pages = collect(graph, 'root.md', depth=2, **bounds)
-    assert nodes == {f'leaf{i:03}.md' for i in range(620)} | {'root.md', 'bridge.md'}
-    assert len(edges) == 622
+    root = 'bridge.md' if depth == 1 else 'root.md'
+    nodes, edges, pages = collect(graph, root, depth=depth, **bounds)
+    assert nodes == {f'leaf{i:03}.md' for i in range(620)} | ({'bridge.md'} if depth == 1 else {'root.md', 'bridge.md'})
+    assert len(edges) == (621 if depth == 1 else 622)
     assert edges['leaf619.md', 'leaf618.md'] == 2
     assert pages[-1].projection_complete
     assert not any('neighborhood_limit' in page.limiting_reasons for page in pages)
@@ -118,13 +123,13 @@ def test_local_continuation_revokes_stale_membership(wiki, settings, monkeypatch
         graph.query_graph('root.md', depth=2, node_limit=2, edge_limit=1, cursor=first.next_cursor)
 
 
-def test_eight_hop_shortest_membership_preserves_cycles_and_incoming_links(wiki):
+def test_eight_hop_shortest_outgoing_membership_preserves_cycle_edges(wiki):
     files = {f'n{i}.md': f'[[n{i + 1}]]' for i in range(9)}
     files.update({'n9.md': '# Outside', 'in.md': '[[n0]]', 'n3.md': '[[n4]] [[n1]]'})
     graph = build_graph(wiki, files)
     nodes, edges, pages = collect(graph, 'n0.md', depth=8, node_limit=2, edge_limit=1)
-    assert nodes == {f'n{i}.md' for i in range(10)} | {'in.md'}
-    assert len(edges) == 11 and pages[-1].projection_complete
+    assert nodes == {f'n{i}.md' for i in range(9)}
+    assert len(edges) == 9 and pages[-1].projection_complete
 
 
 def test_interrupted_page_rolls_back_and_can_retry_same_cursor(wiki, monkeypatch):
@@ -200,3 +205,71 @@ def test_slow_setup_soft_deadline_still_advances_discovery_and_output(wiki, monk
     assert cursor is None
     assert nodes == {'root.md', 'bridge.md', 'leaf.md'}
     assert edges == {('root.md', 'bridge.md'), ('bridge.md', 'leaf.md')}
+
+
+@pytest.mark.parametrize('depth', range(1, 9))
+def test_local_membership_counts_only_outgoing_hops_and_recenters(wiki, depth):
+    graph = build_graph(wiki, {'r.md': '[[a]]', 'a.md': '[[b]]', 'b.md': '# B',
+                               'x.md': '[[r]]', 'y.md': '[[a]]', 'alone.md': '# Alone'})
+    nodes, edges, pages = collect(graph, 'r.md', depth=depth, node_limit=2, edge_limit=1)
+    assert nodes == ({'r.md', 'a.md'} if depth == 1 else {'r.md', 'a.md', 'b.md'})
+    assert edges == ({('r.md', 'a.md'): 1} if depth == 1 else {('r.md', 'a.md'): 1, ('a.md', 'b.md'): 1})
+    assert pages[-1].projection_complete
+    # Recentering starts a new directed search, even at the same selected depth.
+    assert collect(graph, 'a.md', depth=depth)[0] == {'a.md', 'b.md'}
+    assert collect(graph, 'b.md', depth=depth)[0] == {'b.md'}
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+@pytest.mark.parametrize('depth', [1, 2, 3])
+def test_outgoing_diamond_keeps_all_induced_directed_records(wiki, depth, reverse):
+    files = {'r.md': '[[a]] [[b]] [[a#Again]]', 'a.md': '[[c]] [[b]] [[r]]',
+             'b.md': '[[c]] [[a]]', 'c.md': '[[r]] [[a]] [[a#Again]] [[d]]',
+             'd.md': '# D', 'x.md': '[[r]] [[c]]'}
+    if reverse:
+        files = dict(reversed(list(files.items())))
+    graph = build_graph(wiki, files)
+    nodes, edges, pages = collect(graph, 'r.md', depth=depth, node_limit=2, edge_limit=1)
+    expected = {('r.md', 'a.md'): 2, ('r.md', 'b.md'): 1,
+                ('a.md', 'b.md'): 1, ('a.md', 'r.md'): 1, ('b.md', 'a.md'): 1}
+    if depth >= 2:
+        expected.update({('a.md', 'c.md'): 1, ('b.md', 'c.md'): 1,
+                         ('c.md', 'r.md'): 1, ('c.md', 'a.md'): 2})
+    if depth == 3:
+        expected['c.md', 'd.md'] = 1
+    assert nodes == ({'r.md', 'a.md', 'b.md'} | ({'c.md'} if depth >= 2 else set())
+                     | ({'d.md'} if depth == 3 else set()))
+    assert edges == expected and pages[-1].projection_complete
+    for page in pages:
+        for edge in page.edges:
+            assert edge.source_revision and edge.occurrence_id
+            assert edge.position
+
+
+def test_backlink_inspection_and_whole_wiki_do_not_change_outgoing_membership(wiki):
+    graph = build_graph(wiki, {'r.md': '[[a]]', 'a.md': '# A', 'x.md': '[[r]]',
+                               'y.md': '[[a]]', 'alone.md': '# Alone'})
+    assert collect(graph, 'r.md', depth=2)[0] == {'r.md', 'a.md'}
+    incoming = graph.query_links('r.md', 'incoming')
+    assert [item.source for item in incoming.items] == ['x.md']
+    assert collect(graph, 'r.md', depth=2)[0] == {'r.md', 'a.md'}
+    nodes, edges, pages = collect(graph, None, depth=8, node_limit=2, edge_limit=1)
+    assert nodes == {'r.md', 'a.md', 'x.md', 'y.md', 'alone.md'}
+    assert edges == {('r.md', 'a.md'): 1, ('x.md', 'r.md'): 1, ('y.md', 'a.md'): 1}
+    assert pages[-1].projection_complete
+
+
+@pytest.mark.parametrize('depth', [1, 2])
+def test_legacy_undirected_local_cursor_requires_restart(wiki, depth):
+    import hashlib
+    from django.core import signing
+    graph = build_graph(wiki, {'r.md': '[[a]] [[b]]', 'a.md': '# A', 'b.md': '# B'})
+    first = graph.query_graph('r.md', depth=depth, node_limit=2, edge_limit=1)
+    assert first.next_cursor
+    data = signing.loads(first.next_cursor, salt='graph-v1')
+    legacy_arguments = {'kind': 'graph', 'path': 'r.md', 'depth': depth, 'folder': '', 'tag': '',
+                        'query': '', 'node_limit': 2, 'edge_limit': 1}
+    data['q'] = hashlib.sha256(json.dumps(legacy_arguments, sort_keys=True).encode()).hexdigest()
+    legacy_cursor = signing.dumps(data, salt='graph-v1', compress=True)
+    with pytest.raises(StorageError, match='graph_cursor_expired'):
+        graph.query_graph('r.md', depth=depth, node_limit=2, edge_limit=1, cursor=legacy_cursor)

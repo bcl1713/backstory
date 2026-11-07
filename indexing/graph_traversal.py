@@ -94,7 +94,7 @@ def _session(context):
                     incomplete INTEGER, reasons TEXT, boundary INTEGER, replay TEXT);
                 CREATE TABLE members (id INTEGER PRIMARY KEY, path TEXT UNIQUE,
                     depth INTEGER, ancestors TEXT, display INTEGER,
-                    direction INTEGER DEFAULT 0, after INTEGER DEFAULT 0, done INTEGER DEFAULT 0);
+                    after INTEGER DEFAULT 0, done INTEGER DEFAULT 0);
                 CREATE INDEX frontier ON members(done,depth,id);
                 CREATE TABLE pairs (id INTEGER PRIMARY KEY, source TEXT, destination TEXT,
                     count INTEGER, first INTEGER, position TEXT, UNIQUE(source,destination));
@@ -120,17 +120,16 @@ def _session(context):
             database.close()
 
 
-def _adjacent(context, path, direction, after, limit):
-    # An occurrence-order index per endpoint avoids sorting a hub's complete
-    # adjacency list or scanning unrelated relations before each bounded page.
-    column, index = ('source', 'relation_source_page') if direction == 0 else ('destination', 'relation_target_page')
+def _adjacent(context, path, after, limit):
+    # Seek only outgoing occurrences: incoming-only hubs neither join the
+    # neighborhood nor consume work as traversal frontiers.
     if not context.valid:
         return [], []
     with connection.cursor() as cursor:
         cursor.execute(
             'SELECT r.occurrence_id '
-            f'FROM indexing_resolvedrelation r INDEXED BY {index} '
-            f'WHERE r.generation_id=%s AND r.epoch=%s AND r.{column}=%s '
+            'FROM indexing_resolvedrelation r INDEXED BY relation_source_page '
+            'WHERE r.generation_id=%s AND r.epoch=%s AND r.source=%s '
             'AND r.occurrence_id>%s '
             # Read raw bounded rows before filtering, so a long dirty/asset
             # window cannot consume unbounded SQL work without a checkpoint.
@@ -177,7 +176,7 @@ def _discover(context, database, meta, depth, folder, tag, text):
         if _witness(context, front) is None:
             return
         window = WORK_ROWS - consumed
-        ids, rows = _adjacent(context, front['path'], front['direction'], front['after'], window)
+        ids, rows = _adjacent(context, front['path'], front['after'], window)
         paths = {p for row in rows for p in (row['source'], row['destination'])}
         context.prime(paths)
         display = set(_filtered_nodes(context.generation, folder, tag, text).filter(path__in=paths)
@@ -196,16 +195,15 @@ def _discover(context, database, meta, depth, folder, tag, text):
             progressed = True
             if not a or not b:
                 continue
-            neighbor = target if front['direction'] == 0 else source
             if front['depth'] < depth:
                 ancestors = [*json.loads(front['ancestors']), front['path']]
                 database.execute('INSERT OR IGNORE INTO members(path,depth,ancestors,display) VALUES(?,?,?,?)',
-                                 (neighbor, front['depth'] + 1, json.dumps(ancestors), int(neighbor in display)))
+                                 (target, front['depth'] + 1, json.dumps(ancestors), int(target in display)))
             if (folder or tag or text) and ((source in display) != (target in display)):
                 meta['boundary'] = 1
-            # Only the outgoing scan counts occurrences. BFS processes all
-            # shallower frontiers first, so last-layer membership is settled.
-            if front['direction'] == 0 and _member(database, target) is not None:
+            # Scan every member, including the last layer, to retain all
+            # induced edges. BFS settles membership before last-layer scans.
+            if _member(database, target) is not None:
                 database.execute('INSERT INTO pairs(source,destination,count,first,position) VALUES(?,?,1,?,?) '
                                  'ON CONFLICT(source,destination) DO UPDATE SET count=count+1',
                                  (source, target, row['occurrence_id'], json.dumps(row['occurrence__position'])))
@@ -214,8 +212,7 @@ def _discover(context, database, meta, depth, folder, tag, text):
         if len(ids) == window:
             database.execute('UPDATE members SET after=? WHERE id=?', (ids[-1], front['id']))
             return
-        database.execute('UPDATE members SET direction=1,after=0,done=? WHERE id=?',
-                         (front['direction'], front['id']))
+        database.execute('UPDATE members SET done=1 WHERE id=?', (front['id'],))
 
 
 def _emit(context, database, meta, node_limit, edge_limit):
