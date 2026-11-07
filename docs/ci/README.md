@@ -21,8 +21,12 @@ Use a trusted Linux x86_64 machine with Linux pidfd support, Python 3.9+ for
 the runner, Docker Engine/Compose, a working browser sandbox, Node **22.23.4**, uv **0.12.19**, and Playwright's Linux OS dependencies.
 The runner installs the frozen application dependencies and browser binaries.
 Install OS packages separately on the intended test machine; the runner does not
-change system settings or install a Docker daemon. Stock Firefox stays pinned to
-155.0.1 and geckodriver to 0.37.1 with the original checksum verification.
+change system settings or install a Docker daemon. Both automatic browser lanes
+use Playwright's supported patched Firefox: exact `@playwright/test` **1.64.1**
+and the npm lockfile select Firefox **157.0**, revision **1555**. Install through
+Playwright; substituting a stock executable is unsupported. The separate pinned
+stock Firefox/geckodriver smoke is opt-in. See the [assertion inventory, measured
+baseline, browser update policy and compatibility command](../testing/2026-11-07-issue-117-evidence.md).
 
 Commit the reviewed candidate in a clean isolated checkout, then run:
 
@@ -47,8 +51,9 @@ to Firefox. Python retains its two
 isolated xdist workers. For individual issues, run the relevant tests directly.
 
 The full gate includes asset build, all Python and formatter tests,
-focused Firefox code blocks, Firefox renderer tests, pinned stock Firefox, Django
-deployment checks, Compose validation and a built-container Django check. A
+focused Firefox code blocks, Firefox renderer tests including all 32 synthetic
+viewport/scaling/font/child-CSS-zoom combinations, Django deployment checks,
+Compose validation and a built-container Django check. A
 missing tool or failed stage blocks success. There is no reduced-release or
 skip-tests mode. The runner creates only synthetic fixture data, uses a unique
 Compose project, and attempts cleanup of only that project's disposable volume
@@ -60,7 +65,8 @@ Inspect and stop those test processes before reusing a failed run's port; this
 runner is not an operating-system container or a process isolation boundary.
 
 Each stage has a log; `status.json` records progress/failure. Only a complete pass
-on the same clean commit creates `receipt.json`. Keep the receipt, logs,
+on the same clean commit creates `receipt.json`. Schema2 requires the consolidated
+gate set and rejects legacy stock-lane receipts. Keep the receipt, logs,
 screenshots and traces with the review record. A locally produced receipt is
 operator evidence, not a signed third-party attestation. Inspect actual screenshots
 for changed UI flows before merging; automated passes do not replace UI review.
