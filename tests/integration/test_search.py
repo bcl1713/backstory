@@ -129,6 +129,13 @@ def test_oversized_heading_search_payload_caps_title_without_rewriting_projectio
     page = s.search_notes('uniqueoversizedheadingneedle')
     assert len(page.items) == 1 and len(page.items[0].title) == 512
     assert IndexedNote.objects.get(generation__state='active', path='large-heading.md').title == title
-    response = reader.get('/search/', {'q': 'uniqueoversizedheadingneedle'})
-    assert response.status_code == 200 and len(response.content) < 10000
+    query = 'uniqueoversizedheadingneedle'
+    response = reader.get('/search/', {'q': query})
+    empty = reader.get('/search/', {'q': 'z' * len(query)})
+    assert response.status_code == empty.status_code == 200
+    assert not empty.context['page'].items
+    # Equal-length queries keep the shared shell/form cost out of this result
+    # budget. A single capped title, snippet and row must fit in one KiB.
+    assert 0 < len(response.content) - len(empty.content) < 1024
+    assert title[:512].encode() in response.content
     assert (wiki / 'large-heading.md').read_text() == source
