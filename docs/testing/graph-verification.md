@@ -18,14 +18,14 @@ npm run test:formatter
 BACKSTORY_BROWSER_RUNTIME=/tmp/graph-final-chromium-3 BACKSTORY_BROWSER_PORT=18765 npm run test:browser
 BACKSTORY_BROWSER_RUNTIME=/tmp/graph-final-firefox BACKSTORY_BROWSER_PORT=18766 npx playwright test --config=playwright.firefox.config.js
 python scripts/benchmark_graph.py --output /tmp/graph-benchmark-final.json
-python scripts/local_ci.py --base dev --head codex/issue-107 --report /tmp/graph-exact-tree-ci-reviewed
+TMPDIR=/home/oracle-worker/Work/issue-107-test-tmp python scripts/local_ci.py --base dev --head codex/issue-107 --report /home/oracle-worker/Work/issue-107-ci-reviewed
 ```
 
 Use the session's own rootless test daemon through its inherited
 `DOCKER_HOST=unix:///run/user/1002/docker.sock`. The default system daemon is not
 used. No socket permissions, security policy or service configuration were
 changed. The exact-tree runner writes its final source identity, per-gate logs
-and receipt outside the checkout at `/tmp/graph-exact-tree-ci-reviewed`; this keeps the
+and receipt outside the checkout at `/home/oracle-worker/Work/issue-107-ci-reviewed`; this keeps the
 tested commit immutable. Individual gates are not a substitute for that receipt.
 Release publication and actual-host WebMCP acceptance require separate deployment
 authorization. No deployment was requested or performed.
@@ -123,3 +123,11 @@ visual fixture passed in the complete run. Full log:
 `/tmp/graph-chromium-final-3.log`; corrected-case log:
 `/tmp/graph-chromium-fixes.log`. This is not a claim of one uninterrupted green
 catch-all run. The current repository CI gate uses the focused Firefox suites.
+
+A final receipt refresh under `/tmp/graph-exact-tree-ci-reviewed` hit this
+executor's per-user tmpfs quota during stock Firefox installation/startup,
+causing synthetic login to time out. Its failure logs are preserved. The
+receipt refresh uses the disk-backed report and TMPDIR paths shown above,
+without changing application code, browser options, socket permissions or
+production policy. Completed synthetic runtime copies and verified download
+archives were removed; screenshots, recordings, measurements and logs remain.
