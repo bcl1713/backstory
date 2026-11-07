@@ -8,6 +8,15 @@ a local test failure.
 
 ## Run the complete gate
 
+The automatic publisher owns this gate during ordinary releases. Development
+uses [focused checks](../development.md); do not routinely run the complete gate
+before merge and then repeat it through the publisher. Run it manually for
+manual release recovery or a specific integration risk that warrants it. Reuse
+a valid exact-commit receipt for subsequent manual publication attempts while
+the relevant inputs are unchanged. The publisher currently starts a new full
+gate for every automatic attempt; changing its retry/reuse behavior is separate
+work. See the [test review](../testing/2026-11-07-test-review.md).
+
 Use a trusted Linux x86_64 machine with Linux pidfd support, Python 3.9+ for
 the runner, Docker Engine/Compose, a working browser sandbox, Node **22.23.4**, uv **0.12.19**, and Playwright's Linux OS dependencies.
 The runner installs the frozen application dependencies and browser binaries.

@@ -45,15 +45,16 @@ For containers generate a **new** fixture with `--for-containers`; follow
 synthetic wiki directories/files, without changing ownership. It never repairs
 an existing fixture or live storage.
 
-Run correctness checks against disposable roots:
+Choose checks for the changed behavior and run them against disposable roots.
+The commands below are examples to select from, not a sequence to run in full:
 
 ```sh
-uv run pytest
-# Same parallel Python execution used in CI:
-uv run pytest -n 2 --dist loadfile --durations=20
-npm run test:formatter
+# Backend change: select the affected file(s) or test name.
+uv run pytest tests/integration/test_saves.py -k stale
+# JavaScript change: select the affected test file(s).
+node --test tests/formatter/source-merge.test.mjs
+# UI change: install the browser if absent, then select the relevant spec.
 npx playwright install chromium
-# Select browser coverage relevant to the change, for example:
 npm run test:browser -- tests/browser/wiki-tools.spec.js
 ```
 
@@ -74,10 +75,17 @@ Concurrent checkouts can isolate browser tests with both
 `BACKSTORY_BROWSER_PORT=8868`. Use a distinct disposable root and loopback port
 for each run; tests within a run still share one worker and synthetic wiki.
 
-Open ordinary PRs against `dev`. After review and complete local acceptance,
+Stop after the relevant checks pass. Reuse their results while source and relevant
+inputs remain unchanged; a commit, handoff, or publication request is not itself
+a reason to repeat them. See [project instructions](../AGENTS.md) for the testing
+checkpoint and [test review](testing/2026-11-07-test-review.md) for coverage and
+consolidation findings.
+
+Open ordinary PRs against `dev`. After review and focused local acceptance,
 merge; the local publisher on forge tests the resulting commit and automatically
 publishes its prerelease and `:dev` image. Promote through a `dev` → `main` merge
-PR for automatic stable publication after its own full gate. See
+PR for automatic stable publication after its own full gate. The publisher owns
+the full release gate; do not routinely duplicate it before merge. See
 [local releases](releases.md) for versioning and separate test/production stacks.
 
 Default production configuration is HTTPS with Secure cookies, HSTS and explicit

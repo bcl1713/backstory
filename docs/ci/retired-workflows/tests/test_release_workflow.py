@@ -6,7 +6,7 @@ import subprocess
 import pytest
 import yaml
 
-WORKFLOW = Path(__file__).resolve().parents[2] / 'docs/ci/retired-workflows/release.yml'
+WORKFLOW = Path(__file__).resolve().parents[4] / 'docs/ci/retired-workflows/release.yml'
 
 
 def run_step(tmp_path, name, *, api_status=0, state='draft', channel='stable',
