@@ -53,7 +53,8 @@ uv run pytest
 uv run pytest -n 2 --dist loadfile --durations=20
 npm run test:formatter
 npx playwright install chromium
-npm run test:browser
+# Select browser coverage relevant to the change, for example:
+npm run test:browser -- tests/browser/wiki-tools.spec.js
 ```
 
 Browser tests own `/tmp/backstory-release-one/browser-runtime`, bind only
@@ -62,11 +63,11 @@ Browser tests own `/tmp/backstory-release-one/browser-runtime`, bind only
 wiki. Python tests create and clean their own temporary roots. Formatter tests
 invoke the real packaged helper. There are no latency gates or benchmarks.
 
-The [local CI runner](ci/README.md) runs the full Chromium suite sequentially
-with a unique runtime directory, followed by the Firefox gates. Keep Playwright's
-worker count at one. The runner installs Chromium with `--only-shell` and retains
-failure traces/screenshots beside the local receipt. A single optional debugging
-shard (`npm run test:browser -- --shard=1/4`) is not a full acceptance gate.
+The [local CI runner](ci/README.md) runs focused Firefox browser suites with unique
+runtime directories and retains failure traces/screenshots beside the local
+receipt. The catch-all Chromium suite is no longer an automatic gate. Choose
+specific spec files for browser checks relevant to an issue, as above. Keep
+Playwright's worker count at one.
 
 Concurrent checkouts can isolate browser tests with both
 `BACKSTORY_BROWSER_RUNTIME=/tmp/backstory-my-task` and

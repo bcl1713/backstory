@@ -56,3 +56,15 @@ Interface: `application_identity() -> dict` returns only `name`, `build`, `versi
 - The sandbox-only formatter run exited without child diagnostics; the complete
   unrestricted run passed. Full exact-commit local CI follows this commit and its
   receipt is retained outside the source tree.
+
+## Requested CI follow-up
+
+Remove the automatic catch-all Chromium stage that expanded to 440 browser tests,
+including its browser installation and release receipt requirement. Keep the
+remaining required gates and document focused browser selection for individual
+issues. Verify the runner, receipt validation and publisher/release orchestration
+with their focused Python tests; do not rerun the retired browser suite.
+
+Follow-up validation: 114 focused runner, publisher, release, identity and status
+tests passed. The emitted automatic plan contains ten required gates and no
+Chromium install or catch-all browser command. The browser suite was not rerun.

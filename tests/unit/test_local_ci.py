@@ -1,4 +1,4 @@
-"""Local correctness keeps every gate and never grants itself publication."""
+"""Local correctness enforces required gates without the retired full-browser run."""
 import importlib.util
 import json
 import os
@@ -28,16 +28,16 @@ def test_browser_specs_do_not_share_fixed_runtime_or_artifact_paths():
         assert '/tmp/backstory-release-one' not in path.read_text(), str(path)
 
 
-def test_plan_keeps_all_browser_and_container_gates(tmp_path):
+def test_plan_uses_focused_browser_and_container_gates(tmp_path):
     plan = module().build_plan(tmp_path, 18765)
     assert [step['name'] for step in plan] == [
         'dependencies', 'build', 'python', 'formatter', 'browser-install',
-        'chromium', 'firefox-code', 'firefox-renderers', 'stock-firefox-install',
+        'firefox-code', 'firefox-renderers', 'stock-firefox-install',
         'stock-firefox', 'container']
     commands = '\n'.join(step['command'] for step in plan)
     for expected in ['uv sync --frozen', 'npm ci', 'npm run build',
                      'pytest -n 2 --dist loadfile', 'npm run test:formatter',
-                     'npm run test:browser', 'playwright.code.config.js',
+                     'playwright.code.config.js',
                      'playwright.firefox.config.js', 'selenium==4.52.0',
                      'stock_firefox.py', 'docker build', 'check --deploy --fail-level WARNING',
                      'run --pull never --rm web', 'down --volumes']:
@@ -45,8 +45,24 @@ def test_plan_keeps_all_browser_and_container_gates(tmp_path):
     assert 'docker push' not in commands
     assert 'gh release' not in commands
     assert '${{ ' not in commands
+    assert 'npm run test:browser' not in commands
+    assert next(step['command'] for step in plan if step['name'] == 'browser-install') == 'npx playwright install firefox'
     assert len({step['env']['BACKSTORY_BROWSER_RUNTIME'] for step in plan
-                if 'BACKSTORY_BROWSER_RUNTIME' in step['env']}) == 4
+                if 'BACKSTORY_BROWSER_RUNTIME' in step['env']}) == 3
+
+
+def test_receipt_accepts_required_gates_without_full_chromium_suite():
+    receipt = {'schema': 1, 'source_sha': 'a' * 40, 'source_tree': 'b' * 40,
+               'gates': dict.fromkeys([
+                   'dependencies', 'build', 'python', 'formatter', 'browser-install',
+                   'firefox-code', 'firefox-renderers', 'stock-firefox-install',
+                   'stock-firefox', 'container',
+               ], 'passed')}
+    m = module()
+    assert m.validate_receipt(receipt, 'a' * 40, 'b' * 40) is None
+    del receipt['gates']['container']
+    with pytest.raises(ValueError):
+        m.validate_receipt(receipt, 'a' * 40, 'b' * 40)
 
 
 def test_receipt_rejects_incomplete_failed_and_wrong_source(tmp_path):
