@@ -54,3 +54,23 @@ test('exhausted candidate-bounded pages can complete without certifying genuinel
   pages.accept(page(['b']), true);
   assert.equal(pages.complete, false);
 });
+
+test('non-advancing and cyclic continuations fail before changing accumulated evidence', () => {
+  const pages = new GraphPages();
+  pages.accept(page(['a'], [], 'two'));
+  assert.throws(() => pages.accept(page(['bad'], [], 'two'), true), /continuation_stalled/);
+  assert.deepEqual(pages.data.nodes.map(n => n.path), ['a']);
+  pages.accept(page([], [], 'three'), true);
+  assert.throws(() => pages.accept(page(['bad'], [], 'two'), true), /continuation_stalled/);
+  pages.clear(); pages.accept(page(['new'], [], 'two'));
+  assert.equal(pages.data.nodes.length, 1);
+});
+
+test('continuing empty pages have an explicit resource bound and keep the unconsumed cursor', () => {
+  const pages = new GraphPages({ maxPages: 2 });
+  pages.accept(page(['a'], [], 'two'));
+  pages.accept(page([], [], 'three'), true);
+  assert.equal(pages.accept(page([], [], 'four'), true), false);
+  assert.equal(pages.data.next_cursor, 'three'); assert.equal(pages.complete, false);
+  assert.equal(pages.limited, true);
+});

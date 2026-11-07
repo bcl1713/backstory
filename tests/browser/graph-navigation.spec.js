@@ -29,7 +29,7 @@ async function openGraph(page) {
   await page.locator('.cm-content').focus(); await page.keyboard.type('g/');
   await expect(panel(page)).toBeVisible();
   await expect(panel(page).getByRole('searchbox', { name: 'Graph search' })).toBeFocused();
-  await expect(panel(page).locator('[data-graph-summary]')).toContainText('3 notes');
+  await expect(panel(page).locator('[data-graph-summary]')).toContainText('4 notes');
 }
 async function viewOptions(page) { await panel(page).locator('[data-graph-map-options]').evaluate(el => { el.open = true; }); }
 
@@ -63,7 +63,7 @@ test('Insert text is preserved; Graph opens over a dirty draft and opening a not
 });
 test('list and tools share canonical edges; technical evidence starts behind disclosure', async ({ page }) => {
   await setup(page); await openGraph(page);
-  const evidence = await (await page.request.get('/tools/graph/?path=Graph%20A.md')).json();
+  const evidence = await (await page.request.get('/tools/graph/?path=Graph%20A.md&depth=2')).json();
   if (!await panel(page).locator('[data-graph-list]').isVisible()) await panel(page).getByRole('button', { name: 'Connection list', exact: true }).click();
   await expect(panel(page).locator('[data-graph-nodes] > li')).toHaveCount(evidence.nodes.length);
   await expect(panel(page).locator('[data-graph-edges] > li')).toHaveCount(evidence.edges.length);
@@ -80,7 +80,7 @@ test('reduced motion, phone graph-first layout and no-JavaScript evidence remain
   await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 390, height: 844 }); await revealChrome(page);
   await page.getByRole('link', { name: 'Graph', exact: true }).click();
-  await expect(panel(page).locator('[data-graph-summary]')).toContainText('3 notes');
+  await expect(panel(page).locator('[data-graph-summary]')).toContainText('4 notes');
   if (await map(page).getAttribute('data-renderer') === 'webgl') await expect(map(page)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const context = await browser.newContext({ javaScriptEnabled: false, storageState: { cookies: await page.context().cookies(), origins: [] } });
