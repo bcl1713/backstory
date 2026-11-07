@@ -263,7 +263,10 @@ file flow is separate from the JSON WebMCP note tools above.
 
 The three graph tools use the same bounded service as the UI. Results include
 canonical paths, directed occurrence counts, source revisions, advisory locations,
-freshness, relation/mutation epochs, projection completeness and limiting reasons.
+freshness, relation/mutation epochs, opaque `eligibility_version`, projection completeness and limiting reasons.
+The eligibility version changes with policy/storage/resolver identity. Retained clients
+must clear incompatible cached results, including details, on a version change or
+authorization/storage failure. Incremental source publication also invalidates old cursors.
 They are read-only and non-authoritative. Follow continuations even after empty
 pages; a 409 `graph_cursor_expired` response sets `restart: true`. Missing/isolated
 candidates require complete eligible evidence and never authorize repairs.

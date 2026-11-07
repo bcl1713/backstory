@@ -249,7 +249,8 @@ test('dirty navigation, logout and unload are guarded; keyboard Save and textare
   await login(page);
   await replace(page, '# Guarded draft\n');
   await revealChrome(page);
-  for (const selector of [page.getByRole('link', { name: 'Backstory', exact: true }), page.getByRole('button', { name: 'Sign out' })]) {
+  await page.locator('[data-settings-tools] > summary').click();
+  for (const selector of [page.getByRole('link', { name: 'Home', exact: true }), page.getByRole('button', { name: 'Sign out' })]) {
     page.once('dialog', dialog => dialog.dismiss());
     await selector.click();
     expect(await readSource(page)).toContain('# Guarded draft');

@@ -48,6 +48,7 @@ class PageMetadata:
     projection_complete: bool
     observed_at: str
     limits: dict
+    eligibility_version: str = ''
     limiting_reasons: tuple[str, ...] = ()
     next_cursor: str | None = None
     authoritative: bool = False

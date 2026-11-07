@@ -30,6 +30,8 @@ async function login(page) {
 }
 async function importTheme(page, source = dark, name = 'dracula.toml') {
   await revealChrome(page);
+  const settings = page.locator('[data-settings-tools]');
+  if (await settings.getAttribute('open') === null) await settings.locator(':scope > summary').click();
   await page.getByLabel('Import Alacritty theme').setInputFiles({ name, mimeType: 'application/toml', buffer: Buffer.from(source) });
 }
 const background = page => page.locator('body');
@@ -67,6 +69,7 @@ test('imports a palette, preserves draft, history and geometry, remembers it and
   await expect(page.locator('#source')).toHaveCSS('color', 'rgb(248, 248, 242)');
   await page.goto('/search/');
   await expect(background(page)).toHaveCSS('background-color', 'rgb(40, 42, 54)');
+  await page.locator('[data-settings-tools] > summary').click();
   await page.getByRole('button', { name: 'Restore Tokyo Night', exact: true }).click();
   await expect(background(page)).toHaveCSS('background-color', 'rgb(26, 27, 38)');
   await page.reload();

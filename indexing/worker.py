@@ -65,31 +65,80 @@ def _json_tree(value):
 
 
 def _commit_projection(snapshot, info, generations, token):
-    # A fresh hash immediately before commit rejects a stale bulk snapshot.
-    projection = project_note(snapshot)
-    if read_note(snapshot.path).revision != snapshot.revision or file_stat(snapshot.path) != info:
+    from .graph_projection import (dirty_dependents, namespace_keys, namespace_version,
+                                   record_mutation, replace_dependencies)
+    from .names import note_names
+    # Capture source identities before parsing/I/O, then compare under the writer
+    # lock. A stale projection cannot overwrite a later committed source.
+    expected = dict(IndexedNote.objects.filter(generation__in=generations, path=snapshot.path)
+                    .values_list('generation_id', 'revision'))
+    namespace = namespace_version()
+    needs_projection = any(expected.get(generation.pk) != snapshot.revision for generation in generations)
+    projection = project_note(snapshot) if needs_projection else None
+    if (read_note(snapshot.path).revision != snapshot.revision or file_stat(snapshot.path) != info
+            or namespace_version() != namespace):
         raise StorageError('index_revision_changed', 503)
     with transaction.atomic():
-        # Reserve SQLite write intent before update_or_create reads a snapshot.
         ScanState.objects.filter(pk=1).update(errors=F('errors'))
         for generation in generations:
-            note, _ = IndexedNote.objects.update_or_create(generation=generation, path=snapshot.path, defaults={
-                'revision': snapshot.revision, 'stat': info, 'title': projection.title,
-                'ids': list(projection.ids), 'aliases': list(projection.aliases), 'tags': list(projection.tags),
-                'projection': {'metadata': _json_tree(projection.typed_metadata),
-                               'diagnostics': [item.code for item in projection.diagnostics]},
-                'relations_complete': not projection.diagnostics,
-                'body': projection.body, 'seen': token,
-            })
-            from .names import note_names
-            IndexedName.objects.filter(note=note).delete()
-            IndexedName.objects.bulk_create([IndexedName(note=note, name=name, resolvable=resolvable) for name, resolvable in note_names(note.path, note.title, note.ids, note.aliases)])
-            LinkEdge.objects.filter(note=note).delete()
-            LinkEdge.objects.bulk_create([LinkEdge(note=note, target=edge.target, kind=edge.kind,
-                                                    fragment=edge.fragment, position=list(edge.position),
-                                                    occurrence_kind=edge.occurrence_kind,
-                                                    position_precision=edge.position_precision) for edge in projection.edges])
-            IndexGeneration.objects.filter(pk=generation.pk).update(mutation=F('mutation') + 1)
+            note = IndexedNote.objects.filter(generation=generation, path=snapshot.path).first()
+            if (note.revision if note else None) != expected.get(generation.pk):
+                raise StorageError('index_revision_changed', 503)
+            if note and note.revision == snapshot.revision:
+                # Verification and duplicate save notifications are graph no-ops.
+                IndexedNote.objects.filter(pk=note.pk).update(stat=info, seen=token)
+                continue
+            new_source = note is None
+            old_keys = namespace_keys(note) if note else set()
+            old_edges = list(LinkEdge.objects.filter(note=note).order_by('pk')) if note else []
+            old_names = note_names(note.path, note.title, note.ids, note.aliases) if note else []
+            was_complete = note.relations_complete if note else False
+            if note is None:
+                note = IndexedNote(generation=generation, path=snapshot.path)
+            note.revision, note.stat, note.seen = snapshot.revision, info, token
+            note.title, note.body = projection.title, projection.body
+            note.ids, note.aliases, note.tags = list(projection.ids), list(projection.aliases), list(projection.tags)
+            note.projection = {'metadata': _json_tree(projection.typed_metadata),
+                               'diagnostics': [item.code for item in projection.diagnostics]}
+            note.relations_complete = not projection.diagnostics
+            def signature(edge):
+                return edge.target, edge.kind, edge.fragment, edge.occurrence_kind
+            same_edges = ([signature(edge) for edge in old_edges] ==
+                          [signature(edge) for edge in projection.edges])
+            source_changed = not same_edges or was_complete != note.relations_complete
+            if source_changed:
+                note.relations_dirty = True
+                note.relation_after = note.relation_build_version = 0
+                note.relation_version += 1
+            note.save()
+            names = note_names(note.path, note.title, note.ids, note.aliases)
+            if names != old_names:
+                IndexedName.objects.filter(note=note).delete()
+                IndexedName.objects.bulk_create([IndexedName(note=note, name=name, resolvable=resolvable)
+                                                 for name, resolvable in names])
+            if same_edges:
+                refreshed = []
+                for edge, fresh in zip(old_edges, projection.edges):
+                    if edge.position != list(fresh.position) or edge.position_precision != fresh.position_precision:
+                        edge.position = list(fresh.position)
+                        edge.position_precision = fresh.position_precision
+                        refreshed.append(edge)
+                if refreshed:
+                    LinkEdge.objects.bulk_update(refreshed, ['position', 'position_precision'])
+            else:
+                LinkEdge.objects.filter(note=note).delete()
+                LinkEdge.objects.bulk_create([LinkEdge(note=note, target=edge.target, kind=edge.kind,
+                                                       fragment=edge.fragment, position=list(edge.position),
+                                                       occurrence_kind=edge.occurrence_kind,
+                                                       position_precision=edge.position_precision)
+                                              for edge in projection.edges])
+                replace_dependencies(note, projection.edges)
+            if new_source and same_edges:
+                replace_dependencies(note, projection.edges)
+            new_keys = namespace_keys(note)
+            if new_keys != old_keys:
+                dirty_dependents(generation, old_keys | new_keys)
+            record_mutation(generation)
             with connection.cursor() as cursor:
                 cursor.execute('DELETE FROM indexed_fts WHERE rowid = %s', [note.pk])
                 cursor.execute('INSERT INTO indexed_fts(rowid,path,title,body,generation) VALUES (%s,%s,%s,%s,%s)',
@@ -172,9 +221,18 @@ def _finish(state, generation, now):
         stale = IndexedNote.objects.filter(generation=generation).exclude(seen=state.checkpoint['token'])
         with connection.cursor() as cursor:
             cursor.execute('DELETE FROM indexed_fts WHERE rowid IN (SELECT id FROM indexing_indexednote WHERE generation_id=%s AND seen != %s)', [generation.pk, state.checkpoint['token']])
-        removed, _ = stale.delete()
+        from .graph_projection import dirty_dependents, namespace_keys, record_mutation
+        # Deletion invalidates absent-path and name lookups before their inputs
+        # disappear, in the same transaction as namespace publication.
+        removed = False
+        for note in stale.defer('body', 'projection', 'tags', 'stat').order_by('pk')[:BATCH_SIZE]:
+            dirty_dependents(generation, namespace_keys(note))
+            note.delete()
+            removed = True
         if removed:
-            IndexGeneration.objects.filter(pk=generation.pk).update(mutation=F('mutation') + 1)
+            record_mutation(generation)
+        if stale.exists():
+            return False
         if generation.state == 'building':
             IndexGeneration.objects.filter(state='active').update(state='retired')
             generation.state = 'active'
@@ -253,7 +311,7 @@ def _run(now, progress):
         if complete:
             cp['phase'] = 'validate'
             cp['after'] = 0
-    else:
+    elif cp['phase'] == 'validate':
         # Candidate promotion also revalidates revisions in bounded batches.
         notes = list(IndexedNote.objects.filter(generation=generation, seen=token, pk__gt=cp.get('after', 0)).order_by('pk')[:remaining])
         for note in notes:
@@ -265,6 +323,11 @@ def _run(now, progress):
             cp['after'] = note.pk
             processed += 1
         if len(notes) < remaining:
+            cp.update(phase='dependencies', after=0)
+    else:
+        from .graph_projection import verify_path_batch
+        cp['after'], complete = verify_path_batch(generation, cp.get('after', 0), remaining)
+        if complete:
             complete = _finish(state, generation, now)
             return BatchResult(processed + priority, priority, not complete or _pending(), 'ready' if complete else 'partial')
     state.checkpoint = cp

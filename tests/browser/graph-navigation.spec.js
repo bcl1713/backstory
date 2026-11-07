@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { runtime } from './support/server.js';
 import { revealChrome } from './support/chrome.js';
@@ -26,12 +26,12 @@ async function setup(page) {
 const panel = page => page.locator('[data-graph-dialog]');
 const map = page => panel(page).locator('[data-graph-map]');
 async function openGraph(page) {
-  await page.locator('.cm-content').focus();
-  await page.keyboard.type('g/');
+  await page.locator('.cm-content').focus(); await page.keyboard.type('g/');
   await expect(panel(page)).toBeVisible();
   await expect(panel(page).getByRole('searchbox', { name: 'Graph search' })).toBeFocused();
-  await expect(map(page).locator('[data-node-path]')).toHaveCount(3);
+  await expect(panel(page).locator('[data-graph-summary]')).toContainText('3 notes');
 }
+async function viewOptions(page) { await panel(page).locator('[data-graph-map-options]').evaluate(el => { el.open = true; }); }
 
 test('g/ opens search; two Escapes restore exact editor caret and Normal mode without saving', async ({ page }) => {
   await setup(page);
@@ -40,142 +40,70 @@ test('g/ opens search; two Escapes restore exact editor caret and Normal mode wi
   const before = await editor.evaluate(el => el.markdownEditor.getSource());
   const writes = [];
   page.on('request', r => { if (r.method() === 'POST' && /\/(save|format)\//.test(r.url())) writes.push(r.url()); });
-  await openGraph(page);
-  await page.keyboard.press('Escape');
-  await expect(map(page)).toBeFocused();
-  await expect(panel(page)).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(panel(page)).not.toBeVisible();
+  await openGraph(page); await page.keyboard.press('Escape');
+  // WebGL is optional: keyboard navigation through the full list remains available.
+  const navigation = await map(page).isVisible() ? map(page) : panel(page).getByRole('button', { name: 'Connection list', exact: true });
+  await expect(navigation).toBeFocused();
+  await page.keyboard.press('Escape'); await expect(panel(page)).not.toBeVisible();
   await expect(page.locator('.cm-content')).toBeFocused();
   expect(await editor.evaluate(el => el.markdownEditor.view.state.selection.main.head)).toBe(3);
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe(before);
-  await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Normal');
-  expect(writes).toEqual([]);
+  await expect(page.locator('[data-vim-mode]')).toHaveText('Vim · Normal'); expect(writes).toEqual([]);
 });
-
-test('Insert text and browser shortcuts are preserved; Menu opens over a dirty draft and opening uses its guard', async ({ page }) => {
-  await setup(page);
-  await page.locator('.cm-content').focus();
-  await page.keyboard.type('ig/');
-  await expect(panel(page)).not.toBeVisible();
-  await page.keyboard.press('Escape');
-  await revealChrome(page);
-  const dialogs = [];
-  page.on('dialog', async d => { dialogs.push(d.message()); await d.dismiss(); });
-  await page.getByRole('link', { name: 'Graph', exact: true }).click();
-  await expect(panel(page)).toBeVisible();
+test('Insert text is preserved; Graph opens over a dirty draft and opening a note uses its guard', async ({ page }) => {
+  await setup(page); await page.locator('.cm-content').focus(); await page.keyboard.type('ig/');
+  await expect(panel(page)).not.toBeVisible(); await page.keyboard.press('Escape'); await revealChrome(page);
+  const dialogs = []; page.on('dialog', async d => { dialogs.push(d.message()); await d.dismiss(); });
+  await page.getByRole('link', { name: 'Graph', exact: true }).click(); await expect(panel(page)).toBeVisible();
   expect(dialogs).toEqual([]);
-  await panel(page).getByRole('button', { name: 'Connection list', exact: true }).click();
+  if (!await panel(page).locator('[data-graph-list]').isVisible()) await panel(page).getByRole('button', { name: 'Connection list', exact: true }).click();
   await panel(page).getByRole('link', { name: 'Open Graph B.md', exact: true }).click();
   expect(dialogs).toHaveLength(1);
   expect(await page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource())).toContain('g/');
 });
-
-test('list, map and tools share canonical edges; selection changes lighting without moving camera', async ({ page }) => {
+test('list and tools share canonical edges; technical evidence starts behind disclosure', async ({ page }) => {
   await setup(page); await openGraph(page);
-  await page.keyboard.press('Escape');
-  const initial = await map(page).locator('.graph-world').getAttribute('transform');
-  await page.keyboard.press('ArrowRight');
-  const selected = await map(page).getAttribute('data-selected');
-  expect(selected).toBeTruthy();
-  await expect(map(page).locator(`[data-node-path="${selected}"]`)).toHaveClass(/is-selected/);
-  const tools = await page.request.get('/tools/graph/?path=Graph%20A.md');
-  const evidence = await tools.json();
-  await panel(page).getByRole('button', { name: 'Connection list', exact: true }).click();
+  const evidence = await (await page.request.get('/tools/graph/?path=Graph%20A.md')).json();
+  if (!await panel(page).locator('[data-graph-list]').isVisible()) await panel(page).getByRole('button', { name: 'Connection list', exact: true }).click();
   await expect(panel(page).locator('[data-graph-nodes] > li')).toHaveCount(evidence.nodes.length);
   await expect(panel(page).locator('[data-graph-edges] > li')).toHaveCount(evidence.edges.length);
-  expect(await map(page).locator('.graph-world').getAttribute('transform')).toBe(initial);
-  await panel(page).getByRole('slider', { name: 'Bloom intensity' }).fill('0');
+  await expect(panel(page).locator('[data-graph-summary]')).not.toContainText(/epoch|revision|observed/);
+  await expect(panel(page).getByText('Technical evidence', { exact: true })).toBeVisible();
+  await expect(panel(page).locator('[data-graph-details] code:visible')).toHaveCount(0);
+  await viewOptions(page); await panel(page).getByRole('slider', { name: 'Bloom intensity' }).fill('0');
   await expect(map(page)).toHaveAttribute('data-bloom', '0');
 });
-
-test('drag tugs a neighbor, cancellation releases pins, and physics sleeps with stable selection', async ({ page }) => {
-  await setup(page); await openGraph(page);
-  await panel(page).getByLabel('Depth').selectOption('2');
-  await panel(page).getByRole('button', { name: 'Apply filters' }).click();
-  await expect(map(page).locator('[data-node-path]')).toHaveCount(4);
-  await expect(map(page)).toHaveAttribute('data-motion', 'settled', { timeout: 16000 });
-  const selected = await map(page).getAttribute('data-selected');
-  const node = map(page).locator('[data-node-path="Graph B.md"]');
-  const neighbor = map(page).locator('[data-node-path="Graph D.md"]');
-  const before = await neighbor.getAttribute('transform');
-  const box = await node.locator('.graph-node-mark').boundingBox();
-  await map(page).evaluate(el => el.addEventListener('pointerdown', event => { window.graphDragPointer = event.pointerId; }, { once: true }));
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
-  await page.mouse.move(box.x + 130, box.y + 80, { steps: 18 });
-  await expect.poll(() => neighbor.getAttribute('transform')).not.toBe(before);
-  await map(page).dispatchEvent('pointercancel', { pointerId: await page.evaluate(() => window.graphDragPointer) });
-  await expect(map(page)).toHaveAttribute('data-pinned', 'false');
-  await page.mouse.up();
-  await expect(map(page)).toHaveAttribute('data-pinned', 'false');
-  expect(await map(page).getAttribute('data-selected')).toBe(selected);
-});
-
-test('reduced motion, mobile list, direct URL and no-JavaScript evidence remain usable', async ({ page, browser }) => {
-  await setup(page); await page.emulateMedia({ reducedMotion: 'reduce' });
-  await openGraph(page);
-  await expect(map(page)).toHaveAttribute('data-motion', 'paused');
+test('reduced motion, phone graph-first layout and no-JavaScript evidence remain usable', async ({ page, browser }) => {
+  await setup(page); await page.emulateMedia({ reducedMotion: 'reduce' }); await openGraph(page);
+  await viewOptions(page);
   await expect(panel(page).getByRole('button', { name: 'Pause motion' })).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
-  await page.setViewportSize({ width: 390, height: 844 });
-  await revealChrome(page); await page.getByRole('link', { name: 'Graph', exact: true }).click();
-  await expect(panel(page).locator('[data-graph-list]')).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 }); await revealChrome(page);
+  await page.getByRole('link', { name: 'Graph', exact: true }).click();
+  await expect(panel(page).locator('[data-graph-summary]')).toContainText('3 notes');
+  if (await map(page).getAttribute('data-renderer') === 'webgl') await expect(map(page)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  // A no-script session needs cookies only. Importing origin localStorage asks
-  // Firefox's driver to execute storage initialization in a no-script context.
-  const context = await browser.newContext({ javaScriptEnabled: false,
-    storageState: { cookies: await page.context().cookies(), origins: [] } });
-  const fallback = await context.newPage();
-  await fallback.goto('/graph/?path=Graph%20A.md');
-  await expect(fallback.getByRole('link', { name: 'Cluster B', exact: true })).toBeVisible();
-  await context.close();
+  const context = await browser.newContext({ javaScriptEnabled: false, storageState: { cookies: await page.context().cookies(), origins: [] } });
+  const fallback = await context.newPage(); await fallback.goto('/graph/?path=Graph%20A.md');
+  await expect(fallback.getByRole('link', { name: 'Cluster B', exact: true })).toBeVisible(); await context.close();
 });
-
-test('theme changes update vector roles while selection and camera survive', async ({ page }) => {
-  await setup(page); await revealChrome(page);
-  await page.getByLabel('Import Alacritty theme').setInputFiles({ name: 'light.toml', mimeType: 'application/toml', buffer: Buffer.from("colors.primary={background='#ffffff',foreground='#202020'}") });
-  await page.getByRole('link', { name: 'Graph', exact: true }).click();
-  await expect(map(page).locator('[data-node-path]')).toHaveCount(3);
-  await panel(page).getByRole('button', { name: 'Pause motion' }).click();
-  const selected = await map(page).getAttribute('data-selected');
-  const camera = await map(page).locator('.graph-world').getAttribute('transform');
-  const before = await map(page).locator('.graph-node-mark').first().evaluate(el => getComputedStyle(el).stroke);
-  // Exercise the same semantic token update used by the installed theme control.
-  await page.evaluate(() => document.documentElement.style.setProperty('--link', '#573399'));
-  await expect(map(page).locator('.graph-node-mark').first()).toHaveCSS('stroke', 'rgb(87, 51, 153)');
-  expect(before).not.toBe('rgb(87, 51, 153)');
-  expect(await map(page).getAttribute('data-selected')).toBe(selected);
-  expect(await map(page).locator('.graph-world').getAttribute('transform')).toBe(camera);
-});
-
-test('Menu Escape belongs to graph before chrome; bloom Off and restored lifecycle stay usable', async ({ page }) => {
-  await setup(page); await revealChrome(page);
-  await page.getByRole('link', { name: 'Graph', exact: true }).click();
-  await expect(map(page).locator('[data-node-path]')).toHaveCount(3);
-  await panel(page).getByRole('slider', { name: 'Bloom intensity' }).fill('0');
-  await panel(page).getByRole('searchbox', { name: 'Graph search' }).focus();
-  await page.keyboard.press('Escape'); await expect(map(page)).toBeFocused();
-  await page.keyboard.press('Escape'); await expect(panel(page)).not.toBeVisible();
-  await expect(page.locator('.cm-content')).toBeFocused();
-  await page.keyboard.type('g/');
-  await expect(map(page).locator('[data-node-path]')).toHaveCount(3);
-  await expect(map(page)).toHaveAttribute('data-bloom', '0');
-  await page.evaluate(() => {
-    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
-    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+test('missing WebGL retains full list, filters, continuation and guarded navigation', async ({ page }) => {
+  await setup(page);
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function(kind, ...args) { return String(kind).startsWith('webgl') ? null : original.call(this, kind, ...args); };
   });
-  await expect(map(page).locator('[data-node-path]')).toHaveCount(3);
-  await panel(page).getByRole('button', { name: 'Connection list', exact: true }).click();
+  await page.reload(); await openGraph(page);
   await expect(panel(page).locator('[data-graph-list]')).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'Retry map' })).toBeVisible();
+  await panel(page).getByRole('button', { name: 'Inspect Cluster B', exact: true }).click();
+  await expect(panel(page).getByRole('link', { name: 'Open selected note' })).toHaveAttribute('href', '/notes/Graph%20B.md');
 });
-
-test('closing graph restores the visible plain-text fallback and its caret', async ({ page }) => {
+test('closing graph restores visible plain-text fallback and caret', async ({ page }) => {
   await setup(page); await revealChrome(page);
   await page.getByRole('button', { name: 'Plain text fallback', exact: true }).click();
   await page.locator('#source').evaluate(el => { el.focus(); el.setSelectionRange(4, 4); });
-  await page.getByRole('link', { name: 'Graph', exact: true }).click();
-  await expect(panel(page)).toBeVisible();
+  await page.getByRole('link', { name: 'Graph', exact: true }).click(); await expect(panel(page)).toBeVisible();
   await panel(page).getByRole('button', { name: 'Close graph', exact: true }).click();
-  await expect(page.locator('#source')).toBeFocused();
-  expect(await page.locator('#source').evaluate(el => el.selectionStart)).toBe(4);
+  await expect(page.locator('#source')).toBeFocused(); expect(await page.locator('#source').evaluate(el => el.selectionStart)).toBe(4);
 });

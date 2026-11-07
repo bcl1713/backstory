@@ -171,3 +171,81 @@ def test_denied_references_never_become_missing_diagnostics(wiki, settings):
     page = graph.query_link_issues(issue='missing')
     assert not page.items
     assert 'private/' not in str(graph.query_links('a.md', 'outgoing'))
+
+
+def test_one_hop_pages_progress_past_candidate_window_and_keep_neighbor_edges(wiki):
+    files = {f'n{i:03}.md': '# Neighbor' for i in range(310)}
+    files['hub.md'] = '\n'.join(f'[[n{i:03}]]' for i in range(310))
+    files['n309.md'] = '[[n308]]'
+    graph = build_graph(wiki, files)
+    cursor = None
+    observed = set()
+    for _ in range(20):
+        page = graph.query_graph('hub.md', node_limit=80, cursor=cursor)
+        assert page.limits['examined'] <= 300
+        assert len(page.nodes) <= 80
+        observed.update((edge.source, edge.destination) for edge in page.edges)
+        cursor = page.next_cursor
+        if not cursor:
+            break
+    assert cursor is None
+    assert {('hub.md', f'n{i:03}.md') for i in range(310)} <= observed
+    assert ('n309.md', 'n308.md') in observed
+
+
+def test_one_hop_filter_keeps_matching_neighbors_when_center_is_filtered_out(wiki):
+    graph = build_graph(wiki, {'root.md': '[[subdir/a]]', 'subdir/a.md': '# A'})
+    page = graph.query_graph('root.md', folder='subdir')
+    assert [node.path for node in page.nodes] == ['subdir/a.md']
+    assert page.boundary_connections
+
+
+def test_eligibility_version_revokes_client_evidence_before_policy_rebuild(wiki, settings):
+    graph = build_graph(wiki, {'a.md': '[[b]]', 'b.md': '# B'})
+    first = graph.query_links('a.md', 'outgoing')
+    settings.BACKSTORY_EXCLUSIONS = ['b.md']
+    denied = graph.query_links('a.md', 'outgoing')
+    assert first.eligibility_version and denied.eligibility_version != first.eligibility_version
+    assert not denied.items
+
+
+def test_dirty_raw_window_keeps_continuation_to_later_completed_local_edges(wiki):
+    graph = build_graph(wiki, {'a.md': '\n'.join('[[Missing]]' for _ in range(305)),
+                               'hub.md': '[[a]] [[b]]', 'b.md': '# B'})
+    from indexing import worker
+    from indexing.queue import enqueue_note
+    from wiki.storage import read_note
+    # Replacing the hub's edge sequence puts its clean occurrences after the
+    # dirty neighbor window regardless of filesystem discovery order.
+    (wiki / 'hub.md').write_text('[[a]] [[b]] [[#Heading]]')
+    enqueue_note('hub.md', read_note('hub.md').revision)
+    from tests.integration.test_indexing import drain
+    drain(worker)
+    (wiki / 'Missing.md').write_text('# Found')
+    enqueue_note('Missing.md', read_note('Missing.md').revision)
+    assert worker.run_batch().pending
+    cursor = None
+    observed = set()
+    for _ in range(6):
+        page = graph.query_graph('hub.md', cursor=cursor)
+        observed.update((edge.source, edge.destination) for edge in page.edges)
+        cursor = page.next_cursor
+        if not cursor:
+            break
+    assert {('hub.md', 'a.md'), ('hub.md', 'b.md')} <= observed
+
+
+def test_cursor_restarts_on_individual_source_publication_before_global_completion(wiki):
+    graph = build_graph(wiki, {'a.md': '\n'.join('[[Missing]]' for _ in range(21)),
+                               'b.md': '\n'.join('[[Missing]]' for _ in range(21))})
+    from indexing import worker
+    from indexing.queue import enqueue_note
+    from wiki.storage import read_note
+    (wiki / 'Missing.md').write_text('# Found')
+    enqueue_note('Missing.md', read_note('Missing.md').revision)
+    assert worker.run_batch().pending
+    first = graph.query_graph(node_limit=1)
+    assert first.next_cursor and not first.projection_complete
+    assert worker.run_batch().pending
+    with pytest.raises(StorageError, match='graph_cursor_expired'):
+        graph.query_graph(node_limit=1, cursor=first.next_cursor)

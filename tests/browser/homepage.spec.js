@@ -31,7 +31,7 @@ test('home preserves note identity across refresh, tree, Back and deep links', a
   await page.goto('/notes/Other.md#Details');
   await expect.poll(() => page.locator('#note-path').textContent()).toBe('"Other.md"');
   await revealChrome(page);
-  await page.getByRole('link', { name: 'Backstory', exact: true }).click();
+  await page.getByRole('link', { name: 'Home', exact: true }).click();
   await expect(page).toHaveURL('/');
   await expect.poll(() => page.locator('#note-path').textContent()).toBe('"index.md"');
   const preview = await page.request.get('/preview/index.md');
