@@ -85,7 +85,10 @@ def _commit_projection(snapshot, info, generations, token):
             IndexedName.objects.bulk_create([IndexedName(note=note, name=name, resolvable=resolvable) for name, resolvable in note_names(note.path, note.title, note.ids, note.aliases)])
             LinkEdge.objects.filter(note=note).delete()
             LinkEdge.objects.bulk_create([LinkEdge(note=note, target=edge.target, kind=edge.kind,
-                                                    fragment=edge.fragment, position=list(edge.position)) for edge in projection.edges])
+                                                    fragment=edge.fragment, position=list(edge.position),
+                                                    occurrence_kind=edge.occurrence_kind,
+                                                    position_precision=edge.position_precision) for edge in projection.edges])
+            IndexGeneration.objects.filter(pk=generation.pk).update(mutation=F('mutation') + 1)
             with connection.cursor() as cursor:
                 cursor.execute('DELETE FROM indexed_fts WHERE rowid = %s', [note.pk])
                 cursor.execute('INSERT INTO indexed_fts(rowid,path,title,body,generation) VALUES (%s,%s,%s,%s,%s)',
@@ -168,7 +171,9 @@ def _finish(state, generation, now):
         stale = IndexedNote.objects.filter(generation=generation).exclude(seen=state.checkpoint['token'])
         with connection.cursor() as cursor:
             cursor.execute('DELETE FROM indexed_fts WHERE rowid IN (SELECT id FROM indexing_indexednote WHERE generation_id=%s AND seen != %s)', [generation.pk, state.checkpoint['token']])
-        stale.delete()
+        removed, _ = stale.delete()
+        if removed:
+            IndexGeneration.objects.filter(pk=generation.pk).update(mutation=F('mutation') + 1)
         if generation.state == 'building':
             IndexGeneration.objects.filter(state='active').update(state='retired')
             generation.state = 'active'
@@ -275,7 +280,16 @@ def run_batch(now=None):
             return BatchResult(pending=True, state='leased')
         progress = [0]
         try:
-            return _run(now, progress)
+            from .graph_projection import run_relation_batch
+            relation_pending = run_relation_batch()
+            if relation_pending is not None:
+                return BatchResult(pending=relation_pending, state='relations' if relation_pending else 'ready')
+            result = _run(now, progress)
+            if not result.pending and result.state == 'ready':
+                relation_pending = run_relation_batch()
+                if relation_pending:
+                    return BatchResult(result.processed, result.priority, True, 'relations')
+            return result
         except (StorageError, OSError, OperationalError) as error:
             record_failure("worker", error)
             try:

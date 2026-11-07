@@ -74,6 +74,12 @@ class LinkResult:
 
 
 @dataclass(frozen=True)
+class RelationResult(LinkResult):
+    canonical_path: str | None = None
+    resource_type: str = 'unknown'
+
+
+@dataclass(frozen=True)
 class Diagnostic:
     code: str
     message: str

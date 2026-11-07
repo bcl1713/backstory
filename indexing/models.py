@@ -5,6 +5,7 @@ from django.db import models
 class IndexGeneration(models.Model):
     state = models.CharField(max_length=16, default='building', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    mutation = models.PositiveBigIntegerField(default=0)
 
 
 class IndexedNote(models.Model):
@@ -31,6 +32,32 @@ class LinkEdge(models.Model):
     kind = models.CharField(max_length=16)
     fragment = models.TextField(default='')
     position = models.JSONField(default=list)
+    occurrence_kind = models.CharField(max_length=16, default='link')
+    position_precision = models.CharField(max_length=16, default='advisory')
+
+
+class RelationState(models.Model):
+    generation = models.OneToOneField(IndexGeneration, on_delete=models.CASCADE)
+    mutation = models.PositiveBigIntegerField(default=0)
+    epoch = models.PositiveBigIntegerField(default=0)
+    namespace = models.CharField(max_length=64, default='')
+    after = models.PositiveBigIntegerField(default=0)
+    complete = models.BooleanField(default=False)
+    evidence_complete = models.BooleanField(default=False)
+
+
+class ResolvedRelation(models.Model):
+    occurrence = models.OneToOneField(LinkEdge, on_delete=models.CASCADE)
+    generation = models.ForeignKey(IndexGeneration, on_delete=models.CASCADE)
+    epoch = models.PositiveBigIntegerField()
+    destination = models.TextField(default='')
+    state = models.CharField(max_length=16)
+    resource_type = models.CharField(max_length=16, default='unknown')
+    choices = models.JSONField(default=list)
+
+    class Meta:
+        indexes = [models.Index(fields=['generation', 'epoch', 'destination'], name='relation_inverse'),
+                   models.Index(fields=['generation', 'epoch', 'state'], name='relation_issues')]
 
 
 class IndexJob(models.Model):

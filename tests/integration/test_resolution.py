@@ -6,6 +6,26 @@ from wiki.links import resolve_link
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
+def test_structured_relation_uses_same_canonical_resolution_as_navigation(wiki):
+    from wiki import links
+    build(wiki, {'folder/source.md': '# Source', 'space café%.md': '# Target',
+                 'deep/named.md': '---\naliases: [Friendly]\n---\n# Named',
+                 'picture.png': 'inert synthetic asset'})
+    resolver = getattr(links, 'resolve_relation', None)
+    assert resolver is not None, 'shared structured resolver is missing'
+    cases = [('Friendly', 'wiki', 'deep/named.md', 'note'),
+             ('/space café%.md#Part', 'wiki', 'space café%.md', 'note'),
+             ('../space%20caf%C3%A9%25.md', 'markdown', 'space café%.md', 'note'),
+             ('#Heading', 'wiki', 'folder/source.md', 'self'),
+             ('../picture.png', 'markdown', 'picture.png', 'asset')]
+    for target, kind, canonical, classification in cases:
+        relation = resolver('folder/source.md', target, kind)
+        assert relation.canonical_path == canonical
+        assert relation.resource_type == classification
+        assert relation.href == links.resolve_link('folder/source.md', target, kind).href
+    assert resolver('folder/source.md', 'https://example.invalid/x', 'markdown').resource_type == 'external'
+
+
 def build(wiki, files):
     from indexing import worker
     for path, source in files.items():

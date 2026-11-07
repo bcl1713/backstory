@@ -13,7 +13,7 @@ from urllib.parse import quote, unquote_to_bytes, urlencode, urlsplit
 
 from django.urls import reverse
 
-from .contracts import LinkResult, StorageError
+from .contracts import LinkResult, RelationResult, StorageError
 from .policy import validate_path
 from .storage import open_directory, require_ready
 
@@ -58,8 +58,13 @@ def _regular(path):
     return _entry_kind(path) == "file"
 
 
-def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"]) -> LinkResult:
-    unavailable = LinkResult("unavailable", None, "Unavailable link")
+def resolve_relation(source_path: str, target: str, kind: Literal["markdown", "wiki"]) -> RelationResult:
+    """Canonical resolution shared by rendering and the rebuildable graph.
+
+    Locations are paths, never decoded from rendered URLs. Fragments remain
+    unchecked heading hints; exact files take precedence over indexed names.
+    """
+    unavailable = RelationResult("unavailable", None, "Unavailable link")
     try:
         validate_path(source_path, "content")
         if kind not in {"markdown", "wiki"} or not isinstance(target, str) or len(target) > 4096:
@@ -77,16 +82,16 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
                 if parsed.scheme.lower() not in {"http", "https", "mailto", ""}:
                     return unavailable
                 href = "https:" + raw if not parsed.scheme else raw
-                return LinkResult("external", href, label)
+                return RelationResult("external", href, label, resource_type='external')
             if parsed.query:
                 return unavailable
             path, fragment = _decoded(parsed.path), _decoded(parsed.fragment)
         suffix = "#" + quote("preview-" + heading_slug(fragment), safe="-_") if fragment else ""
         if not path:
-            return LinkResult("resolved", suffix or "#", label)
+            return RelationResult("resolved", suffix or "#", label, canonical_path=source_path, resource_type='self')
         rooted = kind == "wiki" and path.startswith("/") and not path.startswith("//")
         if path.startswith("/") and not rooted:
-            return LinkResult("missing", None, label)
+            return RelationResult("missing", None, label)
         if rooted:
             path = path[1:]
         relative = posixpath.normpath(posixpath.join(posixpath.dirname(source_path), path))
@@ -122,7 +127,8 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
                     create_paths.append(candidate)
                 if entry_kind == "file":
                     route = "wiki:note" if candidate.lower().endswith(".md") else "wiki:attachment"
-                    return LinkResult("resolved", reverse(route, args=[candidate]) + suffix, label)
+                    resource = 'self' if candidate == source_path else 'note' if candidate.lower().endswith('.md') else 'asset'
+                    return RelationResult("resolved", reverse(route, args=[candidate]) + suffix, label, canonical_path=candidate, resource_type=resource)
         if kind == 'wiki':
             from indexing.search import resolve_indexed_name
             from django.db import OperationalError
@@ -131,23 +137,31 @@ def resolve_link(source_path: str, target: str, kind: Literal["markdown", "wiki"
             except OperationalError:
                 return unavailable
             if state == 'unconfirmed':
-                return LinkResult('missing', None, label)
+                return RelationResult('unconfirmed', None, label)
             # A leading slash selects a path in the wiki root, never a global alias.
             if rooted and state != 'unavailable':
                 state, paths = 'missing', ()
             if state == 'resolved':
-                return LinkResult(state, reverse('wiki:note', args=[paths[0]]) + suffix, label)
+                return RelationResult(state, reverse('wiki:note', args=[paths[0]]) + suffix, label,
+                                      canonical_path=paths[0], resource_type='self' if paths[0] == source_path else 'note')
             action = reverse('wiki:linked-new') + '?' + urlencode({'source': source_path, 'target': target})
             if state == 'ambiguous':
-                return LinkResult(state, None, label, action_href=action, choices=paths)
+                return RelationResult(state, None, label, action_href=action, choices=paths)
             parsed = urlsplit(path)
             note_target = not parsed.scheme and not parsed.netloc and posixpath.splitext(path)[1].lower() in {'', '.md'}
             if state == 'missing' and create_paths and not blocked_creation and note_target:
-                return LinkResult(state, None, label, action_href=action, create_path=create_paths[0])
-            return LinkResult(state, None, label)
-        return LinkResult("missing", None, label)
+                return RelationResult(state, None, label, action_href=action, create_path=create_paths[0])
+            return RelationResult(state, None, label)
+        return RelationResult("missing", None, label)
     except (StorageError, OSError, ValueError, UnicodeError):
         return unavailable
+
+
+def resolve_link(source_path: str, target: str, kind: Literal['markdown', 'wiki']) -> LinkResult:
+    """Preserve navigation's public result and missing-link creation behavior."""
+    result = resolve_relation(source_path, target, kind)
+    return LinkResult('missing' if result.state == 'unconfirmed' else result.state,
+                      result.href, result.label, result.action_href, result.create_path, result.choices)
 
 
 from dataclasses import dataclass
@@ -159,6 +173,8 @@ class LinkEdge:
     kind: str
     fragment: str
     position: tuple[int, int]
+    occurrence_kind: str = 'link'
+    position_precision: str = 'advisory'
 
 
 class LinkStructureLimit(ValueError):
@@ -194,7 +210,8 @@ def extract_links(source: str) -> list[LinkEdge]:
                 path, _, fragment = target.partition('#')
                 # Column is advisory for normalized/reference Markdown tokens.
                 column = max(1, content.find(target) + 1)
-                edges.append(LinkEdge(path, kind, fragment, (current, column)))
+                edges.append(LinkEdge(path, kind, fragment, (current, column),
+                                      'image' if token.type == 'image' else 'link'))
             if token.children:
                 walk(token.children, current, token.content)
     walk(tokens)
