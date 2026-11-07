@@ -22,10 +22,16 @@ test('Zen starts with chrome hidden and accessible toggle/shortcut return focus 
   await expect(page.getByRole('navigation', { name: 'Main', exact: true })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Raw source', exact: true })).toBeHidden();
   await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
+  await expect(page.locator('.persistent-actions button')).toHaveText(['Menu', 'Save', 'Upload image']);
+  await expect(page.getByRole('button', { name: 'Format', exact: true })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Vim bindings', exact: true })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Complete link', exact: true })).toHaveCount(0);
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('link', { name: 'Search', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Raw source', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Format', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Vim bindings', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('.cm-content')).toBeFocused();
@@ -39,6 +45,7 @@ test('Zen starts with chrome hidden and accessible toggle/shortcut return focus 
 for (const width of [1440, 390]) test(`Zen keeps the shared font grid and fits the viewport at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 });
   await open(page);
+  await expect(page.locator('.persistent-actions button')).toHaveText(['Menu', 'Save', 'Upload image']);
   await page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.view.dispatch({ selection: { anchor: el.markdownEditor.view.state.doc.length } }));
   const headings = page.locator('.lp-heading');
   await expect(headings).toHaveCount(2);
@@ -70,7 +77,7 @@ for (const width of [1440, 390]) test(`Zen keeps the shared font grid and fits t
   expect(metrics.foreground).toBe('rgb(192, 202, 245)');
   if (width === 1440) expect(Math.abs(metrics.contentWidth - metrics.eighty)).toBeLessThan(2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: `/tmp/backstory-release-one/reports/zen-${width}.png`, fullPage: true });
+  await page.screenshot({ path: `${runtime}/reports/zen-${width}.png`, fullPage: true });
   await page.getByRole('button', { name: 'Navigation and controls', exact: true }).click();
   await page.getByRole('button', { name: 'Raw source', exact: true }).click();
   expect(await read(page)).toBe(source);
@@ -79,6 +86,7 @@ for (const width of [1440, 390]) test(`Zen keeps the shared font grid and fits t
 
 test('Zen retains visible save conflict, failure diagnostics and recovery actions', async ({ page }) => {
   await open(page);
+  await expect(page.locator('.persistent-actions button')).toHaveText(['Menu', 'Save', 'Upload image']);
   await page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.setSource('# Unsaved Zen draft\n'));
   await writeFile(`${runtime}/wiki/Zen.md`, '# External edit\n');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -86,5 +94,5 @@ test('Zen retains visible save conflict, failure diagnostics and recovery action
   await expect(page.locator('[data-editor-status]')).toContainText('Revision conflict');
   expect(await read(page)).toBe('# Unsaved Zen draft\n');
   await expect(page.getByRole('button', { name: 'Navigation and controls', exact: true })).toHaveAttribute('aria-expanded', 'false');
-  await page.screenshot({ path: '/tmp/backstory-release-one/reports/zen-conflict.png', fullPage: true });
+  await page.screenshot({ path: `${runtime}/reports/zen-conflict.png`, fullPage: true });
 });

@@ -27,3 +27,28 @@ def test_projection_failure_keeps_body_and_title_available(yaml, code):
     assert note.title == 'Available' and note.body.endswith('[[Target]]')
     assert note.diagnostics[0].code == code
     assert note.edges[0].target == 'Target'
+
+
+@pytest.mark.parametrize('exception,reason', [(ValueError, 'projection_parse_failed'), (RecursionError, 'projection_recursion_limit')])
+@pytest.mark.parametrize('phase', ['title', 'links'])
+def test_projection_retains_safe_failure_phase_without_exception_text(monkeypatch, exception, reason, phase):
+    from wiki import links, markdown
+    source = '# Heading\n' if phase == 'title' else '---\ntitle: Named\n---\nBody\n'
+    def fail(*args, **kwargs):
+        raise exception('SECRET /server/path raw content')
+    if phase == 'title':
+        monkeypatch.setattr(markdown, '_parser', fail)
+    else:
+        monkeypatch.setattr(links, 'extract_links', fail)
+    note = metadata.project_note(snapshot(source))
+    assert note.projection_failure.phase == phase
+    assert note.projection_failure.reason == reason
+    assert note.diagnostics[-1].code == 'projection_parse_failed'
+    assert 'SECRET' not in repr(note.projection_failure)
+
+
+def test_real_link_structure_limit_retains_safe_category():
+    # The real token budget, not an exception-string imitation.
+    note = metadata.project_note(snapshot('---\ntitle: Many links\n---\n' + '[x](target) ' * 26000))
+    assert note.projection_failure.phase == 'links'
+    assert note.projection_failure.reason == 'link_structure_limit'

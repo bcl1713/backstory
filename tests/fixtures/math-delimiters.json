@@ -1,0 +1,128 @@
+[
+  {
+    "source": "Before\n\nInline \\(a_1 + \\frac{b}{c}\\) after.",
+    "math": [
+      {
+        "expression": "a_1 + \\frac{b}{c}",
+        "display": false
+      }
+    ]
+  },
+  {
+    "source": "Before\n\n\\[x^2 + y^2\\]\n\n$$\n\\begin{matrix}a&b\\\\c&d\\end{matrix}\n$$\n\n\\[\nx+1\n\\]",
+    "math": [
+      {
+        "expression": "x^2 + y^2",
+        "display": true
+      },
+      {
+        "expression": "\\begin{matrix}a&b\\\\c&d\\end{matrix}",
+        "display": true
+      },
+      {
+        "expression": "x+1",
+        "display": true
+      }
+    ]
+  },
+  {
+    "source": "$5 and $10; $x$ stays currency. \\\\(escaped\\) and \\(incomplete\n\\(new\nline\\)",
+    "math": []
+  },
+  {
+    "source": "---\nmath: \\(yaml\\)\n---\n\n`\\(code\\)`\n\n```tex\n\\[x\\]\n```\n\n    \\(indent\\)\n\n[label \\(not math\\)](target)\n\n![\\(alt\\)](image.png)\n\n[reference]: target/\\(url\\)\n\n| Cell |\n| --- |\n| \\(table\\) |",
+    "math": []
+  },
+  {
+    "source": "Before\n\n- Item \\(list\\)\n\n> Quote \\(quote\\)\n\n$$x+1$$",
+    "math": [
+      {
+        "expression": "list",
+        "display": false
+      },
+      {
+        "expression": "quote",
+        "display": false
+      },
+      {
+        "expression": "x+1",
+        "display": true
+      }
+    ]
+  },
+  {
+    "source": "Before\n\n$$\nincomplete\n\n\\[\nno close\n\n\\[ \nblank\n\nline\n\\]",
+    "math": []
+  },
+  {
+    "source": "Before\r\n\r\n\\[\r\nx+1\r\n\\]\r\n\r\n\\(a \\\\) b\\)",
+    "math": [
+      {
+        "expression": "x+1",
+        "display": true
+      },
+      {
+        "expression": "a \\\\) b",
+        "display": false
+      }
+    ]
+  },
+  {
+    "source": "Before\n\n\\[x\\\\]\n\n$$x\\$$\n\n\\[x\\] suffix\\]\n\n$$x$$ suffix$$",
+    "math": []
+  },
+  {
+    "source": "Before\n\n$$\n# heading\n$$",
+    "math": []
+  },
+  {
+    "source": "Before\n\n$$\n---\n$$",
+    "math": []
+  },
+  {
+    "source": "Before\n\n$$\n1. item\n$$",
+    "math": []
+  },
+  {
+    "source": "Before\n\n$$\nx\n---\n$$",
+    "math": []
+  },
+  {
+    "source": "Before\n\n$$\n<div>\n$$",
+    "math": []
+  },
+  {
+    "source": "Before\n\n$$\n    x\n$$",
+    "math": [
+      {
+        "expression": "x",
+        "display": true
+      }
+    ]
+  },
+  {
+    "source": "Before\n\n<div>\\(block\\)</div>\n\n<span title=\"\\(attribute\\)\">visible</span>\n\n<div>\n\\(block line\\)\n</div>",
+    "math": []
+  },
+  {
+    "source": "Before\n\n> \\[x\\]\n\n- $$x$$\n\n  \\[x\\]\n\n\\[x\\]  ",
+    "math": []
+  },
+  {
+    "source": "Before\n\n\\[x_1 + \\frac{a}{b}\\]\n\n\\(a \\\\) b\\)\n\n$$\nx\n    y\n$$",
+    "math": [
+      {
+        "expression": "x_1 + \\frac{a}{b}",
+        "display": true
+      },
+      {
+        "expression": "a \\\\) b",
+        "display": false
+      },
+      {
+        "expression": "x\n    y",
+        "display": true
+      }
+    ]
+  }
+]

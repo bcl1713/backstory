@@ -21,6 +21,7 @@ from urllib.parse import quote, urlsplit
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import F
 from django.urls import reverse
 from django.utils import timezone
 
@@ -121,13 +122,15 @@ def _scan(source):
                     path = '/'.join(filter(None, [folder, entry.name]))
                     try:
                         validate_path(path, 'content')
+                        info = entry.stat(follow_symlinks=False)
+                        if stat.S_ISDIR(info.st_mode):
+                            validate_path(path, 'folder')
                     except StorageError:
                         if _inside(path, source):
                             raise StorageError('protected_move_descendant', 409) from None
                         continue
                     if len(witnesses) >= MAX_ENTRIES:
                         raise StorageError('move_inventory_limit', 413)
-                    info = entry.stat(follow_symlinks=False)
                     selected = _inside(path, source)
                     regular, directory_entry = stat.S_ISREG(info.st_mode), stat.S_ISDIR(info.st_mode)
                     if not regular and not directory_entry:
@@ -167,7 +170,17 @@ def _resolver(paths, notes, blocked=(), projections=None):
     for path, snapshot in notes.items():
         projection = projections[path] if projections is not None else project_note(replace(snapshot, path=path))
         if any(item.code == 'projection_parse_failed' for item in projection.diagnostics):
-            raise StorageError('incomplete_link_inventory', 409)
+            # Paths came from the authorized fresh scan. Never attach source or
+            # exception text; one failure is enough to refuse this preview.
+            validate_path(path, 'content')
+            error = StorageError('incomplete_link_inventory', 409)
+            failure = projection.projection_failure
+            error.inventory_failure = {
+                'path': path,
+                'phase': failure.phase if failure else 'projection',
+                'reason': failure.reason if failure else 'projection_parse_failed',
+            }
+            raise error
         for name, resolvable in note_names(path, projection.title, projection.ids, projection.aliases):
             if resolvable:
                 names.setdefault(name, set()).add(path)
@@ -232,6 +245,9 @@ def _plan(source, destination):
         raise StorageError('not_found', 404)
     if not (stat.S_ISDIR(source_info.st_mode) or stat.S_ISREG(source_info.st_mode) and source.lower().endswith('.md')):
         raise PathDenied()
+    if stat.S_ISDIR(source_info.st_mode):
+        validate_path(source, 'folder')
+        validate_path(destination, 'folder')
     if stat.S_ISREG(source_info.st_mode) and not destination.lower().endswith('.md'):
         raise StorageError('markdown_extension_required')
     if _stat(destination) is not None:
@@ -294,6 +310,8 @@ def preview_move(actor, source, destination):
     _actor(actor)
     try:
         with wiki_write_lock():
+            from .staging import cleanup_staged_saves
+            cleanup_staged_saves()
             # Bound abandoned previews without deleting recovery journals.
             MoveOperation.objects.filter(state='preview', created_at__lt=timezone.now() - timedelta(hours=1)).delete()
             MoveOperation.objects.filter(state__in=['completed', 'cancelled'], created_at__lt=timezone.now() - timedelta(days=30)).delete()
@@ -376,7 +394,11 @@ def _start(operation):
     if fresh != operation.plan:
         raise StorageError('move_preview_stale', 409)
     plan = operation.plan
-    with transaction.atomic(), application_lock('revision-quota'):
+    with application_lock('revision-quota'), transaction.atomic():
+        # Session/index writers do not share the filesystem locks. Reserve the
+        # SQLite writer before quota/history reads, avoiding a stale read
+        # snapshot upgrade if another connection commits between SELECT/INSERT.
+        MoveOperation.objects.filter(pk=operation.pk).update(state=F('state'))
         # Budget both the required backups and longer associations for existing
         # history/drafts. Backups include their actual hash precondition charge.
         charge = sum(_record_charge(max([item['path'], item['destination']], key=lambda path: len(path.encode())),
@@ -395,8 +417,7 @@ def _start(operation):
 
 
 def _relocate(operation):
-    from .staging import cleanup_staged_saves
-    cleanup_staged_saves()
+    # Namespace cleanup belongs before planning, never after validation.
     plan = operation.plan
     if policy_version() != plan['policy']:
         raise StorageError('move_policy_changed', 409)
@@ -408,12 +429,23 @@ def _relocate(operation):
     identity = plan['source_identity']
     if source is not None and destination is None:
         if _fingerprint(source) != identity:
-            raise StorageError('move_recovery_conflict', 409)
+            raise _conflict(operation.source)
         # Revalidate all descendants and inbound bytes on a resumed pre-rename
         # operation as well; never move unreviewed files after an interruption.
         witnesses, _, _ = _scan(operation.source)
         if witnesses != plan['witnesses']:
-            raise StorageError('move_recovery_conflict', 409)
+            changed = []
+            for path in sorted(set(witnesses) | set(plan['witnesses'])):
+                if witnesses.get(path) == plan['witnesses'].get(path) or not path:
+                    continue
+                try:
+                    validate_path(path, 'content')
+                except StorageError:
+                    continue
+                changed.append(path)
+                if len(changed) == 20:
+                    break
+            raise _conflict(*changed)
         _rename_noreplace(operation.source, operation.destination)
     elif source is None and destination is not None:
         if not _moved_identity(operation, destination):
@@ -435,6 +467,9 @@ def _relocate(operation):
     # History path updates and completion are one DB transaction. No duplication
     # on retry, and available draft bytes/ownership are unchanged.
     with transaction.atomic():
+        # This final history transaction also reads before writing. Filesystem
+        # publication is already complete; do not retry/replay it on contention.
+        MoveOperation.objects.filter(pk=operation.pk).update(state=F('state'))
         _history_collision(plan['mapping'])
         for model in [SavedRevision, RecoveryDraft, FormatRecovery]:
             for old, new in plan['mapping'].items():
@@ -466,6 +501,11 @@ def commit_move(actor, operation_id):
             assert_writes_available()
             if operation.created_at < timezone.now() - timedelta(minutes=30):
                 raise StorageError('move_preview_expired', 409)
+        # Cleanup may alter directory witnesses even for excluded temp siblings.
+        # Existing previews must fail stale rather than adopt those changes.
+        from .staging import cleanup_staged_saves
+        cleanup_staged_saves()
+        if operation.state == 'preview':
             _start(operation)
         try:
             if operation.plan.get('recovery_direction') == 'rollback':

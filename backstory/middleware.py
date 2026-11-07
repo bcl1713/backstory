@@ -11,6 +11,7 @@ class ResponsePolicyMiddleware:
 
     def __call__(self, request):
         request.csp_style_nonce = secrets.token_urlsafe(24)
+        request.csp_script_nonce = secrets.token_urlsafe(24)
         from django.core.exceptions import DisallowedHost
         from django.http import HttpResponseBadRequest
         try:
@@ -24,6 +25,36 @@ class ResponsePolicyMiddleware:
         response["Cache-Control"] = "no-store"
         response["Content-Security-Policy"] = f"default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{request.csp_style_nonce}'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         response["Referrer-Policy"] = "same-origin"
+        from .renderers import successful_mermaid_shell, renderer_origin
+        if successful_mermaid_shell(request, response):
+            # Remove the inner Django XFrameOptionsMiddleware's header too.
+            del response['X-Frame-Options']
+            response['Content-Security-Policy'] = (
+                "default-src 'none'; "
+                f"script-src 'nonce-{request.csp_script_nonce}'; "
+                "style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; "
+                "font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; "
+                "worker-src 'none'; base-uri 'none'; form-action 'none'; "
+                f"frame-ancestors {renderer_origin(request)}; sandbox allow-scripts"
+            )
+            response['Referrer-Policy'] = 'no-referrer'
+            response['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
+        from .isolated_renderers import successful_graphviz_shell, graphviz_origin, successful_vega_lite_shell, vega_lite_origin
+        graphviz_shell = successful_graphviz_shell(request, response)
+        if graphviz_shell or successful_vega_lite_shell(request, response):
+            wasm = " 'wasm-unsafe-eval'" if graphviz_shell else ""
+            origin = graphviz_origin(request) if graphviz_shell else vega_lite_origin(request)
+            del response['X-Frame-Options']
+            response['Content-Security-Policy'] = (
+                "default-src 'none'; "
+                f"script-src 'nonce-{request.csp_script_nonce}'{wasm}; "
+                "style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; "
+                "font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; "
+                "worker-src blob:; base-uri 'none'; form-action 'none'; "
+                f"frame-ancestors {origin}; sandbox allow-scripts"
+            )
+            response['Referrer-Policy'] = 'no-referrer'
+            response['Permissions-Policy'] = 'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
         return response
 
 

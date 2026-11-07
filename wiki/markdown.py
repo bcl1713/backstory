@@ -1,15 +1,20 @@
 """Independent CommonMark/GFM preview. Never serialize HTML back into source."""
 from html import escape
+from functools import partial
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlsplit
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_block import html_block
+from markdown_it.rules_inline import html_inline
 from mdit_py_plugins.tasklists import tasklists_plugin
 import nh3
 
 from .attachments import INLINE_RASTER_SUFFIXES
 from .contracts import Preview
 from .links import heading_slug, resolve_link
+from .diagram_preview import install_diagrams, mark_complete_fences
+from .math_preview import install_math, preserve_table_math_source
 
 _LINK_LIMIT = 200
 _TAGS = {
@@ -18,9 +23,9 @@ _TAGS = {
     "thead", "tbody", "tr", "th", "td", "input",
 }
 _ATTRIBUTES = {
-    "a": {"href", "title"}, "img": {"src", "alt", "title", "loading"},
-    "span": {"class"}, "input": {"checked", "disabled"},
-    "ol": {"start"}, **{f"h{level}": {"id"} for level in range(1, 7)},
+    "a": {"href", "title", "class", "aria-label"}, "img": {"src", "alt", "title", "loading"},
+    "span": {"class", "data-math-source", "data-math-expression", "data-math-display"}, "input": {"checked", "disabled"},
+    "pre": {"class", "data-mermaid-source", "data-graphviz-source", "data-vega-lite-source"}, "ol": {"start"}, **{f"h{level}": {"id"} for level in range(1, 7)},
 }
 
 
@@ -41,17 +46,26 @@ def _resolve(env, target, kind):
     return result
 
 
-def _wiki_rule(state, silent):
+def _wiki_rule(state, silent, *, wrapped_aliases=False):
     # Runs in the inline parser: fences, code spans and backslash escapes have
     # already consumed their own syntax. Never search/replace the source string.
     if state.linkLevel or not state.src.startswith("[[", state.pos):
         return False
     end = state.src.find("]]", state.pos + 2, state.posMax)
-    if end == -1 or "\n" in state.src[state.pos + 2:end]:
+    if end == -1:
         return False
+    content = state.src[state.pos + 2:end]
+    if "\n" in content:
+        target, pipe, label = content.partition("|")
+        # Formatting's preservation check recognizes the same bounded wrapped
+        # aliases as the helper. Ordinary previews retain single-line grammar.
+        if (not wrapped_aliases or end + 2 - state.pos > 8192
+                or not target or not pipe or "\n" not in label
+                or any(char in target for char in "\n[]")):
+            return False
     if not silent:
         token = state.push("wiki_link", "", 0)
-        token.content = state.src[state.pos + 2:end]
+        token.content = content
     state.pos = end + 2
     return True
 
@@ -61,6 +75,10 @@ def _wiki_render(self, tokens, index, options, env):
     if result is None:
         return '<span class="link-unavailable">Unavailable link</span>'
     label = escape(result.label)
+    if result.action_href:
+        description = f"Create note: {result.create_path}" if result.create_path else "Choose note destination"
+        return (f'<a class="link-{result.state}" href="{escape(result.action_href, quote=True)}" '
+                f'aria-label="{escape(result.label + " — " + description, quote=True)}">{label}</a>')
     if result.href is None:
         return f'<span class="link-{result.state}">{label}</span>'
     return f'<a href="{escape(result.href, quote=True)}">{label}</a>'
@@ -105,11 +123,43 @@ def _plain_heading(tokens):
     return "".join((token.content.partition("|")[2] or token.content.partition("|")[0]) if token.type == "wiki_link" else token.content for token in tokens if token.type in {"text", "code_inline", "image", "wiki_link"})
 
 
-def _parser():
-    parser = MarkdownIt("gfm-like", {"html": False, "maxNesting": 32}).use(tasklists_plugin)
-    parser.inline.ruler.before("link", "wiki_link", _wiki_rule)
+def _literal_html_inline(state, silent):
+    # Recognize a complete source tag before math/Markdown can reinterpret its
+    # attributes, but never let a source token reach the raw-HTML renderer.
+    # Inert <a> text must not acquire Markdown link-label parser state either.
+    link_level = state.linkLevel
+    matched = html_inline(state, silent)
+    state.linkLevel = link_level
+    if matched and not silent:
+        state.tokens[-1].type = "text"
+    return matched
+
+
+def _literal_html_block(state, start, end, silent):
+    matched = html_block(state, start, end, silent)
+    if matched and not silent:
+        state.tokens[-1].type = "backstory_literal_html"
+    return matched
+
+
+def _literal_html_render(self, tokens, index, options, env):
+    return escape(tokens[index].content)
+
+
+def _parser(*, wrapped_wiki_aliases=False):
+    # HTML grammar is structural only. Source HTML is immediately converted to
+    # escaped literal tokens; app-generated task checkboxes retain their own
+    # existing renderer. This does not admit ordinary raw HTML to the output.
+    parser = MarkdownIt("gfm-like", {"html": True, "maxNesting": 32}).use(tasklists_plugin)
+    parser.inline.ruler.at("html_inline", _literal_html_inline)
+    parser.block.ruler.at("html_block", _literal_html_block)
+    parser.add_render_rule("backstory_literal_html", _literal_html_render)
+    wiki_rule = partial(_wiki_rule, wrapped_aliases=True) if wrapped_wiki_aliases else _wiki_rule
+    parser.inline.ruler.before("link", "wiki_link", wiki_rule)
     parser.add_render_rule("wiki_link", _wiki_render)
     parser.add_render_rule("image", _image_render)
+    install_math(parser)
+    install_diagrams(parser)
     return parser
 
 
@@ -124,6 +174,8 @@ def render_preview(source: str, source_path: str) -> Preview:
     try:
         parser = _parser()
         tokens = parser.parse(source, env)
+        preserve_table_math_source(tokens)
+        mark_complete_fences(tokens, source)
         counts = {}
         used = set()
         for index, token in enumerate(tokens):

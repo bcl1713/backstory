@@ -1,0 +1,14 @@
+{
+  "frame": "vega-lite-frame-PURVA3U6.js",
+  "sha256": "fdff9be178e4f8650b5024278fa932fe3c2bc9a6eeacec24840641fc3c889c52",
+  "versions": {
+    "vega": "6.4.0",
+    "vega-lite": "6.5.0",
+    "vega-interpreter": "2.3.2",
+    "vega-runtime": "7.1.3",
+    "d3-dsv": "3.0.1"
+  },
+  "outputs": 1,
+  "imports": [],
+  "expressionBackend": "official-interpreter-only"
+}

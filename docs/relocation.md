@@ -37,6 +37,25 @@ after 30 minutes. Changes require a new preview; destinations are never replaced
 A Linux no-clobber rename is required. Filesystems lacking that operation fail
 with recovery available; there is no copy/delete fallback.
 
+## Incomplete link inventory
+
+If Markdown projection fails, preview reports `incomplete_link_inventory` and
+identifies the first failing eligible note by its wiki-relative path, the parsing
+phase, and a stable reason. A note outside the moved folder can block the preview
+because its links also need to be inventoried. No move or link edits occur.
+
+`link_structure_limit` means the note exceeded the supported link-structure
+budget; `projection_recursion_limit` means parsing exceeded its recursion limit.
+`projection_parse_failed` means the underlying cause is not yet known. Inspect
+the identified note and resolve the parsing problem, then request a new preview;
+additional failures may appear next. Diagnostics never include source text or
+raw exception messages. Protected notes remain excluded.
+
+This inventory reads wiki files directly. Waiting for or rebuilding the search
+index does not resolve a parse refusal; corrected source is picked up by the
+next preview without an index rebuild. Other inventory refusals, such as scan
+budgets or unreadable files, retain their own reason codes.
+
 ## Drafts and other editor tabs
 
 A note with unsaved changes blocks its move entry point and retains its source
@@ -92,3 +111,45 @@ failure is reported separately from filesystem success; use **Refresh index**
 or **Rebuild index** after resolving the index problem. A lost response is not
 permission to start a second move: reopen the operation URL and inspect its
 recorded state first.
+
+### Concurrent database writers
+
+Relocation's backup/quota transaction and final history-association transaction
+reserve SQLite write intent before reading dependent rows. Session renewal and
+background index connections do not share wiki filesystem locks; a deferred
+read-to-write upgrade could otherwise fail immediately with `SQLITE_BUSY_SNAPSHOT`
+after another writer commits. Both reservations are short database-only sections:
+reviewed source revalidation remains before backup preparation, and actual rename,
+byte publication and filesystem sync remain outside the database transactions.
+
+This does not eliminate every possible busy/database failure. Existing bounded
+SQLite waits, explicit uncertain outcomes and journal-based recovery remain; the
+application does not blindly retry a filesystem move. If the start transaction
+cannot acquire its writer, the persisted preview and source bytes remain unchanged.
+Inspect the operation before an explicit retry. Final-transaction failure still
+uses the existing durable recovery journal rather than repeating backups or
+unconditionally replaying file writes.
+
+Disposable two-connection regressions cover a real competing session-table update
+at each transaction's first history read, successful byte/journal convergence and
+idempotent subsequent calls. They establish the race and the narrow fix, not the
+unretained exception behind any specific historical CI or production request.
+
+### Orphan staging cleanup and inventory
+
+Relocation-owned cleanup removes registered orphan staging siblings under the
+wiki-write lock before
+preview captures the namespace and before confirmation revalidates it. Although
+staging filenames are excluded, removing one changes its parent directory's
+metadata. Cleanup must not occur between successful plan validation and the
+pre-rename namespace check.
+
+An older preview whose directory witnesses changed still requires a new preview;
+the application never substitutes fresh witnesses into a reviewed plan. Resumed
+operations and rollback retain guarded staging cleanup before recovery validation.
+Real source or namespace changes still stop a move. Pre-rename conflicts identify
+up to 20 currently authorized relative paths when available; a root-only change
+may retain the generic conflict rather than exposing internal or protected paths.
+
+Concurrent startup or maintenance cleanup can still cause a conservative stale
+preview or recovery conflict; it does not bypass namespace verification.

@@ -12,3 +12,4 @@ data/
 fixtures/
 !tests/fixtures/
 application-secret
+wiki/_build_identity.json

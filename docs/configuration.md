@@ -142,6 +142,26 @@ or marker. Mount provenance and actual access still require operator verificatio
 | `BACKSTORY_TRUSTED_PROXY_IPS` | Required in trusted mode; actual origin-side TCP peers, never public client ranges. | Comma-separated literal IPs/canonical CIDRs; default empty. Universal trust (including split universal networks), multicast and unspecified single IPs are rejected. | `192.0.2.20/32,2001:db8::20/128`. Missing trusted-mode peers/invalid networks stop startup; an untrusted peer receives HTTP 400. Off mode grants no forwarding trust even if peers are configured. |
 | `BACKSTORY_PROXY_CLIENT_IP_HEADER` | Optional trusted single-client-IP assertion; only enable an overwrite contract you control. | `none`, `x-real-ip`, `x-forwarded-for`; default `none`; bundled tunnel fixes `none`. | `none` ignores client headers, using peer IP for throttling (clients may share a bucket). Invalid selection stops startup. With a selected header, malformed/empty/multiple IPs get HTTP 400; absence retains the peer. |
 
+### Optional Mermaid diagram rendering
+
+| Name | Requirement and purpose | Accepted value; default | Omission/error consequence |
+| --- | --- | --- | --- |
+| `BACKSTORY_MERMAID_PARENT_ORIGIN` | Optional explicit opt-in for the isolated Mermaid frame and editor/preview hydration. Forwarded by base, Portainer and self-contained Cloudflare manifests. | One exact canonical browser origin matching an existing allowed host; empty by default (disabled). HTTPS for HTTPS cookies; HTTP loopback with an explicit non-default port for localhost mode. | Empty retains editable source without frame loads. Invalid/noncanonical origins stop startup; a different request origin stays source-only. No CSRF-origin fallback or global framing exception. |
+
+Set this optional value in the installation's private Compose `.env` or saved
+Portainer stack variables only when deliberately enabling the bounded Mermaid
+feature. Use the browser-facing scheme, host and port, not the container/private
+origin address or the whole CSRF allowlist. Local HTTP must include the published
+browser port. The supplied examples deliberately leave it empty. Inspect the
+rendered configuration and recreate/update the intended stack through your normal
+approved deployment process; editing a local `.env` alone cannot change a running
+container or Portainer's saved variables. Native commands require the value in
+their actual process environment, not just a dotenv file.
+
+See [canonical-origin validation, supported syntax and renderer security
+limits](mermaid-frame.md). No production origin value or deployment is supplied
+by this opt-in support. Images and math do not require this setting.
+
 ### Background worker
 
 These optional settings apply to the native worker and are explicitly forwarded
@@ -252,3 +272,8 @@ Migration from earlier releases:
 - Exact HTTPS hosts/origins are now checked while loading settings, consistent
   with deployment checks. Schemes/ports belong in origins as documented, never
   in the host allowlist. There is no wildcard fallback or automatic proxy trust.
+## Optional Graphviz rendering
+
+`BACKSTORY_GRAPHVIZ_PARENT_ORIGIN` independently enables the approved Graphviz frame for one exact canonical browser-facing application origin. It defaults empty in all distributed manifests and environment examples. It follows the same canonical-origin rules as Mermaid but never inherits Mermaid's opt-in. See [Graphviz containment and resource limits](graphviz-frame.md). This source change does not configure or deploy a running service.
+
+`BACKSTORY_VEGA_LITE_PARENT_ORIGIN` separately enables static inline-data charts for one exact canonical application origin, with empty defaults in every distributed manifest. Graphviz and Mermaid settings do not enable it. See [accepted chart syntax and interpreter containment](vega-lite-frame.md). This change supplies no production value or deployment.

@@ -1,12 +1,32 @@
 # Releases and image publication
 
-The first release is **v1.0.0**. A successful push/merge to `main` runs the
-`release` workflow: full Python, formatter and Chromium tests, asset build,
-Django checks, Compose validation and a container build/startup check must pass.
-The workflow then builds the **same source commit** for linux/amd64 and
-linux/arm64, pushes GHCR tags, and creates the matching GitHub release. Each
-release includes the Portainer manifest, a version-pinned environment example,
-the deployment guide and checksums, plus source SHA and image digest in its notes.
+All correctness tests and image builds now run locally. GitHub Actions is disabled
+repository-wide, and this branch has no active workflow files. The persistent
+publisher on forge detects merges/pushes to `dev` and `main`, runs the complete
+gate and automatically builds, tags and uploads images and GitHub releases.
+Publication does not redeploy a server.
+
+Follow the [local CI and release runbook](ci/README.md) for the complete test gate,
+exact-commit receipt, prerequisite tools, review and automatic publisher service.
+The former workflow definitions are retained only as inert migration references.
+
+## Branch and release policy
+
+1. Feature/fix PRs target `dev`. Verify the intended merge tree locally and retain
+   the full test record plus code/UI review before merging.
+2. The local service tests the resulting current `dev` commit and automatically
+   publishes its unique prerelease and `ghcr.io/bcl1713/backstory:dev` alias.
+3. Promote this repository's `dev` to `main` through a reviewed merge commit,
+   preserving Conventional Commit history. Test that resulting commit separately.
+4. The service tests main and automatically publishes its stable release and
+   numbered/`:latest` aliases.
+5. Merge main back into dev after stable publication to retain tag ancestry.
+
+Keep test and production stacks, wiki directories, data directories and ports
+separate. Publication never redeploys a server. Operators choose when to pull and
+redeploy, preferably using the release's immutable digest or full version.
+No branch/security settings are changed by the local scripts. Do not fabricate
+hosted CI success to satisfy an obsolete check requirement.
 
 ## Version selection
 
@@ -29,56 +49,57 @@ package manifests record 1.0.0; release tags and OCI image labels are the
 authoritative version for subsequent container releases, without bot commits
 back to main.
 
+Dev uses that prospective stable version followed by
+`-dev.<commit-count>.g<12-character-sha>`, for example
+`1.1.0-dev.42.g0123456789ab`. It is deterministic for a commit and reachable
+stable history, so rerunning the same dev build reuses its prerelease version.
+Dev tags never consume stable version numbers. GitHub prereleases are explicitly
+excluded from the Latest release; they carry the same deployment assets as stable
+releases. Their generated change notes cover changes since the previous stable
+release.
+
 ## Published artifacts
 
-The package is [ghcr.io/bcl1713/backstory](https://github.com/bcl1713/backstory/pkgs/container/backstory).
-A release publishes `:1.0.0` and `:v1.0.0` style version tags, moving `:1.0`,
-`:1` and `:latest` aliases, and an OCI source/revision/version label. Use a full
-numbered tag or the release's image digest for deployment; moving aliases can
-advance with later releases. See the [deployment guide](portainer.md) for
-Portainer pulling, named users, upgrades and rollback.
+Both channels publish linux/amd64 and linux/arm64 images built locally from an
+immutable archive of the exact tested commit. Releases retain version/source OCI
+labels, the image digest, the Portainer manifest, a version-pinned environment
+example, deployment guide and checksums.
 
-The workflow authenticates using the built-in `GITHUB_TOKEN` with
-`contents: write` and `packages: write`, following
-[GitHub's GHCR workflow guidance](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pushing-container-images).
-It does not require a personal token secret. Main/tag protection rules must allow
-this release workflow to create tags and releases. If an existing package has
-separate access rules, grant this repository Actions write access in its package
-settings. The initial GHCR package may be private even for a public repository:
-check **Package settings → Change visibility → Public** after first publication
-and verify an anonymous pull before advertising login-free installation.
-Public visibility changes are permanent under
-[GitHub's package visibility rules](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#configuring-visibility-of-container-images-for-a-package).
-Private package deployments instead need a Portainer GHCR credential with
-`read:packages`; no local build is required.
+The Docker build also writes `wiki/_build_identity.json` inside the application
+from the publisher's `BACKSTORY_VERSION` and `BACKSTORY_REVISION` build arguments.
+The runtime user can read this image-owned file; it is not wiki data or a runtime
+configuration setting. Local context copies are excluded and overwritten during
+packaging. Native checkouts and builds without release arguments report unknown
+identity. The authenticated `wiki_status` tool and `/tools/status/` expose only the
+validated source SHA and release version from this file, with `unknown` for missing
+or invalid fields. Validation accepts a lowercase 40-character Git SHA and the
+publisher's stable or dev version format (at most 80 ASCII characters, no leading
+zero numeric components); reads are bounded to 1 KiB.
+
+After an operator deploys an image, read authenticated status and compare both
+fields with that immutable release's source/version evidence. An unknown value
+is uncertainty, not proof of deployment failure. Registry publication and a moving
+branch or image alias do not establish which artifact is running. This change
+does not publish or deploy an image or add credentials or runtime settings.
+
+Dev publishes full prerelease tags and updates only `:dev`. Stable publishes
+version tags, minor and major aliases and `:latest`. The local service uses existing
+GitHub authentication for release and GHCR publication; it never creates tokens
+or changes account access. See [Portainer deployment](portainer.md) for
+operator-controlled upgrades and rollback.
 
 ## Failure and recovery
 
-Main releases are serialized and publication is never canceled in progress.
-GitHub Actions can replace an older pending run when rapid pushes arrive; the
-next run covers all changes since the previous release. Avoid merging another
-change while deliberately recovering a failed release.
+Keep the complete local test receipt and review evidence. A failed or incomplete
+gate cannot publish. Current remote branch identity is checked before building
+and again before moving channel aliases. If source advances, retest the new
+commit rather than borrowing an earlier receipt.
 
-If correctness or an image build fails, no GitHub release is published. If the
-image push succeeds but release creation/upload fails, image tags may exist
-before the public release. Fix the underlying permissions/outage, then rerun
-the failed workflow. Lookup/API failures stop publication; they are never treated as a missing release.
-A draft release is refreshed to the current source/digest and completed on retry; a stable tag already
-pointing at the same commit reuses its version. A previously published release
-for that commit is skipped, so a manual retry does not create a patch release.
-An older run refuses publication after main advances, so it cannot move the image
-aliases backward. Use **Actions → release → Run workflow → main** to retry the
-current main head.
-Never run publication from another branch or move/delete published version tags.
-GitHub release and GHCR operations are separate API calls, so publication is not
-an atomic registry transaction.
-
-Image upload and GitHub release creation occur in the **same workflow**.
-GitHub documents that events created by `GITHUB_TOKEN` generally
-[do not trigger another workflow](https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow#triggering-a-workflow-from-a-workflow);
-this pipeline does not rely on a release/tag event to publish the image.
-
-For the initial cut: land the workflow/docs with the reviewed application branch,
-wait for the main correctness gate and multi-platform publication, then verify
-`v1.0.0`, image labels/digest/platforms and pull access. Actual live wiki enrollment,
-Portainer deployment and proxy changes remain operator-controlled steps.
+Image publication and GitHub release publication are separate operations. A
+partial failure can leave pinned image tags or a draft release. Fix the cause,
+verify the source is unchanged, and retry with a fresh assets directory. Published
+releases are not silently modified. Retries reuse matching existing version image
+digests after verifying source/version labels and both platforms. Incomplete or
+conflicting version tags and registry lookup failures block publication; follow
+the runbook to investigate without overwriting an image. Never move/delete published version tags.
+No retry may re-enable or invoke GitHub-hosted workflows.

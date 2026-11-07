@@ -9,10 +9,13 @@ async function tabTo(page, target) {
   await expect(target).toBeVisible();
   // Folder links grow with the disposable corpus; traverse a complete possible
   // focus cycle rather than assuming a fixed number of controls on the page.
-  const controls = await page.locator('a[href], button, input, textarea, select, summary, [tabindex]').count();
+  const focusable = page.locator('a[href], button, input, textarea, select, summary, [tabindex]');
+  let controls = await focusable.count();
   for (let n = 0; n < controls + 2; n++) {
     if (await target.evaluate(el => el === document.activeElement)) return;
     await page.keyboard.press('Tab');
+    // The file tree can finish loading during traversal, adding more stops.
+    controls = Math.max(controls, await focusable.count());
   }
   if (await target.evaluate(el => el === document.activeElement)) return;
   throw new Error('Control cannot be reached using Tab');
@@ -35,7 +38,7 @@ test('keyboard navigation reaches folders, search, editor modes, proposal dismis
   await writeFile(`${runtime}/wiki/Keyboard.md`, '# Keyboard\n');
   await login(page);
   await activate(page, page.getByRole('link', { name: 'Skip to content' }));
-  await activate(page, page.getByRole('link', { name: 'Keyboard.md', exact: true }));
+  await activate(page, page.getByRole('navigation', { name: 'Folder', exact: true }).getByRole('link', { name: 'Keyboard.md', exact: true }));
   await activate(page, page.getByRole('button', { name: 'Navigation and controls', exact: true }));
   await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Keyboard.md');
   await expect(page.getByRole('navigation', { name: 'Folder sidebar' })).toContainText('Other.md');
@@ -44,7 +47,8 @@ test('keyboard navigation reaches folders, search, editor modes, proposal dismis
   await tabTo(page, page.getByRole('textbox', { name: 'Markdown editor', exact: true }));
   await expect(page.locator('.cm-editor')).toHaveClass(/cm-focused/);
   const focusStyle = await page.locator('.cm-content').evaluate(el => getComputedStyle(el).boxShadow);
-  expect(focusStyle).not.toBe('none');
+  expect(focusStyle).toBe('none');
+  await expect(page.locator('.cm-cursor').first()).toBeVisible();
   await page.keyboard.press('ArrowRight');
   await activate(page, page.getByRole('button', { name: 'Format', exact: true }));
   await expect(page.locator('[data-format-proposal]')).toBeVisible();
@@ -88,11 +92,16 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844
     await page.locator('.cm-content').focus();
     await page.keyboard.press('Control+End');
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeInViewport();
-    await expect(page.getByRole('button', { name: 'Format', exact: true })).toBeInViewport();
+    await expect(toggle).toBeInViewport();
+    await expect(page.locator('.persistent-actions button')).toHaveText(['Menu', 'Save', 'Upload image']);
+    await expect(page.getByRole('button', { name: 'Format', exact: true })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Vim bindings', exact: true })).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await page.screenshot({ path: `/tmp/backstory-release-one/reports/task11-${viewport.width}.png`, fullPage: true });
+    await page.screenshot({ path: `${runtime}/reports/task11-${viewport.width}.png`, fullPage: true });
     await revealChrome(page);
+    await expect(page.getByRole('button', { name: 'Format', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Vim bindings', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Raw source', exact: true }).click();
-    await page.screenshot({ path: `/tmp/backstory-release-one/reports/task11-${viewport.width}-source.png`, fullPage: true });
+    await page.screenshot({ path: `${runtime}/reports/task11-${viewport.width}-source.png`, fullPage: true });
   });
 }

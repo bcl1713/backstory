@@ -8,6 +8,7 @@ import uuid
 
 from django.conf import settings
 from django.db import connection, transaction, OperationalError
+from django.db.models import F
 
 from wiki.contracts import StorageError
 from wiki.metadata import project_note
@@ -15,6 +16,7 @@ from wiki.readiness import check_readiness
 from wiki.storage import read_note, require_ready
 from .models import IndexGeneration, IndexedNote, IndexedName, IndexJob, LinkEdge, ScanState
 from .scanner import file_stat, next_paths
+from .diagnostics import record_failure, failure_reason
 
 BATCH_SIZE = 20
 YIELD_SECONDS = 1
@@ -68,6 +70,8 @@ def _commit_projection(snapshot, info, generations, token):
     if read_note(snapshot.path).revision != snapshot.revision or file_stat(snapshot.path) != info:
         raise StorageError('index_revision_changed', 503)
     with transaction.atomic():
+        # Reserve SQLite write intent before update_or_create reads a snapshot.
+        ScanState.objects.filter(pk=1).update(errors=F('errors'))
         for generation in generations:
             note, _ = IndexedNote.objects.update_or_create(generation=generation, path=snapshot.path, defaults={
                 'revision': snapshot.revision, 'stat': info, 'title': projection.title,
@@ -157,6 +161,8 @@ def _finish(state, generation, now):
     require_ready()
     # Prioritized writes are replayed into both generations before publication.
     with transaction.atomic():
+        # Keep the pending-work check and publication in one serialized write.
+        ScanState.objects.filter(pk=1).update(errors=F('errors'))
         if IndexJob.objects.exists() or ScanState.objects.filter(pk=1, reconcile_needed=True).exists():
             return False
         stale = IndexedNote.objects.filter(generation=generation).exclude(seen=state.checkpoint['token'])
@@ -271,10 +277,11 @@ def run_batch(now=None):
         try:
             return _run(now, progress)
         except (StorageError, OSError, OperationalError) as error:
+            record_failure("worker", error)
             try:
                 state, _ = ScanState.objects.get_or_create(pk=1)
                 state.errors += 1
-                state.last_error = error.reason_code if isinstance(error, StorageError) else 'index_io_error'
+                state.last_error = error.reason_code if isinstance(error, StorageError) else failure_reason(error)
                 state.backoff_until = now + min(300, 5 * 2 ** min(state.errors - 1, 6))
                 if state.checkpoint:
                     # Retry the complete scan, retaining useful old rows and the
@@ -284,8 +291,8 @@ def run_batch(now=None):
                     state.checkpoint = cp
                     state.processed = state.discovered = 0
                 state.save(update_fields=['checkpoint', 'errors', 'last_error', 'backoff_until', 'processed', 'discovered'])
-            except OperationalError:
-                pass
+            except OperationalError as persist_error:
+                record_failure("worker_failure_state", persist_error)
             return BatchResult(progress[0], progress[0], pending=True, state='backoff')
 
 

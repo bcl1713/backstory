@@ -250,3 +250,18 @@ Review the route and edge settings before the connector serves public requests.
 | Backstory rejects a request | Verify actual final TCP peer, public Host and exact overwritten HTTPS scheme. Do not expand trust or disable the guard. |
 | All visitors share an IP throttle bucket | Expected with client-IP `none`; Backstory ignores Cloudflare/XFF client headers. |
 | Health succeeds but a save fails | Health is process-only. Check authenticated Storage status, read-only setting and note-parent permissions; never enroll an unverified marker just to get ready. |
+
+### Wiki timezone in an existing Portainer stack
+
+Setting `BACKSTORY_WIKI_TIMEZONE=America/Chicago` in Portainer's stack variables
+requires the stack manifest to forward it under `services.web.environment`:
+
+```yaml
+BACKSTORY_WIKI_TIMEZONE: ${BACKSTORY_WIKI_TIMEZONE:-}
+```
+
+Older copied manifests may lack this line; updating the image alone does not
+update copied YAML. Keep unrelated deployment settings unchanged. After updating
+the stack, **Browse wiki → Wiki timezone** should show `America/Chicago` as set
+by the server environment. The host may remain on UTC; no host-clock change is
+needed. Empty/unset retains the saved wiki zone, or UTC fallback until configured.

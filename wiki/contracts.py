@@ -68,6 +68,9 @@ class LinkResult:
     state: str
     href: str | None
     label: str
+    action_href: str | None = None
+    create_path: str | None = None
+    choices: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

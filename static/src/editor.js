@@ -1,15 +1,51 @@
-import { Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
+import { mountImageUpload } from './image-upload.js';
+import { createLinkFollower, activateLink } from './follow-link.js';
+import { initialVimEnabled, rememberVimEnabled, shouldFocusEditor } from './editor-preferences.js';
+import { isVimToggleShortcut } from './editor-shortcuts.js';
+import { ChangeSet, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, keymap, drawSelection } from '@codemirror/view';
+import { forceParsing, syntaxTreeAvailable } from '@codemirror/language';
 import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
+import { codePreview, codeHighlighting, codeLanguage } from './code-preview.js';
+import { tablePreview } from './table-preview.js';
+import { diagramPreview, diagramEngines } from './diagram-preview.js';
+import { mathPreview, mathSyntax } from './math-preview.js';
+import { createImagePreviewExtension } from './image-preview.js';
 import { createLivePreviewExtension, frontMatter } from './live-preview.js';
-import { createLiveLinksExtension, wikiLinks } from './live-links.js';
+import { createLiveLinksExtension, wikiLinks, linkAtCaret } from './live-links.js';
+import { createVimBindings } from './vim-bindings.js';
+import { createLinkCompletionExtension } from './link-completion.js';
+import { stickyEditorScroll } from './editor-viewport.js';
+import { closeCompletion } from '@codemirror/autocomplete';
+import { sourceChanges } from './source-merge.js';
+import { blockExitExtension, blockIsInactive } from './block-format.js';
 
-export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onFailure = () => {}, nonce = '', getPath = () => '' }) {
+export function mountMarkdownEditor({ parent, source, newline = '\n', onChange = () => {}, onBlockExit = () => {}, onFailure = () => {}, onVimModeChange = () => {}, onCompletionStatus = () => {}, nonce = '', mermaidEnabled = false, graphvizEnabled = false, vegaLiteEnabled = false, getPath = () => '' }) {
   const presentation = new Compartment();
-  const liveExtensions = () => [createLivePreviewExtension(), createLiveLinksExtension({ getPath })];
+  let normalMode = false;
+  let destroyed = false;
+  const followLink = createLinkFollower({
+    resolve: async query => {
+      const response = await fetch('/resolve/?' + new URLSearchParams(query), { credentials: 'same-origin', cache: 'no-store', redirect: 'error' });
+      if (!response.ok) throw new Error('Link unavailable');
+      return response.json();
+    },
+    navigate: activateLink,
+    isCurrent: snapshot => !destroyed && normalMode && view.state.doc === snapshot.doc && view.state.selection.eq(snapshot.selection) && getPath() === snapshot.path,
+    onStatus: onCompletionStatus,
+  });
+  const bindings = createVimBindings(mode => {
+    normalMode = mode === 'normal';
+    if (!normalMode) followLink.cancel();
+    onVimModeChange(mode);
+  }, {
+    follow: () => followLink(linkAtCaret(view), getPath(), { doc: view.state.doc, selection: view.state.selection, path: getPath() }),
+    home: () => { followLink.cancel(); activateLink('/'); },
+  });
+  const liveExtensions = () => [codePreview, codeHighlighting, tablePreview, mathPreview, ...((mermaidEnabled || graphvizEnabled || vegaLiteEnabled) ? [diagramEngines.of([...(mermaidEnabled?['mermaid']:[]),...(graphvizEnabled?['graphviz']:[]),...(vegaLiteEnabled?['vega-lite']:[])]),diagramPreview] : []), createLivePreviewExtension(), createLiveLinksExtension({ getPath }), createImagePreviewExtension({ getPath })];
   const separator = ['\n', '\r\n', '\r'].includes(newline) ? newline : '\n';
   const uniformEndings = new Map(['\n', '\r\n', '\r'].map(value => [value, { separator: value }]));
   const endingsFrom = (text, preferred) => {
@@ -45,16 +81,23 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         lineEndings,
         invertedEffects.of(transaction => transaction.docChanged || transaction.effects.some(effect => effect.is(restoreEndings))
           ? [restoreEndings.of(transaction.startState.field(lineEndings))] : []),
+        bindings.extension,
+        createLinkCompletionExtension({ onStatus: onCompletionStatus }),
         history(), keymap.of([...defaultKeymap, ...historyKeymap]), drawSelection(),
-        markdown({ base: markdownLanguage, extensions: [frontMatter, wikiLinks], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
+        markdown({ base: markdownLanguage, codeLanguages: codeLanguage, extensions: [frontMatter, wikiLinks, mathSyntax], addKeymap: false, completeHTMLTags: false, pasteURLAsLink: false }),
         EditorView.lineWrapping,
+        stickyEditorScroll,
         EditorView.theme({}, { dark: true }),
         EditorView.contentAttributes.of({ 'aria-label': 'Markdown editor', spellcheck: 'false' }),
         EditorView.cspNonce.of(nonce),
         EditorView.exceptionSink.of(() => onFailure()),
         presentation.of(liveExtensions()),
+        blockExitExtension(onBlockExit),
         EditorView.updateListener.of(update => {
-          if (update.docChanged || update.startState.field(lineEndings) !== update.state.field(lineEndings)) onChange(getSource());
+          if (update.docChanged || !update.startState.selection.eq(update.state.selection)) followLink.cancel();
+          if (update.docChanged || update.startState.field(lineEndings) !== update.state.field(lineEndings)) {
+            onChange(getSource(), { user: update.transactions.some(tr => !tr.isUserEvent('input.external') && !tr.isUserEvent('input.format')) });
+          }
         }),
       ],
     }),
@@ -74,18 +117,32 @@ export function mountMarkdownEditor({ parent, source, newline = '\n', onChange =
         annotations: [Transaction.userEvent.of('input'), isolateHistory.of('full')],
       });
     },
+    applyExternalSource(nextSource, preferredNewline, origin = 'input.external') {
+      if (getSource() === nextSource && (!preferredNewline || preferredNewline === view.state.field(lineEndings).separator)) return;
+      const text = nextSource.replace(/\r\n|\r/g, '\n');
+      const changes = ChangeSet.of(sourceChanges(view.state.doc.toString(), text), view.state.doc.length);
+      view.dispatch({
+        changes,
+        effects: [restoreEndings.of(endingsFrom(nextSource, preferredNewline || view.state.field(lineEndings).separator)), view.scrollSnapshot().map(changes)],
+        annotations: [Transaction.userEvent.of(origin), isolateHistory.of('full')],
+      });
+    },
     setMode(mode) {
       if (!['live', 'source'].includes(mode)) throw new TypeError('Unknown editor mode');
+      closeCompletion(view);
       view.dispatch({ effects: presentation.reconfigure(mode === 'live' ? liveExtensions() : []), annotations: Transaction.addToHistory.of(false) });
     },
+    setVimEnabled(enabled) { bindings.setEnabled(view, enabled); },
+    closeCompletion() { closeCompletion(view); },
     focus() { view.focus(); },
-    destroy() { removeHeadingNavigation(); view.destroy(); },
+    destroy() { destroyed = true; followLink.cancel(); bindings.destroy(); removeHeadingNavigation(); view.destroy(); },
   };
 }
 
 function attachNoteEditor() {
   const parent = document.querySelector('[data-markdown-editor]');
   if (!parent) return;
+  const stage = document.querySelector('[data-editor-stage]');
   const fallback = document.querySelector('#source');
   const fallbackRegion = document.querySelector('[data-source-fallback]');
   const controls = document.querySelector('[data-editor-controls]');
@@ -95,52 +152,168 @@ function attachNoteEditor() {
   // Preserve those edits; untouched text keeps its original mixed line endings.
   const source = fallback.value === fallback.defaultValue ? initialSource : fallback.value.replaceAll('\n', newline);
   const readiness = document.querySelector('[data-editor-readiness]');
+  const vimToggle = document.querySelector('[data-vim-toggle]');
+  const vimStatus = document.querySelector('[data-vim-mode]');
+  const completionStatus = document.querySelector('[data-link-completion-status]');
+  const showCompletionStatus = message => { completionStatus.textContent = message; completionStatus.hidden = !message; };
+  const desktop = matchMedia('(min-width: 601px) and (hover: hover) and (pointer: fine)').matches;
+  let storage;
+  try { storage = window.localStorage; } catch { /* Optional browser preference. */ }
+  let vimEnabled = initialVimEnabled(storage, desktop);
+  let vimMode = 'off';
+  const showVimMode = () => {
+    const suspended = vimEnabled && parent.hidden;
+    const label = suspended ? 'Suspended (plain text)' : vimMode[0].toUpperCase() + vimMode.slice(1);
+    vimToggle.setAttribute('aria-pressed', String(vimEnabled));
+    vimStatus.textContent = `Vim · ${label}`;
+  };
   let api;
   let fallbackSource = source;
+  let fallbackNewline = newline;
+  let fallbackComposing = false;
+  let enhancedComposing = false;
+  parent.addEventListener('compositionstart', () => { enhancedComposing = true; });
+  parent.addEventListener('compositionend', () => { enhancedComposing = false; });
+  fallback.addEventListener('compositionstart', () => { fallbackComposing = true; });
+  fallback.addEventListener('compositionend', () => { fallbackComposing = false; });
   let onChange = () => {};
-  const changed = value => {
+  let onBlockExit = () => {};
+  const changed = (value, origin = { user: true }) => {
     fallbackSource = value;
     if (fallback.value !== value.replace(/\r\n|\r/g, '\n')) fallback.value = value;
-    onChange(value);
+    onChange(value, origin);
   };
   const setPresentation = (mode, failed = false, focus = true) => {
     const plain = mode === 'plain' || !api;
+    if (api) api.closeCompletion();
+    showCompletionStatus('');
     if (plain && api) fallback.value = api.getSource();
     if (!plain) api.setMode(mode);
     parent.hidden = plain;
     fallbackRegion.hidden = !plain;
     parent.dataset.presentation = plain ? 'plain' : mode;
+    if (api) api.setVimEnabled(vimEnabled && !plain);
+    showVimMode();
     controls.querySelectorAll('[data-editor-mode]').forEach(button => {
       button.setAttribute('aria-pressed', String(button.dataset.editorMode === parent.dataset.presentation));
       button.disabled = !api && button.dataset.editorMode !== 'plain';
     });
     const name = plain ? 'Plain text fallback' : mode === 'source' ? 'Raw source' : 'Live preview';
     readiness.textContent = failed ? 'Enhanced editor unavailable. Ready · Plain text fallback · Complete document source.' : `Ready · ${name}${plain ? ' · Complete document source' : ''}`;
+    if (!plain && stage?.dataset.editorState === 'loading') {
+      readiness.dataset.readyText = readiness.textContent;
+      readiness.textContent = 'Rendering enhanced editor…';
+    } else delete readiness.dataset.readyText;
     controls.hidden = false;
     if (focus) { if (plain) fallback.focus(); else api.focus(); }
   };
   const showFallback = () => setPresentation('plain');
   try {
-    api = mountMarkdownEditor({ parent, source, newline, getPath: () => JSON.parse(document.querySelector('#note-path').textContent), nonce: parent.dataset.styleNonce || '', onChange: changed,
+    api = mountMarkdownEditor({ parent, source, newline, mermaidEnabled: parent.dataset.mermaidEnabled === 'true', graphvizEnabled: parent.dataset.graphvizEnabled === 'true', vegaLiteEnabled: parent.dataset.vegaLiteEnabled === 'true', getPath: () => JSON.parse(document.querySelector('#note-path').textContent), nonce: parent.dataset.styleNonce || '', onChange: changed,
+      onBlockExit: block => onBlockExit(block),
+      onVimModeChange: mode => { vimMode = mode; showVimMode(); },
+      onCompletionStatus: showCompletionStatus,
       onFailure: () => queueMicrotask(() => setPresentation('plain', true)) });
     parent.markdownEditor = api;
-    setPresentation('live', false, false);
+    setPresentation((stage?.dataset.plainRequested === 'true' || location.hash === '#plain-source') ? 'plain' : 'live', false, false);
+    vimToggle.hidden = false;
+    vimStatus.hidden = false;
   } catch {
     parent.replaceChildren();
     setPresentation('plain', true, false);
   }
+  stage?.addEventListener('editor-fallback', () => setPresentation('plain', true, false));
+  const toggleVim = () => {
+    if (!api) return;
+    vimEnabled = !vimEnabled;
+    rememberVimEnabled(storage, vimEnabled);
+    api.closeCompletion();
+    showCompletionStatus('');
+    api.setVimEnabled(vimEnabled && !parent.hidden);
+    showVimMode();
+    if (!parent.hidden) api.focus();
+  };
+  vimToggle.addEventListener('click', toggleVim);
+  // Capture before CodeMirror/Vim keymaps, only in the enhanced editor.
+  parent.addEventListener('keydown', event => {
+    if (!api || parent.hidden || enhancedComposing || !api.view.hasFocus || !isVimToggleShortcut(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    toggleVim();
+  }, true);
   controls.querySelectorAll('[data-editor-mode]').forEach(button => button.addEventListener('click', () => setPresentation(button.dataset.editorMode)));
   fallback.addEventListener('input', () => {
     if (api) api.view.dispatch({ changes: { from: 0, to: api.view.state.doc.length, insert: fallback.value }, annotations: Transaction.userEvent.of('input') });
-    else changed(fallback.value.replaceAll('\n', newline));
+    else changed(fallback.value.replaceAll('\n', fallbackNewline));
   });
   const editor = {
     getSource: () => api ? api.getSource() : fallbackSource,
     setSource: value => { if (api) api.setSource(value); else { fallback.value = value; changed(value); } },
+    applyExternalSource: (value, preferredNewline, origin = 'input.external') => {
+      const changes = ChangeSet.of(sourceChanges(fallback.value, value.replace(/\r\n|\r/g, '\n')), fallback.value.length);
+      const start = changes.mapPos(fallback.selectionStart), end = changes.mapPos(fallback.selectionEnd);
+      const direction = fallback.selectionDirection, top = fallback.scrollTop, left = fallback.scrollLeft;
+      fallbackNewline = preferredNewline || value.match(/\r\n|\r|\n/)?.[0] || fallbackNewline;
+      if (api) api.applyExternalSource(value, preferredNewline, origin);
+      else changed(value, { user: false });
+      fallback.setSelectionRange(start, end, direction);
+      fallback.scrollTop = top; fallback.scrollLeft = left;
+    },
+    isComposing: () => enhancedComposing || fallbackComposing || api?.view.compositionStarted || false,
+    setBlockExitHandler: handler => { onBlockExit = handler; },
+    blockIsInactive: (block, changes) => Boolean(api && !parent.hidden && blockIsInactive(api.view.state, block, changes)),
     focus: () => api && !parent.hidden ? api.focus() : fallback.focus(),
     showFallback,
   };
   onChange = mountNoteActions({ editor, initialSource, isNew: parent.dataset.isNew === 'true', bom: parent.dataset.bom === 'true' });
   if (source !== initialSource) onChange(source);
+  mountImageUpload({ editor, getPath: () => JSON.parse(document.querySelector('#note-path').textContent) });
+  const reveal = () => {
+    stage?.dispatchEvent(new Event('editor-ready'));
+    // Independent of the small network-failure guard successfully loading.
+    if (stage) stage.dataset.editorState = 'ready';
+    const loading = document.querySelector('[data-editor-loading]');
+    if (loading) loading.hidden = true;
+    if (readiness.dataset.readyText) {
+      readiness.textContent = readiness.dataset.readyText;
+      delete readiness.dataset.readyText;
+    }
+    if (api && !parent.hidden && shouldFocusEditor(desktop, document.activeElement, document.body, document.documentElement)) {
+      api.view.contentDOM.focus({ preventScroll: true });
+    }
+  };
+  // CM must measure in its final-width box before it becomes visible. Do not
+  // use display:none here: that would defer layout until after the reveal.
+  // The native link also works if the independent guard failed to download.
+  window.addEventListener('hashchange', () => {
+    if (location.hash === '#plain-source' && stage?.dataset.editorState === 'loading') {
+      setPresentation('plain', false, false);
+      reveal();
+    }
+  });
+  const measureReady = () => {
+    if (parent.hidden) { reveal(); return; }
+    // Large documents may need more than CM's initial synchronous parse budget.
+    // Only the visible viewport must be complete before its first paint.
+    if (!forceParsing(api.view, api.view.viewport.to, 50)) {
+      requestAnimationFrame(measureReady);
+      return;
+    }
+    api.view.requestMeasure({
+      read: () => null,
+      write: () => requestAnimationFrame(() => {
+        if (syntaxTreeAvailable(api.view.state, api.view.viewport.to)) reveal();
+        else measureReady();
+      }),
+    });
+  };
+  if (api && !parent.hidden) {
+    // font-display:swap must not change wrapping immediately after reveal.
+    const style = getComputedStyle(api.view.contentDOM);
+    // font-variant/features can make the computed font shorthand empty.
+    const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    Promise.resolve().then(() => document.fonts?.load(font))
+      .catch(() => {}).then(measureReady);
+  } else reveal();
 }
 attachNoteEditor();

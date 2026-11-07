@@ -369,3 +369,33 @@ enrolling an unverified marker.
 
 The [storage policy](storage.md), [limitations](limitations.md) and
 [operations guide](operations.md) describe the remaining boundaries.
+
+## Wiki timezone
+
+Save metadata uses one server-authoritative IANA timezone for the wiki, not the
+server's operating-system timezone or each editor's current travel timezone.
+
+- To pin an existing Omaha wiki before deploying this feature, set
+  `BACKSTORY_WIKI_TIMEZONE=America/Chicago` in its deployment environment.
+  Compose and Portainer forward this setting. No live setting is changed by an upgrade.
+- When that environment value is empty and no zone is saved, the first signed-in
+  **staff/superuser** browser on an ordinary wiki page initializes it from the
+  browser's IANA timezone. This is first-writer-wins, persisted in the private
+  application database, and never follows subsequent travel/browser changes.
+- **Browse wiki → Wiki timezone** shows the effective zone to all signed-in users.
+  Staff/superusers can override the saved zone there. An environment-pinned zone
+  is read-only in the UI. Stale setting forms cannot overwrite a newer choice.
+- Existing `create_account` accounts are ordinary wiki editors, not settings
+  owners: they may read the zone but cannot initialize/change it. A new installation
+  must either set the deployment environment above or use an administrator-created
+  staff/superuser account for initial browser setup. This feature does not promote
+  existing accounts or change account permissions.
+- Before configuration, including headless/API-only installations, the visible
+  fallback is **UTC**. A headless save does not persist that fallback, so later
+  authorized browser initialization still works. Browser detection failure also
+  leaves UTC until explicitly configured.
+
+Use an IANA name such as `America/Chicago`, `Europe/London`, or `UTC`; ambiguous
+abbreviations such as `CDT` are rejected. Changing zone affects future saves only.
+Today-note navigation remains browser-local and is not changed by this setting.
+The normal startup migration creates the setting table; back it up with the app DB.

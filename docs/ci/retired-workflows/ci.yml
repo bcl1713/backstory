@@ -1,0 +1,298 @@
+name: synthetic correctness
+on:
+  pull_request:
+  workflow_call:
+    inputs:
+      reuse_application:
+        description: Verified release-only application-test evidence; PRs always run all checks.
+        type: boolean
+        default: false
+      evidence_run_id:
+        type: string
+        default: ''
+permissions:
+  contents: read
+
+# Release callers have their own non-canceling publication concurrency group.
+concurrency:
+  group: correctness-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  branch-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote dev through main
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ "$BASE_BRANCH" = main ] && { [ "$HEAD_BRANCH" != dev ] || [ "$HEAD_REPOSITORY" != "$REPOSITORY" ]; }; then
+            echo 'Merge feature branches into dev, then open a dev → main promotion PR.' >&2
+            exit 1
+          fi
+
+  python:
+    if: ${{ !inputs.reuse_application }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: npm run build
+      # Evidence is optional: collection trouble must not weaken or fail PR tests.
+      - name: Record application-test environment
+        continue-on-error: true
+        run: python3 scripts/ci_evidence.py collect --job python --output "$RUNNER_TEMP/ci-evidence/receipt.json"
+      - name: Retain bounded test evidence
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-evidence-python-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-evidence/receipt.json
+          if-no-files-found: error
+          retention-days: 2
+      - run: uv run pytest -n 2 --dist loadfile --durations=20
+
+  formatter:
+    if: ${{ !inputs.reuse_application }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: npm ci
+      # Evidence is optional: collection trouble must not weaken or fail PR tests.
+      - name: Record application-test environment
+        continue-on-error: true
+        run: python3 scripts/ci_evidence.py collect --job formatter --output "$RUNNER_TEMP/ci-evidence/receipt.json"
+      - name: Retain bounded test evidence
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-evidence-formatter-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-evidence/receipt.json
+          if-no-files-found: error
+          retention-days: 2
+      - run: npm run test:formatter
+
+  browser:
+    if: ${{ !inputs.reuse_application }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: npm run build
+      - name: Use the upstream Ubuntu archive for browser dependencies
+        run: |
+          # The Azure mirror has stalled small dependency downloads in CI.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+          fi
+      - run: npx playwright install --with-deps --only-shell chromium
+      # Evidence is optional: collection trouble must not weaken or fail PR tests.
+      - name: Record application-test environment
+        continue-on-error: true
+        run: python3 scripts/ci_evidence.py collect --job browser-${{ matrix.shard }} --output "$RUNNER_TEMP/ci-evidence/receipt.json"
+      - name: Retain bounded test evidence
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ci-evidence-browser-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-evidence/receipt.json
+          if-no-files-found: error
+          retention-days: 2
+      # Each runner owns its server, SQLite database and synthetic wiki.
+      - run: npm run test:browser -- --shard=${{ matrix.shard }}/4
+      - name: Install Firefox for focused code-block coverage
+        if: matrix.shard == 1
+        run: npx playwright install --with-deps firefox
+      - name: Verify code blocks in Firefox
+        if: matrix.shard == 1
+        run: npx playwright test --config=playwright.code.config.js
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: table-preview-${{ matrix.shard }}
+          path: |
+            /tmp/backstory-release-one/reports/table-preview-*.png
+            /tmp/backstory-release-one/reports/editor-startup-*.png
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: rich-rendering-${{ matrix.shard }}
+          path: |
+            /tmp/backstory-release-one/browser-runtime/reports/images-*.png
+            /tmp/backstory-release-one/browser-runtime/reports/math-*.png
+            /tmp/backstory-release-one/browser-runtime/reports/image-upload-*.png
+            /tmp/backstory-release-one/browser-runtime/reports/mermaid-*.png
+            /tmp/backstory-release-one/browser-runtime/reports/graphviz-*.png
+            /tmp/backstory-release-one/browser-runtime/reports/vega-lite-*.png
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: failure()
+        with:
+          name: browser-failure-${{ matrix.shard }}
+          path: /tmp/backstory-release-one/reports/browser-artifacts
+          retention-days: 7
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - run: uv sync --frozen
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: backstory:ci
+          cache-from: |
+            type=gha,scope=ci-container
+            type=gha,scope=release-main
+          cache-to: type=gha,scope=ci-container,mode=max
+      - name: Disposable system and production configuration checks
+        env:
+          BACKSTORY_IMAGE: backstory:ci
+        run: |
+          uv run python -m tests.fixtures.generate "$RUNNER_TEMP/backstory-ci" --profile small --for-containers
+          set -a
+          . "$RUNNER_TEMP/backstory-ci/fixture.env"
+          set +a
+          uv run python manage.py check
+          BACKSTORY_COOKIE_MODE=https BACKSTORY_ALLOWED_HOSTS=example.invalid uv run python manage.py check --deploy --fail-level WARNING
+          docker compose config --quiet
+          docker compose run --pull never --rm web python manage.py check
+      - name: Clean up disposable container resources
+        if: always()
+        env:
+          BACKSTORY_IMAGE: backstory:ci
+        run: |
+          if [ -f "$RUNNER_TEMP/backstory-ci/fixture.env" ]; then
+            set -a
+            . "$RUNNER_TEMP/backstory-ci/fixture.env"
+            set +a
+            docker compose down --volumes
+          fi
+
+  # Always verify Firefox, including releases that reuse Chromium evidence.
+  firefox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps firefox
+      - run: npx playwright test --config playwright.firefox.config.js
+      - name: Obtain pinned stock Firefox and driver for issue 85
+        run: |
+          mkdir -p "$RUNNER_TEMP/stock-firefox"
+          cd "$RUNNER_TEMP/stock-firefox"
+          base=https://ftp.mozilla.org/pub/firefox/releases/155.0.1
+          curl --fail --silent --show-error --location "$base/linux-x86_64/en-US/firefox-155.0.1.tar.xz" --output firefox.tar.xz
+          curl --fail --silent --show-error --location "$base/SHA256SUMS" --output SHA256SUMS
+          python3 - <<'PYVERIFY'
+          import hashlib
+          from pathlib import Path
+          expected = [line.split()[0] for line in Path('SHA256SUMS').read_text().splitlines()
+                      if line.split()[-1] == 'linux-x86_64/en-US/firefox-155.0.1.tar.xz']
+          assert len(expected) == 1
+          assert hashlib.sha256(Path('firefox.tar.xz').read_bytes()).hexdigest() == expected[0]
+          PYVERIFY
+          tar -xJf firefox.tar.xz
+          curl --fail --silent --show-error --location https://github.com/mozilla/geckodriver/releases/download/v0.37.1/geckodriver-v0.37.1-linux64.tar.gz --output geckodriver.tar.gz
+          echo 'e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e  geckodriver.tar.gz' | sha256sum --check
+          tar -xzf geckodriver.tar.gz
+      - name: Verify renderers in stock Firefox 155.0.1
+        env:
+          STOCK_FIREFOX_BINARY: ${{ runner.temp }}/stock-firefox/firefox/firefox
+          GECKODRIVER_BINARY: ${{ runner.temp }}/stock-firefox/geckodriver
+          BACKSTORY_BROWSER_PORT: '8766'
+          BACKSTORY_BROWSER_RUNTIME: /tmp/backstory-stock-firefox
+        run: uv run --no-project --with selenium==4.52.0 python tests/browser/support/stock_firefox.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: firefox-renderers
+          path: |
+            /tmp/backstory-release-one/reports/browser-artifacts
+            /tmp/backstory-release-one/browser-runtime/reports/*-browser-firefox.png
+            /tmp/backstory-stock-firefox/reports
+          retention-days: 7
+
+  # Keep one required check for branch protection and release workflow callers.
+  correctness:
+    if: always()
+    needs: [branch-policy, python, formatter, browser, container, firefox]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every correctness job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          REUSE: ${{ inputs.reuse_application }}
+          EVIDENCE_RUN: ${{ inputs.evidence_run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          reuse = os.environ['REUSE'] == 'true'
+          if reuse and not (os.environ['GITHUB_EVENT_NAME'] == 'push'
+                            and os.environ['GITHUB_REF'] in ('refs/heads/dev', 'refs/heads/main')
+                            and os.environ['EVIDENCE_RUN'].isdigit()):
+              raise SystemExit('Invalid release evidence context')
+          reused = {'python', 'formatter', 'browser'} if reuse else set()
+          failed = [name for name, job in results.items()
+                    if job['result'] != ('skipped' if name in reused else 'success')]
+          if failed:
+              raise SystemExit('Correctness failed: ' + ', '.join(failed))
+          PY

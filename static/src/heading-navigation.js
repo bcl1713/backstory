@@ -1,5 +1,6 @@
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
+import { stickyEditorTop } from './editor-viewport.js';
 import { Transaction } from '@codemirror/state';
 
 // This mirrors heading_slug's plain-text cleanup. Headings come only from the
@@ -75,7 +76,7 @@ export function installHeadingNavigation(view) {
       used.add(candidate);
       if (candidate === wanted) position = node.from;
     } });
-    if (position !== null) view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: 'start' }), annotations: Transaction.addToHistory.of(false) });
+    if (position !== null) view.dispatch({ selection: { anchor: position }, effects: EditorView.scrollIntoView(position, { y: 'start', yMargin: stickyEditorTop(view.dom.ownerDocument) + 5 }), annotations: Transaction.addToHistory.of(false) });
   };
   const initial = setTimeout(jump, 0);
   window.addEventListener('hashchange', jump);

@@ -1,0 +1,31 @@
+{% extends "wiki/shell.html" %}
+{% block title %}Wiki timezone · Backstory{% endblock %}
+{% block content %}
+<section data-wiki-timezone-settings>
+<h1>Wiki timezone</h1>
+<p>Save metadata dates use <strong>{{ timezone }}</strong> for this wiki.</p>
+{% if source == 'environment' %}
+<p>The timezone is set by the server environment. It cannot be changed here; ask the administrator to update the environment setting.</p>
+{% elif source == 'saved' %}
+<p>This timezone is saved for the whole wiki. A different browser timezone will not replace it.</p>
+{% else %}
+<p>No wiki timezone has been saved. UTC is the fallback. On other wiki pages, an owner's browser can initialize the timezone once from its local timezone.</p>
+{% endif %}
+<p>Changing this setting affects dates on future saves only. It does not rewrite existing notes. Today navigation continues to use each browser's local date.</p>
+{% if error %}<p role="alert" class="errorlist">{{ error }}</p>{% endif %}
+{% if messages %}{% for message in messages %}<p role="status">{{ message }}</p>{% endfor %}{% endif %}
+{% if can_change and source != 'environment' %}
+<form method="post" action="/settings/timezone/">
+{% csrf_token %}
+<input type="hidden" name="action" value="override">
+<input type="hidden" name="expected_timezone" value="{{ timezone }}">
+<label for="wiki-timezone">Timezone</label>
+<input id="wiki-timezone" name="timezone" value="{{ timezone }}" required maxlength="255" spellcheck="false" autocapitalize="none" aria-describedby="timezone-help">
+<p id="timezone-help">Enter an IANA timezone, for example America/Chicago, Europe/London, or UTC. This changes the setting for everyone using this wiki.</p>
+<button type="submit">Save wiki timezone</button>
+</form>
+{% elif source != 'environment' %}
+<p>Only a wiki owner (staff or superuser) can change this setting.</p>
+{% endif %}
+</section>
+{% endblock %}

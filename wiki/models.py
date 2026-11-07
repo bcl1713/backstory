@@ -47,3 +47,9 @@ class MoveOperation(models.Model):
     reason_code = models.CharField(max_length=64, default='')
     index_state = models.CharField(max_length=16, default='not_started')
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class WikiSettings(models.Model):
+    """One server-authoritative setting row for this installation's wiki."""
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    timezone = models.CharField(max_length=128)

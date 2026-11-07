@@ -118,6 +118,21 @@ def _paging(request, default):
 
 
 @_tool
+def complete(request):
+    from indexing.completions import complete_notes
+    authorize_content(request, '', 'folder')
+    require_ready()
+    page = complete_notes(request.GET.get('query', ''))
+    freshness = asdict(page.freshness)
+    unavailable = freshness['state'] == 'unavailable'
+    return _json({
+        'state': 'unavailable' if unavailable else 'suggestions',
+        'items': [asdict(item) for item in page.items],
+        'freshness': freshness, 'truncated': page.truncated, 'authoritative': False,
+    }, 503 if unavailable else 200)
+
+
+@_tool
 def search(request):
     # Even discovery is gated by the same authentication/policy/readiness boundary.
     authorize_content(request, '', 'folder')
@@ -167,3 +182,39 @@ def list_notes(request):
         entries.append({**asdict(entry), 'href': href})
     return _json({'state': 'ok', 'path': page.path, 'entries': entries,
                   'next_cursor': page.next_cursor, 'authoritative': True})
+
+
+@_tool(methods=('POST',))
+def create_folder(request):
+    from .folders import create_folder as create
+    if request.content_type != 'application/json':
+        raise StorageError('invalid_folder_request')
+    try:
+        body = json.loads(request.body)
+        if not isinstance(body, dict) or set(body) != {'path'}:
+            raise ValueError
+    except (ValueError, UnicodeError, RequestDataTooBig):
+        raise StorageError('invalid_folder_request') from None
+    path = authorize_content(request, body['path'], 'folder')
+    result = create(path, request.user)
+    return _json(result, 201 if result['state'] == 'created' else 409 if result['state'] == 'uncertain' else 200)
+
+
+@_tool
+def status(request):
+    from .tool_status import status_snapshot
+    return _json(status_snapshot())
+
+
+@_tool(methods=('POST',))
+def read_many(request):
+    from .tool_reads import read_many as read_batch
+    if request.content_type != 'application/json':
+        raise StorageError('invalid_read_many_request')
+    try:
+        body = json.loads(request.body)
+        if not isinstance(body, dict) or set(body) != {'paths'}:
+            raise ValueError
+    except (ValueError, UnicodeError, RequestDataTooBig):
+        raise StorageError('invalid_read_many_request') from None
+    return _json(read_batch(request, body['paths']))

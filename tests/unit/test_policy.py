@@ -60,3 +60,28 @@ def test_existing_formatting_config_policy_exceptions_are_preserved():
                 p.validate_path(path, purpose)
     for path in ["formatting/options.json", "formatting/options.jsonc", "formatting/options.yaml", "formatting/options.yml"]:
         assert p.validate_path(path, "config-reference") == path
+
+
+@pytest.mark.parametrize('path', ['syncthing.md', 'docs/syncthing-overview.md', 'docs/Syncthing-Wiki-Sync.MD'])
+def test_syncthing_documentation_is_content(path):
+    assert policy().validate_path(path, 'content') == path
+
+
+@pytest.mark.parametrize('path', [
+    'syncthing/config.xml', 'syncthing-data/note.md', 'syncthing.md/note.md',
+    '.syncthing.tmp', '.stfolder', '.stversions/note.md',
+    'syncthing.log', 'syncthing-config.xml', 'syncthing-overview.md.bak',
+    'syncthing-overview.sync-conflict-20261031.md',
+    'credentials/syncthing-overview.md', 'docs/.syncthing-overview.md',
+])
+def test_syncthing_metadata_and_unsafe_parents_remain_denied(path):
+    with pytest.raises(policy().PathDenied):
+        policy().validate_path(path, 'content')
+
+
+def test_syncthing_documentation_does_not_allow_folder_or_exclusion(settings):
+    with pytest.raises(policy().PathDenied):
+        policy().validate_path('syncthing-overview.md', 'folder')
+    settings.BACKSTORY_EXCLUSIONS = ['docs/syncthing-overview.md']
+    with pytest.raises(policy().PathDenied):
+        policy().validate_path('docs/syncthing-overview.md', 'content')

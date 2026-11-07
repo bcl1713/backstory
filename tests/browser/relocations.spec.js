@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { runtime } from './support/server.js';
 import { revealChrome } from './support/chrome.js';
+import { waitForEnhancedEditor } from './support/editor-ready.js';
 
 test.setTimeout(90000);
 
@@ -37,7 +38,7 @@ test('folder archival previews exact link changes and refreshes navigation', asy
   await expect(page.getByRole('status').filter({ hasText: 'completed' })).toBeVisible();
   expect(await readFile(`${runtime}/wiki/${root}/Index.md`, 'utf8')).toBe(`# Active\n[[${root}/Archives/Project/Project|Project alias]]\n`);
   await page.getByRole('link', { name: 'Open destination', exact: true }).click();
-  await expect(page.getByRole('link', { name: 'Project.md', exact: true })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Folder', exact: true }).getByRole('link', { name: 'Project.md', exact: true })).toBeVisible();
 });
 
 test('unsaved note draft blocks its move entry point without discarding editor history', async ({ page }) => {
@@ -45,7 +46,7 @@ test('unsaved note draft blocks its move entry point without discarding editor h
   await login(page);
   await page.goto(`/notes/${root}/Active/Project.md`);
   const editor = page.locator('[data-markdown-editor]');
-  await expect.poll(() => editor.evaluate(el => Boolean(el.markdownEditor))).toBe(true);
+  await waitForEnhancedEditor(page);
   await editor.evaluate(el => el.markdownEditor.setSource('# My unsaved draft\n'));
   await revealChrome(page);
   let dialogs = 0;
@@ -67,16 +68,22 @@ test('an open editor retains unsaved source and cannot recreate the old path aft
   await login(page);
   await page.goto(`/notes/${root}/Active/Project.md`);
   const editor = page.locator('[data-markdown-editor]');
-  await expect.poll(() => editor.evaluate(el => Boolean(el.markdownEditor))).toBe(true);
+  await waitForEnhancedEditor(page);
+  // Keep this regression's draft unsaved while the separate move review runs.
+  const now = new Date('2026-10-26T15:00:00Z');
+  await page.clock.install({ time: now });
+  await page.clock.pauseAt(new Date(now.getTime() + 1000));
   await editor.evaluate(el => el.markdownEditor.setSource('# Draft from another tab\n'));
   const mover = await context.newPage();
   await mover.goto('/move/?' + new URLSearchParams({ source: `${root}/Active/Project.md` }));
   await mover.getByLabel('Destination path').fill(`${root}/Archives/Project.md`);
   await mover.getByRole('button', { name: 'Preview move', exact: true }).click();
   await mover.getByRole('button', { name: 'Confirm move and link updates' }).click();
+  await expect(mover.getByRole('status').filter({ hasText: 'completed' })).toBeVisible();
   await page.bringToFront();
   await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.locator('[data-editor-status]')).toContainText('Revision conflict');
+  await expect(page.locator('[data-sync-message]')).toContainText('deleted or moved');
+  await expect(page.locator('[data-editor-status]')).toContainText('Draft retained');
   expect(await editor.evaluate(el => el.markdownEditor.getSource())).toBe('# Draft from another tab\n');
   expect(await readFile(`${runtime}/wiki/${root}/Archives/Project.md`, 'utf8')).toBe('# Project\n');
   await mover.close();

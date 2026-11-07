@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { writeFile, readFile } from 'node:fs/promises';
 import { runtime } from './support/server.js';
+import { expireSession } from './support/session.js';
 
 async function login(page) {
   await page.goto('/accounts/login/');
@@ -32,7 +33,7 @@ test('signed-in tools read current source through fixed endpoints and never exec
   await page.goto('/accounts/login/');
   expect(await page.evaluate(() => Object.keys(window.registeredWikiTools))).toEqual([]);
   await login(page);
-  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['list_notes', 'read_note', 'save_note', 'search_notes']);
+  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'list_notes', 'read_note', 'read_notes', 'save_note', 'search_notes', 'wiki_status']);
   const requests = [];
   page.on('request', request => { if (request.url().includes('/tools/')) requests.push(request); });
   const result = await page.evaluate(async () => {
@@ -49,7 +50,7 @@ test('signed-in tools read current source through fixed endpoints and never exec
   expect(list.entries.length).toBeLessThanOrEqual(2);
   const search = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.search_notes.execute({ query: 'missing-synthetic-search' })));
   expect(['no_matches', 'incomplete', 'unavailable']).toContain(search.state);
-  expect(requests.every(request => request.method() === 'GET' && new URL(request.url()).origin === 'http://127.0.0.1:8765')).toBe(true);
+  expect(requests.every(request => request.method() === 'GET' && new URL(request.url()).origin === new URL(page.url()).origin)).toBe(true);
   await writeFile(`${runtime}/wiki/Tool note.md`, '# Changed externally\n');
   const changed = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.read_note.execute({ path: 'Tool note.md' })));
   expect(changed.source).toBe('# Changed externally\n');
@@ -61,10 +62,10 @@ test('session expiration returns an authentication error without redirecting the
   await stubHost(page);
   await login(page);
   await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.read_note))).toBe(true);
-  await context.clearCookies();
+  await expireSession(context);
   const result = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.read_note.execute({ path: 'Slice.md' })));
   expect(result).toMatchObject({ state: 'error', reason_code: 'authentication_required' });
-  expect(page.url()).toBe('http://127.0.0.1:8765/');
+  expect(new URL(page.url()).pathname).toBe('/');
 });
 
 test('unsupported browsers and asynchronously rejected registration preserve ordinary UI', async ({ page }) => {
@@ -136,7 +137,7 @@ test('tool save refuses an unsaved editor draft and preserves undo history', asy
   expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Original\n');
 });
 
-test('tool save retains a clean editor base so later human edits encounter a conflict', async ({ page }) => {
+test('tool save refreshes a clean editor and later human Save uses the refreshed base', async ({ page }) => {
   await writeFile(`${runtime}/wiki/Tool stale.md`, '# Original\n');
   await stubHost(page);
   await login(page);
@@ -145,13 +146,14 @@ test('tool save retains a clean editor base so later human edits encounter a con
   const base = await callTool(page, 'read_note', { path: 'Tool stale.md' });
   const saved = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Assistant\n' });
   expect(saved.state).toBe('saved');
-  expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Original\n');
+  await expect.poll(() => page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Assistant\n');
   await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.setSource('# Human draft\n'));
+  const response = page.waitForResponse(r => r.url().includes('/save/Tool%20stale.md'));
   await page.locator('[data-save]').click();
-  await expect(page.locator('[data-conflict]')).toBeVisible();
-  await expect(page.locator('#conflict-base')).toHaveValue('# Original\n');
-  await expect(page.locator('#conflict-current')).toHaveValue('# Assistant\n');
-  await expect(page.locator('#conflict-draft')).toHaveValue('# Human draft\n');
+  const confirmed = await response;
+  expect(confirmed.status()).toBe(200);
+  expect(confirmed.request().headers()['if-match']).toBe(saved.revision);
+  await expect(page.locator('[data-conflict]')).toBeHidden();
 });
 
 test('edits during a tool save survive and concurrent editor operations are held', async ({ page }) => {
@@ -169,7 +171,7 @@ test('edits during a tool save survive and concurrent editor operations are held
   await expect(page.locator('[data-save]')).toBeDisabled();
   await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.setSource('# Newer human draft\n'));
   const concurrent = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Concurrent\n' });
-  expect(concurrent.reason_code).toBe('save_in_progress');
+  expect(concurrent).toMatchObject({ reason_code: 'save_in_progress', request_started: false, queued: false });
   await held.continue();
   const saved = await page.evaluate(async () => JSON.parse(await window.pendingToolSave));
   expect(saved.state).toBe('saved');
@@ -220,7 +222,7 @@ test('expired tool writes return authentication errors and leave disk unchanged'
   await stubHost(page);
   await login(page);
   const base = await callTool(page, 'read_note', { path: 'Tool expired.md' });
-  await context.clearCookies();
+  await expireSession(context);
   const result = await callTool(page, 'save_note', { path: base.path, revision: base.revision, source: '# Draft\n' });
   expect(result.reason_code).toBe('authentication_required');
   expect(await readFile(`${runtime}/wiki/Tool expired.md`, 'utf8')).toBe('# Original\n');
@@ -240,5 +242,55 @@ test('a host synchronously rejecting the save tool still discovers usable read t
   await login(page);
   const result = await callTool(page, 'read_note', { path: 'Slice.md' });
   expect(result.authoritative).toBe(true);
-  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['list_notes', 'read_note', 'search_notes']);
+  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'list_notes', 'read_note', 'read_notes', 'search_notes', 'wiki_status']);
+});
+
+test('create_folder is consequential, exclusive and does not initialize timezone or edit notes', async ({ page }) => {
+  await stubHost(page);
+  await login(page);
+  await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.create_folder))).toBe(true);
+  const requests = [];
+  page.on('request', request => { if (request.method() === 'POST') requests.push(new URL(request.url()).pathname); });
+  const result = await page.evaluate(async () => {
+    const tool = window.registeredWikiTools.create_folder;
+    return { annotations: tool.annotations, first: JSON.parse(await tool.execute({ path: 'Synthetic tool folder' })), second: JSON.parse(await tool.execute({ path: 'Synthetic tool folder' })) };
+  });
+  expect(result.annotations).toMatchObject({ readOnlyHint: false, consequentialHint: true });
+  expect(result.first).toMatchObject({ state: 'created', authoritative: true });
+  expect(result.second.state).toBe('already_exists');
+  expect(requests).toEqual(['/tools/create-folder/', '/tools/create-folder/']);
+});
+
+test('lost create_folder acknowledgement is uncertain without an automatic retry', async ({ page }) => {
+  await stubHost(page);
+  await login(page);
+  await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.create_folder))).toBe(true);
+  let posts = 0;
+  await page.route('**/tools/create-folder/', async route => {
+    posts++;
+    await route.fetch();
+    await route.abort('failed');
+  });
+  const result = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.create_folder.execute({ path: 'Synthetic lost folder ack' })));
+  expect(result).toMatchObject({ state: 'uncertain', read_before_retry: true });
+  expect(posts).toBe(1);
+  const listing = await page.evaluate(async () => JSON.parse(await window.registeredWikiTools.list_notes.execute({ folder: '' })));
+  expect(listing.entries.some(entry => entry.path === 'Synthetic lost folder ack')).toBe(true);
+});
+
+test('status and multiple reads are read-only tools with explicit partial results', async ({ page }) => {
+  await writeFile(`${runtime}/wiki/Tool batch.md`, '# Batch\n');
+  await stubHost(page);
+  await login(page);
+  await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.read_notes))).toBe(true);
+  const result = await page.evaluate(async () => ({
+    annotation: window.registeredWikiTools.read_notes.annotations,
+    status: JSON.parse(await window.registeredWikiTools.wiki_status.execute({})),
+    batch: JSON.parse(await window.registeredWikiTools.read_notes.execute({ paths: ['Tool batch.md', 'missing-batch.md'] })),
+  }));
+  expect(result.annotation.readOnlyHint).toBe(true);
+  expect(result.status.application.build).toBe('unknown');
+  expect(result.batch.state).toBe('partial');
+  expect(result.batch.results[0]).toMatchObject({ state: 'ok', source: '# Batch\n', authoritative: true });
+  expect(result.batch.results[1].state).toBe('missing');
 });

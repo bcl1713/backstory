@@ -7,14 +7,16 @@ RUN --mount=type=secret,id=proxy_ca \
     npm ci --strict-ssl=true
 COPY assets ./assets
 COPY static/src ./static/src
-COPY scripts/build-assets.mjs ./scripts/build-assets.mjs
+COPY scripts/build-assets.mjs scripts/build-mermaid-frame.mjs scripts/build-graphviz-frame.mjs scripts/build-vega-lite-frame.mjs ./scripts/
 RUN npm run build && npm prune --omit=dev --ignore-scripts --no-audit --no-fund && mkdir /node-libs && cp /usr/lib/*-linux-gnu/libstdc++.so.6 /node-libs/
 
 FROM ghcr.io/astral-sh/uv:0.12.19 AS uv
 FROM python:3.14.9-slim-bookworm AS runtime
-ARG BACKSTORY_VERSION=1.0.0
+ARG BACKSTORY_VERSION=unknown
+ARG BACKSTORY_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/bcl1713/backstory" \
     org.opencontainers.image.version="$BACKSTORY_VERSION"
+ENV BACKSTORY_BUILD_REVISION="$BACKSTORY_REVISION" BACKSTORY_BUILD_VERSION="$BACKSTORY_VERSION"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 COPY --from=uv /uv /usr/local/bin/uv
@@ -27,7 +29,8 @@ COPY --from=assets /node-libs/ /usr/local/lib/
 COPY --from=assets /app/node_modules ./node_modules
 COPY . .
 COPY --from=assets /app/static ./static
-RUN ldconfig && BACKSTORY_WIKI_ROOT=/tmp/backstory-build/wiki \
+RUN python -m wiki.build_identity "$BACKSTORY_VERSION" "$BACKSTORY_REVISION" \
+    && ldconfig && BACKSTORY_WIKI_ROOT=/tmp/backstory-build/wiki \
     BACKSTORY_DATA_DIR=/tmp/backstory-build/data \
     BACKSTORY_ALLOWED_HOSTS=localhost \
     python manage.py collectstatic --noinput \

@@ -49,9 +49,12 @@ Run correctness checks against disposable roots:
 
 ```sh
 uv run pytest
+# Same parallel Python execution used in CI:
+uv run pytest -n 2 --dist loadfile --durations=20
 npm run test:formatter
 npx playwright install chromium
-npm run test:browser
+# Select browser coverage relevant to the change, for example:
+npm run test:browser -- tests/browser/wiki-tools.spec.js
 ```
 
 Browser tests own `/tmp/backstory-release-one/browser-runtime`, bind only
@@ -59,6 +62,23 @@ Browser tests own `/tmp/backstory-release-one/browser-runtime`, bind only
 `/tmp/backstory-release-one/reports`. They never load the caller's configured
 wiki. Python tests create and clean their own temporary roots. Formatter tests
 invoke the real packaged helper. There are no latency gates or benchmarks.
+
+The [local CI runner](ci/README.md) runs focused Firefox browser suites with unique
+runtime directories and retains failure traces/screenshots beside the local
+receipt. The catch-all Chromium suite is no longer an automatic gate. Choose
+specific spec files for browser checks relevant to an issue, as above. Keep
+Playwright's worker count at one.
+
+Concurrent checkouts can isolate browser tests with both
+`BACKSTORY_BROWSER_RUNTIME=/tmp/backstory-my-task` and
+`BACKSTORY_BROWSER_PORT=8868`. Use a distinct disposable root and loopback port
+for each run; tests within a run still share one worker and synthetic wiki.
+
+Open ordinary PRs against `dev`. After review and complete local acceptance,
+merge; the local publisher on forge tests the resulting commit and automatically
+publishes its prerelease and `:dev` image. Promote through a `dev` → `main` merge
+PR for automatic stable publication after its own full gate. See
+[local releases](releases.md) for versioning and separate test/production stacks.
 
 Default production configuration is HTTPS with Secure cookies, HSTS and explicit
 hosts/origins. Local fixtures explicitly select localhost mode and proxy mode

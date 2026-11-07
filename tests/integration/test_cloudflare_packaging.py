@@ -157,3 +157,17 @@ def test_example_dotenv_selects_tunnel_manifest_with_plain_compose(tmp_path):
     assert next(m for m in web['volumes'] if m['target'] == '/wiki')['read_only'] is True
     assert connector['volumes'][0]['source'] == '/absolute/private/path/cloudflare-tunnel-token'
     assert not web.get('ports')
+
+@pytest.mark.parametrize('portainer', [False, True])
+@pytest.mark.parametrize('origin', [None, '', 'https://wiki.example.test'])
+def test_self_contained_tunnel_transports_optional_renderer_origin_without_new_trust(tmp_path, portainer, origin):
+    deployment = rendered(config(tmp_path, portainer=portainer, BACKSTORY_MERMAID_PARENT_ORIGIN=origin))
+    web = deployment['services']['web']
+    assert web['environment']['BACKSTORY_MERMAID_PARENT_ORIGIN'] == (origin or '')
+    assert web['environment']['BACKSTORY_COOKIE_MODE'] == 'https'
+    assert web['environment']['BACKSTORY_PROXY_MODE'] == 'trusted'
+    assert web['environment']['BACKSTORY_CSRF_TRUSTED_ORIGINS'] == 'https://wiki.example.test'
+    assert web['environment']['BACKSTORY_TRUSTED_PROXY_IPS'] == '172.30.241.3/32'
+    assert web['environment']['BACKSTORY_PROXY_CLIENT_IP_HEADER'] == 'none'
+    assert not web.get('ports') and set(web['networks']) == {'origin'}
+    assert not deployment['services']['cloudflared'].get('environment')

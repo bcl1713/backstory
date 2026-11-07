@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from django.conf import settings
 from django.db import transaction
+from django.db.models import F
 from wiki.policy import validate_path
 from .models import IndexJob, ScanState
 
@@ -15,6 +16,12 @@ class JobState:
 def enqueue_note(path: str, revision: str):
     validate_path(path, 'content')
     with transaction.atomic():
+        # Reserve the SQLite writer before taking a read snapshot. Otherwise a
+        # worker commit between SELECT and INSERT causes SQLITE_BUSY_SNAPSHOT,
+        # which cannot wait for the configured busy timeout. Even a zero-row
+        # UPDATE acquires write intent; bootstrap remains safe too. No note I/O
+        # occurs inside this short queue transaction.
+        ScanState.objects.filter(pk=1).update(reconcile_needed=F('reconcile_needed'))
         state, _ = ScanState.objects.get_or_create(pk=1)
         existing = IndexJob.objects.filter(path=path)
         if existing.exists():

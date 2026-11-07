@@ -1,0 +1,22 @@
+{% extends 'wiki/shell.html' %}
+{% block title %}Linked note · Backstory{% endblock %}
+{% block content %}
+{% if existing_href %}
+<h1>This note already exists</h1>
+<p>The target is available. Open it to view or edit its current content.</p>
+<p><a href="{{ existing_href }}">Open existing note</a></p>
+{% else %}
+<h1>Choose a note destination</h1>
+<p>More than one note matches this link. Choose the note you intend to open.</p>
+<ul>{% for choice in choices %}<li><a href="{{ choice.href }}">{{ choice.path }}</a></li>{% endfor %}</ul>
+<form method="get" action="{% url 'wiki:linked-new' %}">
+<input type="hidden" name="source" value="{{ source_path }}">
+<input type="hidden" name="target" value="{{ target }}">
+<label for="new-destination">New note path</label>
+<p id="new-path-help">To create a different note, enter its full Markdown path from the wiki root, ending in .md. Its folder must already exist. The original link will keep its current spelling.</p>
+<input id="new-destination" name="destination" maxlength="4096" aria-describedby="new-path-help" required>
+<button type="submit">Continue to Create Note</button>
+</form>
+{% endif %}
+<p><a href="{% url 'wiki:note' source_path %}">Return to source note</a></p>
+{% endblock %}

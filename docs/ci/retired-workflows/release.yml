@@ -1,0 +1,235 @@
+name: release
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+# Keep a release together; never cancel an image upload mid-publication.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+
+jobs:
+  # Read-only probe: any failure or unverifiable evidence selects the full suite.
+  evidence:
+    continue-on-error: true
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      reuse: ${{ steps.decision.outputs.reuse }}
+      run_id: ${{ steps.decision.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+          python-version: '3.14'
+          enable-cache: true
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.4'
+          cache: npm
+      - run: uv sync --frozen
+      - run: npm ci
+      - run: npm run build
+      - name: Probe application environments
+        run: |
+          python3 scripts/ci_evidence.py probe --profile formatter --output "$RUNNER_TEMP/ci-probe.json"
+          python3 scripts/ci_evidence.py probe --profile python --output "$RUNNER_TEMP/ci-probe.json"
+      - name: Use the upstream Ubuntu archive for browser dependencies
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/apt-mirrors.txt
+          fi
+      - run: npx playwright install --with-deps --only-shell chromium
+      - run: python3 scripts/ci_evidence.py probe --profile browser --output "$RUNNER_TEMP/ci-probe.json"
+      - name: Verify prior successful PR evidence
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_PROBE_FILE: ${{ runner.temp }}/ci-probe.json
+        run: python3 scripts/ci_evidence.py decide
+
+  correctness:
+    needs: evidence
+    if: ${{ always() && !cancelled() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev') }}
+    uses: ./.github/workflows/ci.yml
+    with:
+      reuse_application: ${{ needs.evidence.result == 'success' && needs.evidence.outputs.reuse == 'true' }}
+      evidence_run_id: ${{ needs.evidence.outputs.run_id }}
+
+  publish:
+    needs: correctness
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      RELEASE_BRANCH: ${{ github.ref_name }}
+      RELEASE_CHANNEL: ${{ github.ref_name == 'dev' && 'dev' || 'stable' }}
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select semantic version
+        id: version
+        run: |
+          git fetch origin "$RELEASE_BRANCH" --tags
+          if [ "$(git rev-parse "origin/$RELEASE_BRANCH")" != "$GITHUB_SHA" ]; then
+            echo "$RELEASE_BRANCH has advanced; use the release run for its current head." >&2
+            exit 1
+          fi
+          python3 scripts/release-version.py --channel "$RELEASE_CHANNEL"
+      - name: Check for an already published release
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          # A successful empty list means absence; API/auth failures stop the run.
+          state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == env.TAG) | if .draft then "draft" else "published" end')"
+          case "$state" in
+            published)
+              echo 'published=true' >> "$GITHUB_OUTPUT"
+              echo "Release $TAG is already published; nothing to do." >> "$GITHUB_STEP_SUMMARY" ;;
+            draft|'') ;;
+            *) echo 'Unexpected release lookup result; refusing publication.' >&2; exit 1 ;;
+          esac
+      - name: Image metadata
+        if: steps.existing.outputs.published != 'true'
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          image="ghcr.io/${REPOSITORY,,}"
+          echo "name=$image" >> "$GITHUB_OUTPUT"
+          {
+            echo 'aliases<<EOF'
+            if [ "$RELEASE_CHANNEL" = dev ]; then
+              echo "$image:dev"
+            else
+              echo "$image:${VERSION%.*}"
+              echo "$image:${VERSION%%.*}"
+              echo "$image:latest"
+            fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+        if: steps.existing.outputs.published != 'true'
+      - uses: docker/setup-buildx-action@v3
+        if: steps.existing.outputs.published != 'true'
+      - uses: docker/login-action@v3
+        if: steps.existing.outputs.published != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and publish the tested commit
+        if: steps.existing.outputs.published != 'true'
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            BACKSTORY_VERSION=${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}
+            ${{ steps.image.outputs.name }}:${{ steps.version.outputs.tag }}
+          cache-from: |
+            type=gha,scope=release-${{ github.ref_name }}
+            type=gha,scope=ci-container
+          cache-to: type=gha,scope=release-${{ github.ref_name }},mode=max
+      - name: Publish channel aliases for current head
+        if: steps.existing.outputs.published != 'true'
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          ALIASES: ${{ steps.image.outputs.aliases }}
+        run: |
+          # A newer commit may have arrived during the multi-platform build.
+          git fetch origin "$RELEASE_BRANCH"
+          if [ "$(git rev-parse "origin/$RELEASE_BRANCH")" != "$GITHUB_SHA" ]; then
+            echo "$RELEASE_BRANCH advanced during the build; refusing to move channel aliases." >&2
+            exit 1
+          fi
+          tags=()
+          while IFS= read -r alias; do
+            tags+=(--tag "$alias")
+          done <<< "$ALIASES"
+          docker buildx imagetools create "${tags[@]}" "$IMAGE@$DIGEST"
+      - name: Prepare deployment assets and release notes
+        if: steps.existing.outputs.published != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE: ${{ steps.image.outputs.name }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          mkdir release-assets
+          cp compose.portainer.yaml release-assets/
+          sed "s/1\.0\.0/$VERSION/g" docs/portainer.md > release-assets/portainer.md
+          sed "s|^BACKSTORY_IMAGE=.*|BACKSTORY_IMAGE=$IMAGE:$VERSION|" portainer.env.example > release-assets/portainer.env.example
+          (cd release-assets && sha256sum compose.portainer.yaml portainer.env.example portainer.md > SHA256SUMS)
+          cat > release-assets/release-notes.md <<EOF
+          Deploy Backstory with Portainer or Docker Compose using the attached files. No clone or local build is required.
+
+          Image: \`$IMAGE:$VERSION\` (linux/amd64 and linux/arm64)
+
+          Digest: \`$IMAGE@$DIGEST\`
+
+          Tested source: \`$SOURCE_SHA\`
+
+          Release channel: \`$RELEASE_CHANNEL\`. Publishing does not redeploy a server.
+
+          Start with the [Portainer deployment guide](https://github.com/${{ github.repository }}/blob/${{ steps.version.outputs.tag }}/docs/portainer.md).
+          Set your storage paths, UID/GID, public host, CSRF origin and actual trusted proxy peer; create named accounts interactively after startup.
+          EOF
+      - name: Create matching GitHub release after image publication
+        if: steps.existing.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SOURCE_SHA: ${{ github.sha }}
+          PREVIOUS: ${{ steps.version.outputs.previous }}
+        run: |
+          state="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == env.TAG) | if .draft then "draft" else "published" end')"
+          case "$state" in
+            '')
+              notes_args=()
+              if [ -n "$PREVIOUS" ] && [ "$PREVIOUS" != "$TAG" ]; then
+                notes_args+=(--notes-start-tag "$PREVIOUS")
+              fi
+              gh release create "$TAG" --target "$SOURCE_SHA" --title "Backstory $TAG" --draft \
+                --generate-notes --notes-file release-assets/release-notes.md "${notes_args[@]}" ;;
+            draft)
+              # A draft might predate this commit or this build's digest.
+              gh release edit "$TAG" --target "$SOURCE_SHA" --notes-file release-assets/release-notes.md ;;
+            *) echo 'Release is already public or state is unexpected; refusing to modify it.' >&2; exit 1 ;;
+          esac
+          gh release upload "$TAG" release-assets/compose.portainer.yaml release-assets/portainer.env.example \
+            release-assets/portainer.md release-assets/SHA256SUMS --clobber
+          if [ "$RELEASE_CHANNEL" = dev ]; then
+            gh release edit "$TAG" --draft=false --prerelease=true --latest=false
+          else
+            gh release edit "$TAG" --draft=false --prerelease=false --latest=true
+          fi
+          echo "Published [$TAG](https://github.com/${{ github.repository }}/releases/tag/$TAG)" >> "$GITHUB_STEP_SUMMARY"

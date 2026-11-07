@@ -42,7 +42,7 @@ CONFIG_NAMES = frozenset({
     ".prettierignore", ".markdownlintignore",
     ".editorconfig", ".gitignore",
 })
-_POLICY_VERSION = "3"
+_POLICY_VERSION = "4"
 
 
 def policy_version():
@@ -93,9 +93,17 @@ def validate_path(path: str, purpose: str):
             raise PathDenied()
     elif parts[-1].casefold() in CONFIG_NAMES:
         raise PathDenied()
-    for part in parts:
+    for index, part in enumerate(parts):
         lowered = part.casefold()
-        if part.startswith(".") or lowered in _DENIED_NAMES or any(fnmatch.fnmatchcase(lowered, pattern) for pattern in _DENIED_PATTERNS):
+        # Syncthing documentation is not sync metadata. Exempt only this one
+        # prefix rule for a final Markdown content component; all other rules,
+        # parent components, administrator exclusions and no-follow IO remain.
+        documentation = purpose == "content" and index == len(parts) - 1 and lowered.endswith(".md")
+        if part.startswith(".") or lowered in _DENIED_NAMES or any(
+            fnmatch.fnmatchcase(lowered, pattern)
+            for pattern in _DENIED_PATTERNS
+            if not (pattern == "syncthing*" and documentation)
+        ):
             raise PathDenied()
     for pattern in (() if purpose == "identity" else settings.BACKSTORY_EXCLUSIONS):
         pattern = pattern.rstrip("/")

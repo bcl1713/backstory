@@ -73,6 +73,65 @@ def exact_https_origin(origin, hosts):
         return False
 
 
+def _browser_ipv6(address):
+    # WHATWG serializes eight hexadecimal pieces, even for IPv4-mapped IPv6.
+    # Python 3.13+ str/compressed may instead emit a dotted IPv4 suffix.
+    packed = address.packed
+    pieces = [int.from_bytes(packed[index:index + 2]) for index in range(0, 16, 2)]
+    best_start, best_size, index = -1, 1, 0
+    while index < 8:
+        start = index
+        while index < 8 and pieces[index] == 0:
+            index += 1
+        if index - start > best_size:
+            best_start, best_size = start, index - start
+        index += 1
+    text = [format(piece, 'x') for piece in pieces]
+    if best_start >= 0:
+        return ':'.join(text[:best_start]) + '::' + ':'.join(text[best_start + best_size:])
+    return ':'.join(text)
+
+
+def exact_renderer_origin(origin, hosts, cookie_mode):
+    """One canonical browser origin; never derive embedding authority from CSRF."""
+    if not isinstance(origin, str) or not origin or not origin.isascii():
+        return False
+    try:
+        parsed = urlsplit(origin)
+        host = parsed.hostname
+        authority = f'[{host}]' if host and ':' in host else host
+        if (not authority or not exact_host(authority) or authority not in hosts
+                or any(c.isspace() or ord(c) < 32 for c in origin)
+                or parsed.username is not None or parsed.password is not None
+                or parsed.path or parsed.query or parsed.fragment):
+            return False
+        # Browser special-scheme URLs normalize legacy IPv4 spellings and
+        # compress IPv6. Reject rather than silently broaden host authority.
+        # WHATWG URL: host parsing / ends-in-a-number / host serialization.
+        if ':' in host:
+            if host != _browser_ipv6(ipaddress.IPv6Address(host)):
+                return False
+        elif re.fullmatch(r'(?:[0-9]+|0[xX][0-9a-fA-F]*)', host.rsplit('.', 1)[-1]):
+            # Numeric-ending DNS names are interpreted as IPv4 by browsers too.
+            # IPv4Address accepts only four canonical decimal octets, rejecting
+            # shortened/integer/hex/octal/malformed numeric forms.
+            if host != str(ipaddress.IPv4Address(host)):
+                return False
+        if cookie_mode == 'localhost':
+            if parsed.scheme != 'http' or authority not in {'localhost', '127.0.0.1', '[::1]'}:
+                return False
+            if parsed.port is None or parsed.port == 80:
+                return False
+        elif cookie_mode != 'https' or parsed.scheme != 'https' or parsed.port == 443:
+            return False
+        if parsed.port is not None and not 1 <= parsed.port <= 65535:
+            return False
+        canonical = f'{parsed.scheme}://{authority}' + (f':{parsed.port}' if parsed.port else '')
+        return origin == canonical
+    except (TypeError, ValueError):
+        return False
+
+
 def safe_origin_bind(address, cookie_mode):
     try:
         if not isinstance(address, str) or '%' in address:

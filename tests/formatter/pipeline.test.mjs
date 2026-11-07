@@ -154,3 +154,94 @@ test('Prettier honors root gitignore while markdownlint gitignore stays independ
   assert.equal(both.outcome,'skipped');
   assert.equal(both.source,source);
 });
+
+test('packaged formatter preserves explicit TeX delimiters and expressions at its fixed point', () => {
+  const source = '# Math\n\nInline \\(a_1 + \\frac{b}{c}\\); $5 and $10.\n\n\\[x^2 + y^2\\]\n\n$$\n\\begin{matrix}a&b\\\\c&d\\end{matrix}\n$$\n';
+  const result = helper(source);
+  assert.equal(result.outcome, 'ok');
+  assert.equal(result.source, source);
+  assert.equal(helper(result.source).source, source);
+});
+
+test('formatting fails closed rather than rewriting exact explicit math source', () => {
+  for (const source of ['# Math\n\nInline \\(\\verb|a  b|\\).\n', '# Math\n\n\\[\\text{a  b}\\]\n']) {
+    const result = helper(source);
+    assert.equal(result.outcome, 'failed');
+    assert.equal(result.source, source);
+    assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === 'format-math-source'));
+  }
+});
+
+test('formatting ordinary Markdown around unchanged math still works with configured EOL conversion', () => {
+  const source = '# Math\n\n* item \\(x^2\\)\n';
+  const result = helper(source, { '.editorconfig': 'root=true\n[*.md]\nend_of_line=crlf\n' });
+  assert.equal(result.outcome, 'ok');
+  assert.equal(result.source, '# Math\r\n\r\n- item \\(x^2\\)\r\n');
+});
+
+test('full formatter rejects TeX drift in the 101st formula rather than trusting the display cap', () => {
+  const source = '# Math\n\n' + '\\(x\\)\n\n'.repeat(100) + '\\(\\verb|a  b|\\)\n';
+  const result = helper(source);
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.source, source);
+  assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === 'format-math-source'));
+});
+
+test('formatter fails closed when full syntax verification exceeds its visit budget', () => {
+  const source = '# Math\n\n' + '***\n\n'.repeat(100001) + '\\(\\verb|a  b|\\)\n';
+  const result = helper(source, { '.prettierignore': 'notes/\n', '.markdownlint-cli2.jsonc': '{"config":{"default":false}}' });
+  assert.equal(result.outcome, 'failed');
+  assert.equal(result.source, source);
+  assert.ok(result.diagnostics.some(diagnostic => diagnostic.code === 'format-math-source' && diagnostic.message.includes('safety budget')));
+});
+
+test('formatter refuses Mermaid fence rewrites including the 33rd fence beyond presentation cap',()=>{
+  const ordinary='```mermaid\nflowchart TD\nA[keep  two  spaces]\n```\n\n';
+  for(const source of ['# Diagram\n\n~~~~mermaid\nflowchart TD\nA-->B\n~~~~\n','# Diagram\n\n'+ordinary.repeat(32)+'~~~~mermaid\nsequenceDiagram\nA->>B: Hi\n~~~~\n']){
+    const result=helper(source);assert.equal(result.outcome,'failed');assert.equal(result.source,source);
+    assert.ok(result.diagnostics.some(d=>d.code==='format-mermaid-source'));
+  }
+});
+test('unchanged Mermaid fence source permits surrounding Markdown formatting and EOL conversion',()=>{
+ const source='# Diagram\n\n* item\n\n```mermaid\nflowchart TD\nA[keep  two  spaces]-->B\n```\n';
+ const result=helper(source,{'.editorconfig':'root=true\n[*.md]\nend_of_line=crlf\n'});
+ assert.equal(result.outcome,'ok');assert.equal(result.source,source.replace('* item','- item').replaceAll('\n','\r\n'));
+});
+
+test('wrapped wikilink aliases format to stable single-line links in list containers', () => {
+  for (const [input, expected] of [
+    ['- [[notes/sample|Sample\n  label]]', '- [[notes/sample|Sample label]]'],
+    ['1. [[notes/sample#part|Sample\n   label]]', '1. [[notes/sample#part|Sample label]]'],
+    ['- parent\n  - [[notes/sample|Sample\n    label]]', '- parent\n  - [[notes/sample|Sample label]]'],
+    ['- [x] [[notes/sample|Sample\n  label]]', '- [x] [[notes/sample|Sample label]]'],
+    ['> - [[notes/sample|Sample\n>   label]]', '> - [[notes/sample|Sample label]]'],
+    ['- [[notes/sample|Sample **bold**\n  label]] and [[notes/other|Other\n  label]]', '- [[notes/sample|Sample **bold** label]] and [[notes/other|Other label]]'],
+    ['- [[notes/foo\\_bar|Sample &amp;  two\n  words]]', '- [[notes/foo\\_bar|Sample &amp;  two words]]'],
+    ['- ![[notes/sample|Sample\n  label]]', '- ![[notes/sample|Sample label]]'],
+    ['- See [draft [[notes/sample|Sample\n  label]] pending].', '- See [draft [[notes/sample|Sample label]] pending].'],
+  ]) {
+    const source = '# Index\n\n' + input + '\n';
+    const result = helper(source, {}, 'index.md');
+    assert.equal(result.outcome, 'ok', JSON.stringify(result));
+    assert.equal(result.source, '# Index\n\n' + expected + '\n');
+    const again = helper(result.source, {}, 'index.md');
+    assert.equal(again.outcome, 'ok');
+    assert.equal(again.source, result.source);
+  }
+});
+
+test('formatting BOM front matter does not join wrapped alias text in literal YAML scalars', () => {
+  const source = '\ufeff---\ntitle: |\n  [[target|Sample\n  label]]\n---\n\n# Index\n';
+  const result = helper(source, {}, 'index.md');
+  assert.equal(result.outcome, 'ok');
+  assert.equal(result.source, source);
+});
+
+test('wrapped aliases retain BOM and configured CRLF and do not wrap long labels again', () => {
+  const source = '\ufeff# Index\r\n\r\n- [[notes/sample|Sample\r\n  long label with more words]]\r\n';
+  const files = { '.prettierrc': '{"printWidth":20,"proseWrap":"always","endOfLine":"crlf"}' };
+  const result = helper(source, files, 'index.md');
+  assert.equal(result.outcome, 'ok');
+  assert.equal(result.source, '\ufeff# Index\r\n\r\n- [[notes/sample|Sample long label with more words]]\r\n');
+  assert.equal(helper(result.source, files, 'index.md').source, result.source);
+});

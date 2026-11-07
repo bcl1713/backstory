@@ -23,6 +23,17 @@ def save(reader, source, base=None, *, path="note.md", mode="formatted", token=N
     return reader.post("/save/" + path, data=json.dumps({"source": source, "mode": mode, "recovery_token": token}), content_type="application/json", **headers)
 
 
+def assert_created_note(source, body, identifier):
+    from wiki.metadata import yaml_data, parse_front_matter
+    from datetime import date
+    matter = parse_front_matter(source)
+    values = yaml_data(source.split('---', 2)[1])
+    assert set(values) == {'created', 'modified', 'id'}
+    assert values['id'] == identifier
+    assert date.fromisoformat(values['created']).isoformat() == values['modified']
+    assert matter.body == '\n' + body
+
+
 def backend():
     return importlib.import_module("wiki.saves")
 
@@ -38,11 +49,50 @@ def test_two_editors_get_412(reader, wiki):
     assert (wiki / "note.md").read_bytes() == b"# First\n"
 
 
+@pytest.mark.parametrize("create", [False, True])
+def test_formatted_wrapped_alias_save_readback_links_and_guards(reader, wiki, create):
+    (wiki / "notes").mkdir()
+    (wiki / "notes/sample.md").write_text("# Part\n")
+    target = wiki / "note.md"
+    original = b"# Original\n"
+    if not create:
+        target.write_bytes(original)
+    draft = "# Index\n\n- [[notes/sample#Part|Sample\n  label]]\n"
+    response = save(reader, draft, None if create else revision(original), create=create)
+    assert response.status_code == 200, response.json()
+    assert response.json()["state"] == "saved"
+    readback = reader.get("/source/note.md")
+    assert readback.status_code == 200
+    source = readback.content.decode()
+    assert "- [[notes/sample#Part|Sample label]]\n" in source
+    assert target.read_bytes() == readback.content
+    preview = reader.get("/preview/note.md")
+    assert preview.status_code == 200
+    assert re.search(r'<a\b[^>]*href="/notes/notes/sample.md#preview-part"[^>]*>Sample label</a>', preview.context["preview"].html)
+    again = save(reader, source, readback["ETag"])
+    assert again.status_code == 200 and again.json()["state"] == "noop"
+    stale = save(reader, "# Stale\n", revision(original))
+    assert stale.status_code == 412
+    assert target.read_bytes() == readback.content
+
+
+@pytest.mark.parametrize("condition", [
+    'W/"' + 'a' * 64 + '"', '*', '"short"', '"' + 'a' * 64 + '", "' + 'b' * 64 + '"',
+])
+def test_save_requires_one_strong_application_revision(reader, wiki, condition):
+    target = wiki / "note.md"
+    target.write_bytes(b"# Original\n")
+    response = save(reader, "# Rejected\n", condition)
+    assert response.status_code == 400
+    assert response.json()["reason_code"] == "invalid_precondition"
+    assert target.read_bytes() == b"# Original\n"
+
+
 def test_create_never_overwrites(reader, wiki):
     first = save(reader, "# New\n", create=True)
     assert first.status_code == 200
     assert save(reader, "# Other\n", create=True).status_code == 412
-    assert (wiki / "note.md").read_bytes() == b"# New\n"
+    assert_created_note((wiki / "note.md").read_text(), "# New\n", "new")
     assert save(reader, "# Nested\n", path="absent/note.md", create=True).status_code == 404
     assert not (wiki / "absent").exists()
 
@@ -263,7 +313,7 @@ def test_index_failure_is_successful_disk_save(reader, wiki, monkeypatch):
     response = save(reader, "# New\n", create=True)
     assert response.status_code == 200
     assert response.json()["state"] == "saved_index_delayed"
-    assert (wiki / "note.md").read_bytes() == b"# New\n"
+    assert_created_note((wiki / "note.md").read_text(), "# New\n", "new")
 
 
 def test_precondition_is_checked_before_formatting(reader, wiki, monkeypatch):
@@ -317,7 +367,7 @@ def test_cleanup_error_cannot_turn_published_create_into_failed_save(reader, wik
     monkeypatch.setattr(os, "unlink", fail_temp_cleanup)
     response = save(reader, "# New\n", create=True)
     assert response.status_code == 200
-    assert (wiki / "note.md").read_bytes() == b"# New\n"
+    assert_created_note((wiki / "note.md").read_text(), "# New\n", "new")
 
 
 def test_application_lock_is_shared_by_independent_processes(wiki, settings):
@@ -456,3 +506,63 @@ def test_wiki_parent_permission_error_is_actionable_and_preserves_disk(reader, w
     response = save(reader, '# Edited\n', base)
     assert response.status_code == 503 and response.json()['reason_code'] == 'wiki_write_denied'
     assert (wiki / 'note.md').read_text() == '# Original\n'
+
+
+def test_math_source_drift_uses_existing_explicit_recovery_without_silent_rewrite(reader, wiki):
+    original = b"# Original\n"
+    target = wiki / "note.md"
+    target.write_bytes(original)
+    draft = "# Math\n\nInline \\(\\verb|a  b|\\).\n"
+    failed = save(reader, draft, revision(original))
+    assert failed.status_code == 422
+    data = failed.json()
+    assert data["source"] == draft
+    assert any(item["code"] == "format-math-source" for item in data["diagnostics"])
+    assert data["recovery_token"]
+    assert target.read_bytes() == original
+    recovered = save(reader, draft, revision(original), mode="source_recovery", token=data["recovery_token"])
+    assert recovered.status_code == 200
+    assert recovered.json()["state"] == "saved_source"
+    assert target.read_bytes() == draft.encode()
+
+
+@pytest.mark.parametrize('create', [True, False])
+def test_formatter_timeout_retains_recovery_and_never_publishes(reader, wiki, monkeypatch, create):
+    import sys
+    f = importlib.import_module('wiki.formatting')
+    monkeypatch.setattr(f, '_HELPER_COMMAND', (sys.executable, '-c', 'import time; time.sleep(5)'))
+    monkeypatch.setattr(f, '_TIMEOUT', 0.1)
+    original = b'# Original\n'
+    if not create:
+        (wiki / 'note.md').write_bytes(original)
+    draft = '# Synthetic draft\n\n' + '- A synthetic item with [a link](example.md).\n' * 85
+    response = save(reader, draft, None if create else revision(original), create=create)
+    assert response.status_code == 422
+    data = response.json()
+    assert data['source'] == draft and data['recovery_token']
+    assert any(d['code'] == 'formatter_timeout' for d in data['diagnostics'])
+    if create:
+        assert not (wiki / 'note.md').exists()
+        assert reader.get('/source/note.md').status_code == 404
+    else:
+        assert (wiki / 'note.md').read_bytes() == original
+        assert reader.get('/source/note.md').content == original
+
+
+@pytest.mark.parametrize('create', [True, False])
+def test_modest_synthetic_formatted_save_has_authoritative_readback(reader, wiki, create):
+    from wiki.storage import read_note
+    original = b'# Original\n'
+    if not create:
+        (wiki / 'note.md').write_bytes(original)
+    draft = '---\ntitle: Synthetic timeout investigation\n---\n\n# Synthetic\n\n' + '- A synthetic item with [a link](example.md).\n' * 85
+    response = save(reader, draft, None if create else revision(original), create=create)
+    assert response.status_code == 200, response.json()
+    readback = read_note('note.md')
+    assert readback.source == response.json()['source']
+    assert readback.revision == response.json()['revision']
+    assert reader.get('/source/note.md').content == (wiki / 'note.md').read_bytes()
+    # Retry the stored create metadata too; existing saves do not recreate it.
+    again = save(reader, readback.source if create else draft, readback.revision)
+    assert again.status_code == 200
+    assert read_note('note.md').source == readback.source

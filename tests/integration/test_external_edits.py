@@ -114,7 +114,14 @@ print(r.status)
         assert process.returncode == 0, err
         statuses.append(int(out.strip()))
     assert sorted(statuses) == [200,412]
-    assert target.read_bytes() in [b'# Process 0\n', b'# Process 1\n']
+    if creating:
+        from tests.integration.test_saves import assert_created_note
+        from wiki.metadata import parse_front_matter
+        body = parse_front_matter(target.read_text()).body.lstrip('\n')
+        assert body in ['# Process 0\n', '# Process 1\n']
+        assert_created_note(target.read_text(), body, body.strip('# \n').lower().replace(' ', '-'))
+    else:
+        assert target.read_bytes() in [b'# Process 0\n', b'# Process 1\n']
 
 
 @pytest.mark.django_db(transaction=True)

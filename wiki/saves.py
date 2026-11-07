@@ -4,6 +4,7 @@ Application flock coordinates web processes. External writers do not participate
 final hashes narrow that residual race but cannot promise filesystem CAS.
 """
 import errno
+import difflib
 import hashlib
 import os
 import re
@@ -18,6 +19,8 @@ from .formatting import FormatFailure, format_source, snapshot_config
 from .policy import validate_path
 from .revisions import application_lock, get_recovery, issue_recovery, store_required_backup
 from .staging import finish_stage, register_stage
+from .metadata import MetadataError
+from .save_metadata import prepare_save_metadata, wiki_date
 from .storage import _os_error, open_directory, read_note, require_ready
 from .relocations import wiki_write_lock
 
@@ -98,7 +101,9 @@ def enqueue_note(path, revision):
 def _saved(source, revision, diagnostics, diff, mode, *, uncertain=False, path):
     try:
         queued = enqueue_note(path, revision)
-    except Exception:
+    except Exception as error:
+        from indexing.diagnostics import record_failure
+        record_failure("enqueue", error)
         queued = False
     state = "saved_source" if mode == "source_recovery" else "saved"
     if not queued:
@@ -125,10 +130,17 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                 candidate, diagnostics, diff = submitted_source, recovery[0], recovery[1]
                 result = None
             else:
-                result = format_source(path, submitted_source, current)
+                try:
+                    prepared = prepare_save_metadata(submitted_source, current.source if current else None, wiki_date())
+                except MetadataError as error:
+                    failure = FormatResult(submitted_source, (error.diagnostic,), "", "failed", "")
+                    return failed_format(actor, path, submitted_source, base_revision, failure)
+                result = format_source(path, prepared, current)
                 if result.outcome == "failed":
                     return failed_format(actor, path, submitted_source, base_revision, result)
-                candidate, diagnostics, diff = result.source, result.diagnostics, result.diff
+                candidate, diagnostics = result.source, result.diagnostics
+                diff = "".join(difflib.unified_diff(submitted_source.splitlines(keepends=True),
+                    candidate.splitlines(keepends=True), fromfile="submitted", tofile="saved"))
             # NoteSnapshot separates the encoding BOM; every source character
             # (including a leading U+FEFF) remains editable content.
             source = candidate
@@ -192,6 +204,11 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                             observed = _current(path)
                         except StorageError:
                             return SaveResult("uncertain", submitted_source, None, diagnostics, diff, reason_code="write_uncertain", status=503)
+                        if current is None and error.errno == errno.EEXIST and observed:
+                            # A competing creator owns this name even when its
+                            # bytes happen to equal ours. Never acknowledge its
+                            # publication as this request's successful create.
+                            return _check_base(observed, base_revision, submitted_source)
                         if observed and observed.raw_bytes == output:
                             return _saved(source, observed.revision, diagnostics, diff, mode, uncertain=True, path=path)
                         conflict = _check_base(observed, base_revision, submitted_source)

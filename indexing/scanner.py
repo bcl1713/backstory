@@ -57,6 +57,8 @@ def next_paths(checkpoint, limit=20, entry_limit=200):
                     try:
                         validate_path(candidate, 'content')
                         info = entry.stat(follow_symlinks=False)
+                        if stat.S_ISDIR(info.st_mode):
+                            validate_path(candidate, "folder")
                     except PathDenied:
                         continue
                     if stat.S_ISDIR(info.st_mode):

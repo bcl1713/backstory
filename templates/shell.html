@@ -1,3 +1,3 @@
 {% load static %}<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Backstory</title><link rel="stylesheet" href="{% static 'app.css' %}"></head>
-<body><main id="main"><h1>Backstory</h1><p>Signed in as {{ user.username }}.</p><p>The local runtime is ready. Note browsing arrives in the next stage.</p><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form></main></body></html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Backstory</title><link rel="stylesheet" href="{% static 'app.css' %}">{% include "pwa-head.html" %}</head>
+<body><main id="main">{% include "connectivity-status.html" %}<h1>Backstory</h1><p>Signed in as {{ user.username }}.</p><p>The local runtime is ready. Note browsing arrives in the next stage.</p><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Sign out</button></form></main></body></html>

@@ -13,6 +13,9 @@ non-root container supervises Gunicorn and background SQLite indexing.
 `.env`, interactive named users, an existing Cloudflare Tunnel or Nginx Proxy
 Manager for remote HTTPS, backups and upgrades.
 
+The [Android installation guide](docs/pwa.md) covers the online-first PWA and its
+network, privacy and device-verification limits.
+
 The [editor guide](docs/editor.md) covers Zen, navigation shortcuts, clickable
 live links and complete-document source access.
 [Move and archive](docs/relocation.md) covers reviewed note/folder relocation and
@@ -26,6 +29,8 @@ contract; the [Cloudflare guide](docs/cloudflare.md) includes existing-connector
 reuse and an optional bundled connector. [Local development](docs/development.md)
 covers the synthetic workflow; [operations](docs/operations.md) covers recovery.
 [Release automation](docs/releases.md) explains versioning and GHCR publication.
+Merge features into `dev` for automatic prereleases and the `:dev` test image;
+promote `dev` to `main` for stable releases and the `:latest` production image.
 No private notes, default passwords or production configuration ship here.
 
 [Storage policy](docs/storage.md), [safe preview](docs/preview.md),
@@ -41,3 +46,14 @@ The [design](docs/superpowers/specs/2026-10-25-backstory-design.md) and
 record the application design. Publishing the application does not configure an
 operator's live wiki, proxy, tunnel or firewall; follow the deployment guide for
 your installation.
+
+### Wiki home
+
+The canonical home (`/`, including the Backstory navigation link) opens the exact
+root `index.md` when present, with the normal note editor and safeguards. Empty
+`index.md` files are valid home notes. `README.md`, case variants, and nested
+folder indexes are not substituted. Use **File tree → Wiki root** (`/?folder=`)
+to browse the root even when a home note exists; explicit folder URLs continue
+to show folders. If `index.md` is absent the home remains the file tree. Invalid,
+denied, or unavailable content retains its normal diagnostic rather than being
+silently treated as absent. Visiting home never creates or rewrites the note.

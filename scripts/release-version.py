@@ -1,7 +1,8 @@
-"""Select a stable release from reachable vMAJOR.MINOR.PATCH tags and commits.
+"""Select stable or dev releases from reachable stable tags and commits.
 
 Run in a full Git checkout with fetched tags. Does not mutate Git or publish.
 """
+import argparse
 import os
 from pathlib import Path
 import re
@@ -12,21 +13,21 @@ def git(*args):
     return subprocess.check_output(['git', *args], text=True).strip()
 
 
-def release_plan():
+def stable_plan(source):
     if git('rev-parse', '--is-shallow-repository') == 'true':
         raise SystemExit('Release selection requires full Git history and tags.')
     stable = re.compile(r'v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)')
     tags = []
-    for tag in git('tag', '--merged', 'HEAD').splitlines():
+    for tag in git('tag', '--merged', source).splitlines():
         match = stable.fullmatch(tag)
         if match:
             tags.append((tuple(map(int, match.groups())), tag))
     if not tags:
         return {'version': '1.0.0', 'tag': 'v1.0.0', 'previous': ''}
     (major, minor, patch), previous = max(tags)
-    if git('rev-parse', f'{previous}^{{commit}}') == git('rev-parse', 'HEAD'):
+    if git('rev-parse', f'{previous}^{{commit}}') == source:
         return {'version': previous[1:], 'tag': previous, 'previous': previous}
-    messages = git('log', '--format=%B%x00', f'{previous}..HEAD').split('\x00')
+    messages = git('log', '--format=%B%x00', f'{previous}..{source}').split('\x00')
     breaking = re.compile(r'^\w+(?:\([^\n)]+\))?!: |^BREAKING[ -]CHANGE: ', re.M)
     feature = re.compile(r'^feat(?:\([^\n)]+\))?: ')
     if any(breaking.search(message.strip()) for message in messages):
@@ -38,10 +39,26 @@ def release_plan():
     return {'version': version, 'tag': f'v{version}', 'previous': previous}
 
 
+def release_plan(channel='stable', source='HEAD'):
+    source = git('rev-parse', '--verify', f'{source}^{{commit}}')
+    result = stable_plan(source)
+    if channel == 'dev':
+        count = git('rev-list', '--count', source)
+        sha = git('rev-parse', '--short=12', source)
+        version = f"{result['version']}-dev.{count}.g{sha}"
+        result = {**result, 'version': version, 'tag': f'v{version}'}
+    return result
+
+
 if __name__ == '__main__':
-    result = release_plan()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--channel', choices=['stable', 'dev'], default='stable')
+    parser.add_argument('--source-sha', default='HEAD', help='Select from this tested commit, not a mutable checkout.')
+    args = parser.parse_args()
+    source = git('rev-parse', '--verify', f'{args.source_sha}^{{commit}}')
+    result = release_plan(args.channel, source)
     if (git('tag', '--list', result['tag']) and
-            git('rev-parse', f"{result['tag']}^{{commit}}") != git('rev-parse', 'HEAD')):
+            git('rev-parse', f"{result['tag']}^{{commit}}") != source):
         raise SystemExit(f"{result['tag']} already exists on a different commit; refusing publication.")
     output = ''.join(f'{key}={value}\n' for key, value in result.items())
     print(output, end='')

@@ -1,0 +1,13 @@
+@viz-js/viz 3.31.0, Copyright (c) Michael Daines, MIT.
+Source: https://github.com/mdaines/viz-js/tree/c8ce050d28eb0dc1ed1629ea32ab7f3dc117db0f
+Unmodified published backend is bundled by esbuild with application-owned wrappers.
+
+Includes Graphviz 16.1.0 object code, Eclipse Public License 2.0.
+Project and source: https://graphviz.org/ and
+https://gitlab.com/graphviz/graphviz/-/tree/16.1.0
+Source archive: https://gitlab.com/api/v4/projects/4207231/packages/generic/graphviz-releases/16.1.0/graphviz-16.1.0.tar.gz
+License: Graphviz-EPL-2.0.txt (standard EPL-2.0 text from SPDX).
+
+Includes Expat object code, MIT; copyright notices retained in Expat-MIT.txt.
+Source: https://github.com/libexpat/libexpat/tree/R_2_8_5
+Viz build recipe and exact dependency versions are in the pinned source above.

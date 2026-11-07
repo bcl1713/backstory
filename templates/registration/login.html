@@ -1,6 +1,6 @@
 {% load static %}<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · Backstory</title><link rel="stylesheet" href="{% static 'app.css' %}"></head>
-<body><main><h1>Sign in to Backstory</h1><form method="post">{% csrf_token %}{{ form.non_field_errors }}
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · Backstory</title><link rel="stylesheet" href="{% static 'app.css' %}">{% include "pwa-head.html" %}</head>
+<body><main>{% include "connectivity-status.html" %}<h1>Sign in to Backstory</h1><form method="post">{% csrf_token %}{{ form.non_field_errors }}
 <label for="id_username">Username</label><input type="text" name="username" id="id_username" autocomplete="username" required autofocus maxlength="150">
 <label for="id_password">Password</label><input type="password" name="password" id="id_password" autocomplete="current-password" required>
 <label><input type="checkbox" name="remember"> Remember this device</label>

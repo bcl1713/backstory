@@ -230,3 +230,108 @@ and residual external-writer races. This walkthrough uses localhost/proxyoff
 defaults. For opt-in HTTPS forwarding, follow the [generic proxy contract](reverse-proxy.md)
 and its pending combined acceptance gate. The peer/header guard also covers
 `/health/`; use the real TLS proxy and canonical hostname for health probes.
+
+## Index failures versus saved content
+
+`saved_index_delayed` (or its source-recovery equivalent) means the note was
+published but its priority index enqueue failed. Read the note/revision to verify
+content; **do not replay the save** merely to update search. Normal `partial` and
+`stale` index states are not failed saves. The existing incremental/verification
+worker catches up from authoritative files; queue overflow retains a reconciliation
+request. A failed worker keeps its existing bounded backoff (5–300 seconds).
+
+Index failure boundaries now emit privacy-safe JSON lines through the
+`backstory.index` logger, in both web and indexer process logs. Retain those logs
+using your deployment's normal bounded retention/rotation policy. Historical log
+events remain historical after the current status becomes healthy; there is no new
+unbounded database history table. Correlate by UTC `timestamp`, `event_id`, and
+`operation` (`enqueue`, `worker`, `worker_failure_state`, `search`, `resolve`).
+They include fixed exception classes, safe reason codes, SQLite numeric/extended
+error names when available, and `budget_triggered`. They deliberately omit raw
+exception messages, tracebacks, note paths/content, revisions, SQL and credentials.
+Request/security log redaction is unchanged. A logging-sink failure cannot undo a
+successful save; in that case diagnostic retention itself may be unavailable.
+
+Search freshness includes an additive `reason_code`:
+
+- `search_budget_exceeded`: the query's own progress budget actually interrupted
+  SQLite. Narrow the query, or deliberately retry from the first page.
+- `index_database_busy`: SQLite reported busy/locked; retry the same read-only
+  search after the concurrent operation finishes.
+- `index_database_error`: another database failure; consult the corresponding safe
+  diagnostic and worker status before retrying. Do not assume that it is a disk
+  failure or fix it by raising query budgets.
+
+A failed/limited empty search is **incomplete**, not proof of absence. Do not create
+replacement notes based on it. Direct note reads remain authoritative. Persistent
+failures warrant investigating the logged failure class; they do not automatically
+require a production index rebuild.
+
+The priority queue acquires database write intent before taking its read snapshot.
+A synthetic two-connection WAL regression demonstrates and prevents a
+`SQLITE_BUSY_SNAPSHOT` read-to-write upgrade race. This is a verified local failure
+mechanism, **not a claim that it caused the October 30 deployment incidents**.
+No note I/O, formatting or content replay occurs inside that short queue transaction;
+ordinary lock waits retain the configured database timeout and there is no new
+retry loop. Other database failures remain explicitly delayed/diagnosed.
+
+Worker projection commits and final generation publication likewise reserve write
+intent before their dependent database reads. Disposable two-connection WAL tests
+exercise both real worker operations against a concurrent writer. The reservation
+covers only the existing database transaction: note reads and metadata projection
+stay outside it. Pending work still prevents publication, and ordinary lock
+contention still follows the existing timeout and bounded worker backoff. A busy
+worker resets scan progress for a fresh pass while retaining previously indexed
+rows; zero progress counters do not indicate deleted notes or an empty index.
+
+## Formatter timeout evidence
+
+A formatter failure retains the submitted draft and prevents publication. Use
+explicit draft recovery only after reviewing the failure; never automatically
+replay a write. Direct note/source reads verify publication independently of
+index state.
+
+The `backstory.format` logger emits one source-free JSON event per helper call.
+Keep deployment logs under the normal bounded retention/rotation policy. Events
+contain `source_bytes` (UTF-8 bytes actually sent to the helper, including prepared
+save metadata), total helper `elapsed_ms`, helper `outcome`, `timeout_origin`
+(`python`, `node`, `none`), build `revision`/`version`, and at most 64 progress
+markers. They omit bodies, paths, configuration, raw stderr, exception details
+and credentials. Logging failure cannot turn a successful helper into a failed save.
+Helper outcome describes formatting, not publication or subsequent preservation
+checks. No per-note identifiers or source hashes are logged.
+
+Each trace marker records a fixed `stage` and elapsed milliseconds since Node
+process startup. Differences between consecutive offsets locate time in startup,
+module import, configuration, source preservation parsing, each of the two
+Prettier/lint passes, candidate verification, worker termination/scratch cleanup,
+and output. The first offset includes Node's initial module loading. A marker
+names the operation about to start; its duration ends at the next marker. Python's
+total starts before scratch/input setup and includes process launch and cleanup.
+If Python kills the process, its event still retains the last received markers.
+`worker_timeout` records Node's budget expiration even if Python's independent
+deadline wins during cleanup. Both ten-second deadlines remain unchanged.
+
+Published images embed the tested SHA and release version through
+`BACKSTORY_BUILD_REVISION` and `BACKSTORY_BUILD_VERSION`. These are internal log
+selectors. Authenticated status separately reads artifact-local packaged metadata
+for `application.build` and `application.version`; runtime environment overrides
+do not change those fields. Native/local image builds without release arguments
+report `unknown` identity. Do not identify a deployment from a working checkout's
+head. Log selector overrides must retain the actual image identity. See
+[release identity and verification](releases.md#published-artifacts).
+
+Run the generated-data probe from an identified checkout with pinned Node:
+
+```sh
+python3 scripts/probe_formatter.py --report /tmp/new-formatter-probe.json
+```
+
+It never reads wiki data or production configuration. It measures identical
+retries across prose/list/structured notes from roughly 1–64 KB, module-cold
+helpers versus repeated warm pipeline calls, and four-way helper load. Evidence
+records the checkout SHA, dirty flag, Node version, byte count and stage timings.
+Warm calls are a measurement only; production still uses an isolated process per
+request. This probe does not establish deployment health or reproduce an unknown
+private draft. Save-path tests separately cover New Note/existing-note readback,
+failure recovery and no publication.

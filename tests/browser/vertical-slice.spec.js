@@ -1,8 +1,8 @@
+import { expectCreatedMetadata } from './support/metadata.js';
 import { revealChrome } from './support/chrome.js';
 import { test, expect } from '@playwright/test';
 import { readFile, writeFile, stat, readdir, unlink } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { expireSession } from './support/session.js';
 import { runtime } from './support/server.js';
 
 const target = `${runtime}/wiki/Editable.md`;
@@ -17,6 +17,7 @@ async function login(page, route = '/notes/Editable.md') {
 }
 const readSource = page => page.locator('[data-markdown-editor]').evaluate(el => el.markdownEditor.getSource());
 async function replace(page, value) {
+  await expect(page.locator('[data-editor-stage]')).toHaveAttribute('data-editor-state', 'ready');
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+a');
   await page.keyboard.insertText(value);
@@ -32,17 +33,6 @@ async function action(page, label, route = '/save/') {
 async function mode(page, presentation) {
   await revealChrome(page);
   if (presentation === 'source') await page.getByRole('button', { name: 'Raw source', exact: true }).click();
-}
-
-async function expireSession(context) {
-  const session = (await context.cookies()).find(cookie => cookie.name === 'sessionid');
-  expect(session).toBeDefined();
-  const env = { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings', BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`, BACKSTORY_IDENTITY_PATH: '.backstory-marker', BACKSTORY_COOKIE_MODE: 'localhost', BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' };
-  // Expire the actual server-side device; retain CSRF and avoid cookie deletion
-  // racing session-renewal responses from other requests already in flight.
-  const program = "import django,json,sys; django.setup(); from datetime import timedelta; from django.utils.timezone import now; from accounts.models import SessionDevice; count=SessionDevice.objects.filter(session_key_digest=json.load(sys.stdin)['digest'],revoked_at=None).update(absolute_expires_at=now()-timedelta(seconds=1)); assert count==1";
-  const result = spawnSync('.venv/bin/python', ['-c', program], { env, input: JSON.stringify({ digest: createHash('sha256').update(session.value).digest('hex') }), encoding: 'utf8', timeout: 30000 });
-  expect(result.status, result.stderr).toBe(0);
 }
 
 test.beforeEach(async () => { await writeFile(target, original); });
@@ -130,6 +120,7 @@ for (const presentation of ['live', 'source']) {
     await expect(page.getByLabel('Your draft', { exact: true })).toHaveValue(draft.replaceAll('\r\n', '\n'));
     const current = (await conflict.json()).revision;
     await page.getByRole('button', { name: 'Accept current revision for manual merge' }).click();
+    await expect(page.locator('[data-conflict]')).toBeHidden();
     await replace(page, '# Merged\n');
     const saved = await action(page, 'Save');
     expect(saved.status()).toBe(200);
@@ -191,7 +182,7 @@ for (const presentation of ['live', 'source']) {
     const { rm } = await import('node:fs/promises');
     await rm(created, { force: true });
     await login(page, '/?folder=Drafts');
-    await page.getByRole('link', { name: 'New note in this folder' }).click();
+    await page.getByRole('navigation', { name: 'Folder', exact: true }).getByRole('link', { name: 'New note in this folder' }).click();
     await page.getByLabel('Note filename').fill('Missing/note.md');
     await page.getByRole('button', { name: 'Create note', exact: true }).click();
     await expect(page.locator('[data-editor-status]')).toContainText('current folder');
@@ -202,15 +193,15 @@ for (const presentation of ['live', 'source']) {
     expect(response.status()).toBe(200);
     expect(response.request().headers()['if-none-match']).toBe('*');
     expect(response.request().headers()['if-match']).toBeUndefined();
-    expect(await readFile(created)).toEqual(Buffer.from('# New\n'));
-    expect(page.url()).toContain(`/notes/Drafts/${filename}`);
+    expectCreatedMetadata(await readFile(created, 'utf8'), '# New\n', 'new');
+    await expect(page).toHaveURL(new RegExp(`/notes/Drafts/Created-${presentation}\\.md$`));
     await page.reload();
-    expect(await readSource(page)).toBe('# New\n');
+    expect(await readSource(page)).toBe(await readFile(created, 'utf8'));
     await page.goto('/new/?folder=Drafts');
     await page.getByLabel('Note filename').fill(filename);
     await replace(page, '# Collision\n');
     expect((await action(page, 'Create note')).status()).toBe(412);
-    expect(await readFile(created)).toEqual(Buffer.from('# New\n'));
+    expectCreatedMetadata(await readFile(created, 'utf8'), '# New\n', 'new');
     await page.getByRole('button', { name: 'Accept current revision for manual merge' }).click();
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
     await replace(page, '# Manually merged new note\n');
@@ -242,12 +233,13 @@ test('two authenticated editors expose base/current/draft and confirmed reload n
   await second.getByRole('button', { name: 'Download draft' }).click();
   const downloaded = await download;
   expect((await readFile(await downloaded.path())).toString()).toContain('# My preserved draft');
-  second.once('dialog', dialog => dialog.dismiss());
+  const dismissed = new Promise(resolve => second.once('dialog', async dialog => { await dialog.dismiss(); resolve(); }));
   await second.getByRole('button', { name: 'Reload current source' }).click();
+  await dismissed;
   expect(await readSource(second)).toContain('# My preserved draft');
   second.once('dialog', dialog => dialog.accept());
   await second.getByRole('button', { name: 'Reload current source' }).click();
-  expect(await readSource(second)).toBe('# First writer\r\n');
+  await expect.poll(() => readSource(second)).toBe('# First writer\r\n');
   expect((await readFile(target)).toString()).toBe('\ufeff# First writer\r\n');
   await firstContext.close();
   await secondContext.close();
@@ -308,6 +300,7 @@ for (const presentation of ['live', 'source']) test(`${presentation}: expired au
 test('a confirmed save of an earlier draft never replaces edits typed while its response is pending', async ({ page }) => {
   await login(page);
   await replace(page, '# Earlier draft\n');
+  expect(await readSource(page)).toBe('# Earlier draft\r\n');
   let release;
   let published;
   const gate = new Promise(resolve => { release = resolve; });
@@ -396,7 +389,7 @@ test('conflict reload and subsequent Save preserve a leading content FEFF separa
   await expect(page.getByLabel('Current disk source', { exact: true })).toHaveValue('\ufeff# Current\n');
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Reload current source' }).click();
-  expect(await readSource(page)).toBe(currentSource);
+  await expect.poll(() => readSource(page)).toBe(currentSource);
   await page.locator('.cm-content').focus();
   await page.keyboard.press('Control+End');
   await page.keyboard.insertText('\nChanged\n');
