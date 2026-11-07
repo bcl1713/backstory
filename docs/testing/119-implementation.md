@@ -54,3 +54,11 @@ screenshots. Real-device/private-wiki performance, Firefox WebGL appearance and
 the publisher's subsequent full release gate remain outside this focused review.
 Combined focused evidence covers 50 distinct Python, 23 JavaScript, 20 Chromium
 and 13 Firefox scenarios; it is not a fresh complete-suite pass.
+
+## Release-gate search-test follow-up
+
+The authorized #119 release gate on `dev` `e76d9c2` reported 1,495 passing Python tests and one failure: `test_oversized_heading_search_payload_caps_title_without_rewriting_projection` bounded the entire search response to 10,000 bytes. The added fixed graph controls increased the shared HTML shell, so that assertion measured unrelated markup rather than oversized search results.
+
+Changed only this regression to compare the matched response with an authenticated zero-result response using an equal-length query. The incremental result markup must be positive and below 1,024 bytes; the rendered 512-character capped title must be present. The existing API 512-character cap, unchanged full indexed title and unchanged source-file assertions remain. No application behavior or graph source changed.
+
+`.venv/bin/pytest tests/integration/test_search.py::test_oversized_heading_search_payload_caps_title_without_rewriting_projection -q` passed **one test in 0.52s** on the primary working tree with the #119 graph shell. The release-gate failure supplied the expected failing baseline; no other search or full-suite checks were repeated. This follow-up is for a separate fix commit; parent owns its release gate.
