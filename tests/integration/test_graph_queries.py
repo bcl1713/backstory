@@ -360,11 +360,20 @@ def test_two_hop_linked_neighborhood_works_with_small_response_limits(wiki):
     files['far.md'] = '# Far'
     graph = build_graph(wiki, files)
     page = graph.query_graph('hub.md', depth=2, node_limit=2, edge_limit=1)
+    # Bounded discovery may return empty pages; the cursor must recover the
+    # whole membership instead of permanently labeling it neighborhood_limit.
+    for _ in range(200):
+        if page.edges:
+            break
+        assert page.next_cursor
+        page = graph.query_graph('hub.md', depth=2, node_limit=2, edge_limit=1, cursor=page.next_cursor)
     assert page.nodes and len(page.nodes) <= 2
     assert page.edges and len(page.edges) <= 1
     assert page.next_cursor
     assert page.limits['examined'] <= 300
-    default = graph.query_graph('hub.md', depth=2)
-    assert default.nodes and default.edges
-    assert default.state == 'incomplete'
-    assert 'neighborhood_limit' in default.limiting_reasons
+    from tests.integration.test_graph_traversal import collect
+    nodes, edges, pages = collect(graph, 'hub.md', depth=2)
+    assert len(nodes) == 292 and 'far.md' in nodes
+    assert len(edges) == 2611
+    assert pages[-1].projection_complete
+    assert not any('neighborhood_limit' in page.limiting_reasons for page in pages)

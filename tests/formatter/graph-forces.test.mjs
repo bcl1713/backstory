@@ -20,14 +20,14 @@ test('force preferences validate version, finite numbers, bounds and step; persi
 });
 test('live force tuning retains identity and positions, reheats, and remains finite through low/default/high settling', async () => {
   const nodes = ['a', 'b', 'c'].map(path => ({ path }));
-  const sim = new GraphPhysics(nodes, [{ source: 'a', destination: 'b' }, { source: 'b', destination: 'a', occurrence_count: 99 }, { source: 'b', destination: 'c' }]);
+  const sim = new GraphPhysics(nodes, [{ source: 'a', destination: 'b' }, { source: 'b', destination: 'a', occurrence_count: 99 }, { source: 'b', destination: 'c' }], 'a');
   sim.settle(); const a = sim.nodes.get('a'), before = [a.x, a.y, a.z];
   sim.setForces({ spring: 2, repulsion: .5, gravity: 4 });
   assert.equal(sim.nodes.get('a'), a); assert.deepEqual([a.x, a.y, a.z], before);
   assert.equal(sim.springs.length, 2); assert.equal(sim.active, true); assert.equal(sim.steps, 0);
   const distances = [];
   for (const value of [.25, 1, 4]) {
-    const tuned = new GraphPhysics(nodes, [{ source: 'a', destination: 'b' }]);
+    const tuned = new GraphPhysics(nodes, [{ source: 'a', destination: 'b' }], 'a');
     tuned.setForces({ spring: 1, repulsion: value, gravity: 1 }); tuned.settle(720);
     const b = tuned.nodes.get('b'), c = tuned.nodes.get('a'); distances.push(Math.hypot(c.x-b.x,c.y-b.y,c.z-b.z));
     assert.equal(tuned.active, false);

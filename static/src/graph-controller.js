@@ -49,14 +49,14 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   let page = null, selected = currentPath || null, focused = currentPath || null;
   let listMode = preferredList, graphicsAvailable = true, trail = [], nextCursor = null, activeParams = null;
   let pendingPositions = null, pendingVersion = null;
-  let view = null, windowed = false, loadingPaused = false, loadingError = false, loadingReason = '', autoTimer;
+  let view = null, loadingPaused = false, loadingError = false, loadingReason = '', autoTimer;
   let storage; try { storage = window.localStorage; } catch { /* Preferences remain page-local. */ }
   let forces = loadForces(storage);
   const cancelAutomatic = () => { clearTimeout(autoTimer); autoTimer = null; };
   const wholeWiki = () => !activeParams?.path;
   const automaticallyContinue = () => {
     cancelAutomatic();
-    if (!closed && wholeWiki() && nextCursor && !request && !loadingPaused && !loadingError && !pages.limited) {
+    if (!closed && nextCursor && !request && !loadingPaused && !loadingError) {
       // Yield between bounded requests so controls, input and rendering stay live.
       autoTimer = setTimeout(() => { autoTimer = null; void load({ cursor: nextCursor, append: true }); }, 40);
     }
@@ -112,12 +112,9 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   }
   function controls() {
     const global = wholeWiki(), depth = Number(input('depth').value), filters = ['query', 'folder', 'tag'].filter(name => (activeParams?.[name] || '').trim());
-    find('[data-graph-next]').hidden = global || !nextCursor;
-    find('[data-graph-next]').disabled = Boolean(request) || pages.limited;
-    find('[data-graph-cancel]').hidden = !global || loadingPaused || loadingError || pages.limited || !(request || nextCursor);
-    find('[data-graph-resume]').hidden = !loadingPaused || loadingError || pages.limited;
+    find('[data-graph-cancel]').hidden = loadingPaused || loadingError || !(request || nextCursor);
+    find('[data-graph-resume]').hidden = !loadingPaused || loadingError;
     find('[data-graph-restart]').hidden = !loadingError;
-    find('[data-graph-window]').hidden = !pages.limited;
     find('[data-graph-depth-controls]').hidden = global;
     input('depth').disabled = global;
     find('[data-graph-depth-down]').disabled = depth <= 1;
@@ -126,16 +123,43 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     find('[data-graph-local]').setAttribute('aria-pressed', String(!global));
     find('[data-graph-global]').setAttribute('aria-pressed', String(global));
     find('[data-graph-scope]').textContent = `${global ? 'Whole wiki' : `Local · ${depth} hop${depth === 1 ? '' : 's'} · ${activeParams?.path || input('path').value}`}${filters.length ? ` · Filtered by ${filters.map(name => `${name}: ${activeParams[name]}`).join(', ')}` : ''}`;
-    const state = pages.limited ? 'Partial — view limit reached' : loadingError ? 'Partial — loading stopped' :
-      loadingPaused ? 'Loading paused · Partial' : nextCursor ? global ? 'Loading…' : 'More to load' :
-      pages.complete && !windowed ? 'Complete' : 'Partial — updating or limited';
+    const state = loadingError ? 'Partial — loading stopped' : loadingPaused ? 'Loading paused · Partial' :
+      request || nextCursor ? 'Loading…' : pages.complete ? 'Complete' :
+      page?.limiting_reasons?.includes('index_updating') || page?.freshness?.state === 'partial' ?
+        'Loaded available results · Index updating' : 'Loaded available results · Incomplete evidence';
     find('[data-graph-summary]').textContent = !page ? '' :
       `${page.nodes.length} notes · ${page.edges.length} directed links · ${state}${page.boundary_connections ? ' · Some connections are outside your filters' : ''}`;
+  }
+  const listWindow = 250;
+  let nodeOffset = 0, edgeOffset = 0;
+  function listNavigation(kind, total, offset) {
+    const nav = find(`[data-graph-${kind}-navigation]`);
+    const hadFocus = nav.contains(document.activeElement), forwardFocus = document.activeElement === nav.lastElementChild;
+    nav.replaceChildren(); nav.hidden = total <= listWindow;
+    if (nav.hidden) return;
+    const previous = element('button', `Previous ${kind}`, { type: 'button' });
+    const next = element('button', `Next ${kind}`, { type: 'button' });
+    previous.disabled = offset === 0; next.disabled = offset + listWindow >= total;
+    const move = delta => {
+      if (kind === 'notes') nodeOffset = Math.max(0, nodeOffset + delta); else edgeOffset = Math.max(0, edgeOffset + delta);
+      renderList();
+    };
+    previous.addEventListener('click', () => move(-listWindow)); next.addEventListener('click', () => move(listWindow));
+    nav.append(previous, element('span', `${offset + 1}–${Math.min(offset + listWindow, total)} of ${total} loaded ${kind}`), next);
+    if (hadFocus) {
+      const preferred = forwardFocus ? next : previous;
+      (preferred.disabled ? forwardFocus ? previous : next : preferred).focus({ preventScroll: true });
+    }
   }
   function renderList() {
     const activePath = document.activeElement?.dataset.graphInspect;
     const list = find('[data-graph-nodes]'); list.replaceChildren();
-    for (const node of [...(page?.nodes || [])].sort((a, b) => a.path.localeCompare(b.path))) {
+    const ordered = [...(page?.nodes || [])].sort((a, b) => a.path.localeCompare(b.path));
+    nodeOffset = Math.min(nodeOffset, Math.max(0, Math.floor((ordered.length - 1) / listWindow) * listWindow));
+    edgeOffset = Math.min(edgeOffset, Math.max(0, Math.floor(((page?.edges.length || 0) - 1) / listWindow) * listWindow));
+    listNavigation('notes', ordered.length, nodeOffset);
+    listNavigation('links', page?.edges.length || 0, edgeOffset);
+    for (const node of ordered.slice(nodeOffset, nodeOffset + listWindow)) {
       const li = element('li');
       const inspect = element('button', `Inspect ${node.title}`, { type: 'button', 'data-graph-inspect': node.path, 'aria-pressed': String(node.path === selected) });
       // These listeners disappear with the row, rather than accumulating abort
@@ -148,12 +172,12 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     }
     if (!page?.nodes.length) list.append(element('li', loadingError ?
       loadingReason === 'graph_query_limited' ? 'The graph query limit was reached. Try fewer hops or narrower filters.' : 'Loading stopped. Check the graph status for recovery options.' :
-      page && pages.complete ? 'No notes match this scope.' : 'Relationships are still being prepared. Refresh to try again.'));
+      request || nextCursor ? 'Loading connections…' : page && pages.complete ? 'No notes match this scope.' : 'Loaded available results. Relationships are still updating.'));
     const edges = find('[data-graph-edges]'); edges.replaceChildren();
-    for (const edge of page?.edges || []) edges.append(element('li', `${edge.source} → ${edge.destination} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`));
+    for (const edge of (page?.edges || []).slice(edgeOffset, edgeOffset + listWindow)) edges.append(element('li', `${edge.source} → ${edge.destination} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`));
   }
   function clearEvidence() {
-    pages.clear(); page = null; nextCursor = null; selected = focused = null;
+    pages.clear(); page = null; nextCursor = null; selected = focused = null; nodeOffset = edgeOffset = 0;
     detailSequence++; detailRequest?.abort(); detailRequest = null;
     details.replaceChildren(element('h2', 'Selected note'), element('p', 'Select a note to see its connections.'));
     view?.setGraph({ nodes: [], edges: [] }, currentPath); view?.setSelection(null, null);
@@ -229,19 +253,21 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   }
   function accept(data, { append = false, fit = false } = {}) {
     if (!safePage(data)) throw new Error('invalid_response');
-    if (!pages.accept(data, append)) { controls(); say('View limit reached. Continue in a new view or narrow your filters.'); return; }
+    pages.accept(data, append);
     page = pages.data; nextCursor = page.next_cursor;
     if (!page.nodes.some(node => node.path === selected)) selected = page.nodes.some(node => node.path === activeParams?.path) ? activeParams.path : null;
     if (!page.nodes.some(node => node.path === focused)) focused = page.nodes[0]?.path || null;
-    view?.setGraph(page, currentPath); view?.setSelection(selected, focused);
-    if (fit) view?.fit();
+    let mapFailure = false;
+    try { view?.setGraph(page, currentPath); view?.setSelection(selected, focused); }
+    catch { mapFailure = true; unavailable(); }
+    if (fit && !mapFailure) view?.fit();
     renderList(); if (!append || selected && !details.textContent.includes(selected)) showDetails(selected);
     presentation(); controls();
     find('[data-graph-diagnostics]').textContent = `Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. ${page.limiting_reasons?.join(', ') || ''} Indexed saved content, not a disk snapshot. Hops refer to loaded edges; unsaved edits are excluded.`;
     if (page.limiting_reasons?.includes('neighborhood_limit')) {
       say('Partial graph: the neighborhood limit was reached. Try fewer hops or narrower filters.');
       offerOneHop();
-    } else say('');
+    } else say(mapFailure ? 'Map resource limit reached. All loaded records remain available in the connection list.' : '');
   }
   async function load({ cursor, fit = false, append = false, params = null } = {}) {
     clearTimeout(debounce); debounce = null; cancelAutomatic(); const ticket = ++sequence;
@@ -253,7 +279,6 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     if (!append) {
       const priorSelected = selected, priorFocused = focused;
       clearEvidence(); selected = priorSelected; focused = priorFocused;
-      windowed = false;
     }
     activeParams = params || (cursor ? activeParams : parameters());
     if (!activeParams) activeParams = parameters();
@@ -270,8 +295,8 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     } catch (error) {
       if (!closed && ticket === sequence && error.name !== 'AbortError') {
         loadingError = true; loadingReason = error.message;
-        if (error.message !== 'continuation_stalled' && error.message !== 'graph_query_limited') { pendingPositions = pendingVersion = null; clearEvidence(); }
-        say(error.message === 'authentication_required' ? 'Session expired. Sign in again to load the graph.' :
+        if (error.name !== 'RangeError' && error.message !== 'continuation_stalled' && error.message !== 'graph_query_limited') { pendingPositions = pendingVersion = null; clearEvidence(); }
+        say(error.name === 'RangeError' ? 'Loading stopped because this browser ran out of graph resources. Loaded results are incomplete. Try narrower filters or restart loading.' : error.message === 'authentication_required' ? 'Session expired. Sign in again to load the graph.' :
           error.message === 'restart_required' ? 'Connections changed. Restart loading to revalidate this view.' :
           error.message === 'graph_query_limited' ? 'The graph query limit was reached. Try fewer hops or narrower filters.' :
           error.message === 'graph_database_error' ? 'Connections could not load because of a database error. Refresh to try again.' :
@@ -318,7 +343,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   listen(find('[data-graph-clear]'), 'click', () => { input('query').value = ''; void load(); });
   listen(find('[data-graph-local]'), 'click', () => center(currentPath || selected));
   listen(find('[data-graph-global]'), 'click', () => { input('path').value = ''; input('depth').disabled = false; loadingPaused = false; void load({ fit: true }); });
-  listen(find('[data-graph-back]'), 'click', () => { input('path').value = trail.pop() || currentPath; find('[data-graph-back]').disabled = !trail.length; void load({ fit: true }); });
+  listen(find('[data-graph-back]'), 'click', () => { loadingPaused = false; input('path').value = trail.pop() || currentPath; find('[data-graph-back]').disabled = !trail.length; void load({ fit: true }); });
   listen(find('[data-graph-list-toggle]'), 'click', () => { listMode = !listMode || !graphicsAvailable; if (graphicsAvailable) preferredList = listMode; presentation(); });
   listen(find('[data-graph-fit]'), 'click', () => view?.fit());
   listen(find('[data-graph-reset]'), 'click', () => view?.resetOrientation());
@@ -329,14 +354,9 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   listen(find('[data-graph-pause]'), 'click', () => view?.setPaused(!view.paused));
   listen(find('[data-graph-bloom]'), 'input', event => { view?.setBloom(event.target.value); find('[data-graph-bloom-value]').textContent = ['Off', 'Default', 'High'][Number(event.target.value)]; });
   listen(find('[data-graph-refresh]'), 'click', () => { loadingPaused = false; void load(); });
-  listen(find('[data-graph-next]'), 'click', () => { if (nextCursor) void load({ cursor: nextCursor, append: true }); });
   listen(find('[data-graph-cancel]'), 'click', () => { loadingPaused = true; sequence++; cancelAutomatic(); request?.abort(); request = null; controls(); say('Loading paused. Resume loading to continue. Motion is unchanged.'); });
   listen(find('[data-graph-resume]'), 'click', () => { loadingPaused = false; if (nextCursor) void load({ cursor: nextCursor, append: true }); else void load(); });
   listen(find('[data-graph-restart]'), 'click', () => { loadingPaused = false; void load(); });
-  listen(find('[data-graph-window]'), 'click', () => {
-    const cursor = nextCursor, params = activeParams;
-    clearEvidence(); windowed = true; void load({ cursor, params, append: true, fit: true });
-  });
   listen(find('[data-graph-graphics-retry]'), 'click', () => {
     view?.destroy(); view = null; createView();
     if (!graphicsAvailable) return;

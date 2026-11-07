@@ -16,7 +16,7 @@ test('graph visual roles alias the installed semantic theme tokens', async () =>
 
 test('springs use unique undirected pairs, preserve symmetry and finite coincident forces', async () => {
   const { GraphPhysics } = await modules();
-  const sim = new GraphPhysics(nodes(['a', 'b']), [edge('a', 'b'), edge('b', 'a', 80), edge('a', 'b', 50)]);
+  const sim = new GraphPhysics(nodes(['a', 'b']), [edge('a', 'b'), edge('b', 'a', 80), edge('a', 'b', 50)], 'a');
   assert.equal(sim.springs.length, 1);
   const a = sim.nodes.get('a'), b = sim.nodes.get('b');
   a.x = b.x = 0; a.y = b.y = 0; a.z = b.z = 0;
@@ -28,7 +28,7 @@ test('springs use unique undirected pairs, preserve symmetry and finite coincide
 
 test('drag stretches real springs and neighbors follow; release settles and preserves identity', async () => {
   const { GraphPhysics } = await modules();
-  const sim = new GraphPhysics(nodes(['a', 'b', 'c']), [edge('a', 'b'), edge('b', 'c')]);
+  const sim = new GraphPhysics(nodes(['a', 'b', 'c']), [edge('a', 'b'), edge('b', 'c')], 'a');
   sim.settle();
   const b = sim.nodes.get('b'), before = { x: b.x, y: b.y };
   const a = sim.nodes.get('a');
@@ -46,7 +46,7 @@ test('drag stretches real springs and neighbors follow; release settles and pres
 
 test('fixed catch-up, topology continuity and total settling work are bounded', async () => {
   const { GraphPhysics } = await modules();
-  const sim = new GraphPhysics(nodes(['a', 'b']), [edge('a', 'b')]);
+  const sim = new GraphPhysics(nodes(['a', 'b']), [edge('a', 'b')], 'a');
   sim.advance(60);
   assert.ok(sim.steps <= 4);
   const a = sim.nodes.get('a');
@@ -55,13 +55,14 @@ test('fixed catch-up, topology continuity and total settling work are bounded', 
   assert.deepEqual([sim.nodes.get('a').x, sim.nodes.get('a').y], position);
   sim.settle();
   assert.equal(sim.active, false);
-  assert.throws(() => sim.setGraph(nodes(Array.from({ length: 10001 }, (_, i) => String(i))), []), RangeError);
+  sim.setGraph(nodes(Array.from({ length: 10001 }, (_, i) => String(i))), []);
+  assert.equal(sim.nodes.size, 10001);
 });
 
 test('equal elapsed time at 30 and 60 fps produces the same fixed-step state', async () => {
   const { GraphPhysics } = await modules();
-  const a = new GraphPhysics(nodes(['a', 'b', 'c']), [edge('a', 'b'), edge('b', 'c')]);
-  const b = new GraphPhysics(nodes(['a', 'b', 'c']), [edge('a', 'b'), edge('b', 'c')]);
+  const a = new GraphPhysics(nodes(['a', 'b', 'c']), [edge('a', 'b'), edge('b', 'c')], 'a');
+  const b = new GraphPhysics(nodes(['a', 'b', 'c']), [edge('a', 'b'), edge('b', 'c')], 'a');
   for (let i = 0; i < 30; i++) a.advance(1 / 30);
   for (let i = 0; i < 60; i++) b.advance(1 / 60);
   for (const path of ['a', 'b', 'c']) {
@@ -108,11 +109,11 @@ test('camera zoom anchors world coordinates and eased motion never overshoots', 
 test('bounded two-cluster fixture gathers neighborhoods, chain and hub remain usable', async () => {
   const { GraphPhysics } = await modules();
   const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
-  const sim = new GraphPhysics(nodes(ids), [edge('a', 'b'), edge('a', 'c'), edge('b', 'c'), edge('d', 'e'), edge('d', 'f'), edge('e', 'f'), edge('c', 'd')]);
+  const sim = new GraphPhysics(nodes(ids), [edge('a', 'b'), edge('a', 'c'), edge('b', 'c'), edge('d', 'e'), edge('d', 'f'), edge('e', 'f'), edge('c', 'd')], 'a');
   sim.settle(720);
   const distance = (a, b) => Math.hypot(sim.nodes.get(a).x - sim.nodes.get(b).x, sim.nodes.get(a).y - sim.nodes.get(b).y, sim.nodes.get(a).z - sim.nodes.get(b).z);
   assert.ok(distance('a', 'b') < distance('a', 'f'));
-  const dense = new GraphPhysics(nodes(Array.from({ length: 200 }, (_, i) => String(i))), Array.from({ length: 500 }, (_, i) => edge(String(i % 200), String((i * 7 + 1) % 200))));
+  const dense = new GraphPhysics(nodes(Array.from({ length: 200 }, (_, i) => String(i))), Array.from({ length: 500 }, (_, i) => edge(String(i % 200), String((i * 7 + 1) % 200))), '0');
   const started = performance.now();
   dense.settle(240);
   assert.equal(dense.nodes.size, 200);
@@ -122,7 +123,7 @@ test('bounded two-cluster fixture gathers neighborhoods, chain and hub remain us
 
 test('force simulation evolves z, pins in xyz and preserves all coordinates on merge', async () => {
   const { GraphPhysics } = await modules();
-  const sim = new GraphPhysics(nodes(['a', 'b']), [edge('a', 'b')]);
+  const sim = new GraphPhysics(nodes(['a', 'b']), [edge('a', 'b')], 'a');
   const a = sim.nodes.get('a'), b = sim.nodes.get('b');
   a.x = b.x = a.y = b.y = 0; a.z = -150; b.z = 150;
   sim.step();
@@ -137,14 +138,15 @@ test('force simulation evolves z, pins in xyz and preserves all coordinates on m
 test('large coincident hubs use bounded spatial approximation without dropping nodes', async () => {
   const { GraphPhysics } = await modules();
   const all = nodes(Array.from({ length: 10000 }, (_, i) => `n${i}`));
-  const sim = new GraphPhysics(all, all.slice(1).map(n => edge('n0', n.path)));
+  const sim = new GraphPhysics(all, all.slice(1).map(n => edge('n0', n.path)), 'n0');
   for (const n of sim.nodes.values()) n.x = n.y = n.z = 0;
   sim.step();
   assert.equal(sim.nodes.size, 10000);
   assert.ok(sim.interactions <= 10000 * 256, `bounded interactions: ${sim.interactions}`);
   assert.ok([...sim.nodes.values()].every(n => [n.x, n.y, n.z, n.vx, n.vy, n.vz].every(Number.isFinite)));
   assert.ok([...sim.nodes.values()].some(n => n.z !== 0));
-  assert.throws(() => sim.setGraph(nodes(Array.from({ length: 10001 }, (_, i) => String(i))), []), RangeError);
+  sim.setGraph(nodes(Array.from({ length: 10001 }, (_, i) => String(i))), []);
+  assert.equal(sim.nodes.size, 10001);
 });
 
 test('perspective orbit changes projected depth and fit/reset preserve a usable frame', async () => {
