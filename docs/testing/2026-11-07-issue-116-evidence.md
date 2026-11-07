@@ -88,3 +88,25 @@ for both installed inventories (0.32s), without an install or network access.
 The initial uv probe failed because its default cache is read-only; `--no-cache`
 removes that unrelated cache-write requirement, verified by the successful probe.
 No application, browser, publisher, release or full-gate tests were repeated.
+
+## Rollout metadata compatibility correction
+
+The installed `gh pr view --json` does not expose `baseRefOid`; candidate
+preparation originally failed before creating a candidate. Also, REST PR
+`base.sha` can retain the PR's historical base snapshot after the target branch
+advances. Candidate metadata now uses supported `gh pr view` fields for the
+required review decision, REST PR identity/head metadata, and a separate current
+`git/ref/heads/<base>` lookup for the actual proposed merge target. CLI identity
+must match the REST snapshot; PR and target observations repeat after reading
+review evidence, rejecting changed head/base metadata. Existing real remote
+freshness and atomic push leases remain mandatory.
+
+Focused regressions first reproduced the unsupported CLI field (5 failures),
+then the stale PR base snapshot (2 failures). Final command in the integrated
+release-process checkout:
+`/tmp/backstory-parallel-20261107/issue-116/.venv/bin/python -m pytest tests/unit/test_local_candidate.py -q`
+passed **25 tests in 1.60s**. This includes a real disposable-Git preparation with
+an older PR base snapshot and a newer target, plus mismatched CLI/REST head/base
+observations. `git diff --check` passed. Other receipts/browser/publication
+checks retain prior evidence; no full gate, remote push or controller change was
+performed for this correction.

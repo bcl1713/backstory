@@ -22,13 +22,39 @@ def git(source, *args):
 
 
 def pull_request(number):
-    fields = 'number,state,isDraft,baseRefName,headRefName,baseRefOid,headRefOid,headRepository,headRepositoryOwner,author,reviewDecision'
-    pr = json.loads(subprocess.check_output(
+    endpoint = f'repos/{REPOSITORY}/pulls/{number}'
+    def snapshot():
+        data = json.loads(subprocess.check_output(
+            ['gh', 'api', '--hostname', 'github.com', endpoint], text=True, timeout=120))
+        head_repo = data['head'].get('repo') or {}
+        # Pull-request base.sha can remain the PR's old base snapshot. Prepare
+        # against the live target ref, then compare it again after review reads.
+        target = json.loads(subprocess.check_output(
+            ['gh', 'api', '--hostname', 'github.com',
+             f'repos/{REPOSITORY}/git/ref/heads/' + data['base']['ref']],
+            text=True, timeout=120))
+        return dict(number=data['number'], state=data['state'].upper(), isDraft=data['draft'],
+                    baseRefName=data['base']['ref'], baseRefOid=target['object']['sha'],
+                    headRefName=data['head']['ref'], headRefOid=data['head']['sha'],
+                    headRepository={'name': head_repo.get('name')},
+                    headRepositoryOwner={'login': head_repo.get('owner', {}).get('login')},
+                    author={'login': data['user']['login']})
+    # baseRefOid is a GraphQL field but is not exposed by installed gh pr view.
+    # REST supplies PR identity and the live target ref; retain gh's supported
+    # reviewDecision and bind it to that same PR/head before accepting evidence.
+    pr = snapshot()
+    fields = 'number,state,isDraft,baseRefName,headRefName,headRefOid,reviewDecision'
+    view = json.loads(subprocess.check_output(
         ['gh', 'pr', 'view', str(number), '--repo', 'github.com/' + REPOSITORY,
          '--json', fields], text=True, timeout=120))
+    if any(view[key] != pr[key] for key in fields.split(',') if key != 'reviewDecision'):
+        raise ValueError('PR metadata changed between REST and review decision observations.')
     pages = json.loads(subprocess.check_output(
         ['gh', 'api', '--hostname', 'github.com', '--paginate', '--slurp',
-         f'repos/{REPOSITORY}/pulls/{number}/reviews'], text=True, timeout=120))
+         endpoint + '/reviews'], text=True, timeout=120))
+    if snapshot() != pr:
+        raise ValueError('PR head/base metadata changed while reading review evidence.')
+    pr['reviewDecision'] = view['reviewDecision']
     pr['reviews'] = [review for page in pages for review in page]
     return pr
 

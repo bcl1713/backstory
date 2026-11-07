@@ -249,3 +249,86 @@ def test_remote_without_atomic_push_support_fails_closed(candidate, monkeypatch)
         controller.land(path, record['source_sha'], review_file(path, record['source_sha']))
     assert git('ls-remote', 'origin', 'refs/heads/dev').split()[0] == record['base_sha']
     assert git('ls-remote', 'origin', 'refs/heads/feature').split()[0] == record['head_sha']
+
+
+@pytest.mark.parametrize('mismatch', [None, 'cli-head', 'cli-base', 'rest-head', 'rest-base'])
+def test_pull_request_uses_supported_cli_fields_and_consistent_rest_metadata(monkeypatch, mismatch):
+    m = module()
+    rest = dict(number=121, state='open', draft=False, user={'login': 'author'},
+        base=dict(ref='dev', sha='0' * 40),  # REST PR's historical base snapshot.
+        head=dict(ref='feature', sha='b' * 40,
+                  repo=dict(name='backstory', owner={'login': 'bcl1713'})))
+    cli = dict(number=121, state='OPEN', isDraft=False, baseRefName='dev',
+               headRefName='feature', headRefOid='b' * 40, reviewDecision='REVIEW_REQUIRED')
+    if mismatch == 'cli-head':
+        cli['headRefOid'] = 'c' * 40
+    if mismatch == 'cli-base':
+        cli['baseRefName'] = 'main'
+    calls, snapshots = [], 0
+    def output(args, **kwargs):
+        nonlocal snapshots
+        calls.append(args)
+        if args[:3] == ['gh', 'pr', 'view']:
+            fields = args[args.index('--json') + 1].split(',')
+            # Model the installed gh, which rejects this GraphQL-only field.
+            if 'baseRefOid' in fields:
+                raise subprocess.CalledProcessError(1, args, stderr='Unknown JSON field: baseRefOid')
+            return json.dumps(cli)
+        assert args[:4] == ['gh', 'api', '--hostname', 'github.com']
+        if args[-1].endswith('/reviews'):
+            return json.dumps([[dict(state='CHANGES_REQUESTED', user={'login': 'reviewer'}, commit_id='b' * 40)]])
+        if args[-1] == 'repos/bcl1713/backstory/git/ref/heads/dev':
+            return json.dumps({'object': {'sha': ('c' if mismatch == 'rest-base' and snapshots > 1 else 'a') * 40}})
+        assert args[-1] == 'repos/bcl1713/backstory/pulls/121'
+        snapshots += 1
+        if snapshots > 1 and mismatch == 'rest-head':
+            rest['head']['sha'] = 'c' * 40
+        return json.dumps(rest)
+    monkeypatch.setattr(m.subprocess, 'check_output', output)
+    if mismatch:
+        with pytest.raises(ValueError, match='changed|metadata'):
+            m.pull_request(121)
+    else:
+        pr = m.pull_request(121)
+        assert pr['baseRefOid'] == 'a' * 40 and pr['headRefOid'] == 'b' * 40
+        assert pr['reviewDecision'] == 'REVIEW_REQUIRED'
+        assert pr['reviews'][0]['state'] == 'CHANGES_REQUESTED'
+        assert pr['headRepositoryOwner'] == {'login': 'bcl1713'}
+        assert pr['headRepository'] == {'name': 'backstory'}
+        assert snapshots == 2
+
+
+def test_prepare_uses_current_target_after_pr_base_snapshot_is_stale(candidate, monkeypatch):
+    m, controller, pr, work, git = candidate
+    old_base = pr['baseRefOid']
+    git('switch', '-q', 'dev')
+    (work / 'new-target-file').write_text('current target change')
+    git('add', '.')
+    git('commit', '-qm', 'fix: target advanced before prepare')
+    git('push', '-q', 'origin', 'dev')
+    current_base = git('rev-parse', 'HEAD')
+    rest = dict(number=12, state='open', draft=False, user={'login': 'author'},
+        base=dict(ref='dev', sha=old_base),
+        head=dict(ref='feature', sha=pr['headRefOid'],
+                  repo=dict(name='backstory', owner={'login': 'bcl1713'})))
+    original = m.subprocess.check_output
+    def output(args, **kwargs):
+        if args[:3] == ['gh', 'pr', 'view']:
+            return json.dumps({**pr, 'reviewDecision': None})
+        if args[0] == 'gh':
+            if args[-1].endswith('/reviews'):
+                return json.dumps([pr['reviews']])
+            if '/git/ref/heads/' in args[-1]:
+                return json.dumps({'object': {'sha': current_base}})
+            return json.dumps(rest)
+        return original(args, **kwargs)
+    metadata_loader = module().pull_request
+    monkeypatch.setattr(m, 'pull_request', metadata_loader)
+    monkeypatch.setattr(m.subprocess, 'check_output', output)
+    path = controller.prepare(12)
+    record = json.loads(path.read_text())
+    assert record['base_sha'] == current_base != old_base
+    assert (path.parent / 'source/new-target-file').read_text() == 'current target change'
+    parents = original(['git', 'show', '-s', '--format=%P', record['source_sha']],
+                       cwd=path.parent / 'source', text=True).strip().split()
+    assert parents == [current_base, pr['headRefOid']]
