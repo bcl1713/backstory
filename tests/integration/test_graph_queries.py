@@ -78,6 +78,81 @@ def test_unavailable_storage_withholds_all_content(wiki):
     assert page.state == 'unavailable' and not page.nodes and not page.edges
 
 
+@pytest.mark.parametrize('stage', ['queued', 'running'])
+@pytest.mark.parametrize('change', [
+    'changed_source', 'dirty_source', 'deleted_endpoint', 'denied_endpoint',
+    'storage_unavailable', 'namespace_mismatch', 'mutation_mismatch',
+])
+def test_reconciliation_retains_only_safe_relation_evidence(wiki, settings, stage, change):
+    from django.db.models import F
+    from indexing import worker
+    from indexing.models import IndexedNote, IndexGeneration, RelationState
+    from indexing.queue import request_scan
+
+    graph = build_graph(wiki, {'a.md': '[[b]] [[b#Part]]', 'b.md': '# B',
+                               'safe.md': '[[target]]', 'target.md': '# Target'})
+    first = graph.query_links('a.md', 'outgoing', limit=1)
+    request_scan('incremental')
+    if stage == 'running':
+        assert worker.run_batch().pending
+    assert worker.index_status().state == ('stale' if stage == 'queued' else 'partial')
+
+    if change == 'changed_source':
+        (wiki / 'a.md').write_text('# Changed source without those links')
+    elif change == 'dirty_source':
+        IndexedNote.objects.filter(generation__state='active', path='a.md').update(relations_dirty=True)
+        RelationState.objects.filter(generation__state='active').update(complete=False)
+    elif change == 'deleted_endpoint':
+        (wiki / 'b.md').unlink()
+    elif change == 'denied_endpoint':
+        settings.BACKSTORY_EXCLUSIONS = ['b.md']
+    elif change == 'storage_unavailable':
+        (wiki / '.backstory-marker').unlink()
+    elif change == 'namespace_mismatch':
+        RelationState.objects.filter(generation__state='active').update(namespace='unknown')
+    elif change == 'mutation_mismatch':
+        IndexGeneration.objects.filter(state='active').update(mutation=F('mutation') + 1)
+
+    outgoing = graph.query_links('a.md', 'outgoing')
+    pages = [outgoing, graph.query_graph(), graph.query_graph('a.md')]
+    assert not outgoing.items
+    if change == 'denied_endpoint':
+        from wiki.contracts import PathDenied
+        with pytest.raises(PathDenied):
+            graph.query_links('b.md', 'incoming')
+    else:
+        incoming = graph.query_links('b.md', 'incoming')
+        assert not incoming.items
+        pages.append(incoming)
+    assert all(not page.projection_complete for page in pages)
+    assert not pages[2].edges
+    independent_safe = change in {'changed_source', 'dirty_source', 'deleted_endpoint'}
+    assert {(edge.source, edge.destination) for edge in pages[1].edges} == (
+        {('safe.md', 'target.md')} if independent_safe else set())
+    if change == 'denied_endpoint':
+        assert all('b.md' not in str(page) for page in pages)
+    if change in {'denied_endpoint', 'storage_unavailable', 'mutation_mismatch', 'dirty_source'}:
+        with pytest.raises(StorageError, match='graph_cursor_expired'):
+            graph.query_links('a.md', 'outgoing', limit=1, cursor=first.next_cursor)
+    else:
+        assert not graph.query_links('a.md', 'outgoing', limit=1, cursor=first.next_cursor).items
+
+
+def test_rebuild_generation_expires_prior_relation_cursor(wiki):
+    from indexing import worker
+    from indexing.queue import request_scan
+    from tests.integration.test_indexing import drain
+
+    graph = build_graph(wiki, {'a.md': '[[b]] [[b#Part]]', 'b.md': '# B'})
+    first = graph.query_links('a.md', 'outgoing', limit=1)
+    request_scan('rebuild')
+    drain(worker)
+    current = graph.query_links('a.md', 'outgoing')
+    assert current.generation != first.generation and len(current.items) == 2
+    with pytest.raises(StorageError, match='graph_cursor_expired'):
+        graph.query_links('a.md', 'outgoing', limit=1, cursor=first.next_cursor)
+
+
 def test_graph_pages_include_cross_page_edge_endpoints_and_local_center(wiki):
     graph = build_graph(wiki, {'z.md': '[[a]] [[b]]', 'a.md': '[[b]]', 'b.md': '# B'})
     cursor = None
