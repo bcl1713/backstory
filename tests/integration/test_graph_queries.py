@@ -153,3 +153,21 @@ def test_cursor_from_building_projection_restarts_after_publication(wiki):
     worker.run_batch()
     with pytest.raises(StorageError, match='graph_cursor_expired'):
         graph.query_graph(node_limit=1, cursor=first.next_cursor)
+
+
+def test_unindexed_or_deleted_requested_note_cannot_prove_no_links(wiki):
+    graph = build_graph(wiki, {'a.md': '# A'})
+    (wiki / 'new.md').write_text('[[a]]')
+    for direction in ('incoming', 'outgoing', 'both'):
+        assert not graph.query_links('new.md', direction).projection_complete
+    (wiki / 'a.md').unlink()
+    assert not graph.query_links('a.md', 'both').projection_complete
+
+
+def test_denied_references_never_become_missing_diagnostics(wiki, settings):
+    settings.BACKSTORY_EXCLUSIONS = ['private/**']
+    graph = build_graph(wiki, {'a.md': '[[private/target]] [private](private/other.md)',
+                               'private/target.md': '# Excluded'})
+    page = graph.query_link_issues(issue='missing')
+    assert not page.items
+    assert 'private/' not in str(graph.query_links('a.md', 'outgoing'))

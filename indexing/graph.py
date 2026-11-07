@@ -179,6 +179,8 @@ class Query:
                 'occurrence__occurrence_kind')
 
     def occurrence(self, relation):
+        if relation.resource_type == 'excluded':
+            return None
         edge = relation.occurrence
         if not self.eligible(edge.note.path):
             return None
@@ -262,6 +264,8 @@ def query_links(path, direction, cursor=None, limit=50):
         raise StorageError('invalid_direction')
     _limit(limit, 100)
     query = Query({'kind': 'links', 'path': path, 'direction': direction, 'limit': limit}, cursor)
+    if query.index.state != 'unavailable':
+        query.eligible(path)
     rows = query.relation_rows()
     conditions = Q(source=path)
     if direction == 'incoming':

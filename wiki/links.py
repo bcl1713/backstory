@@ -91,7 +91,7 @@ def resolve_relation(source_path: str, target: str, kind: Literal["markdown", "w
             return RelationResult("resolved", suffix or "#", label, canonical_path=source_path, resource_type='self')
         rooted = kind == "wiki" and path.startswith("/") and not path.startswith("//")
         if path.startswith("/") and not rooted:
-            return RelationResult("missing", None, label)
+            return RelationResult("missing", None, label, resource_type='excluded')
         if rooted:
             path = path[1:]
         relative = posixpath.normpath(posixpath.join(posixpath.dirname(source_path), path))
@@ -151,8 +151,9 @@ def resolve_relation(source_path: str, target: str, kind: Literal["markdown", "w
             note_target = not parsed.scheme and not parsed.netloc and posixpath.splitext(path)[1].lower() in {'', '.md'}
             if state == 'missing' and create_paths and not blocked_creation and note_target:
                 return RelationResult(state, None, label, action_href=action, create_path=create_paths[0])
-            return RelationResult(state, None, label)
-        return RelationResult("missing", None, label)
+            return RelationResult(state, None, label,
+                                  resource_type='excluded' if blocked_creation and state == 'missing' else 'unknown')
+        return RelationResult("missing", None, label, resource_type='excluded' if blocked_creation else 'unknown')
     except (StorageError, OSError, ValueError, UnicodeError):
         return unavailable
 

@@ -17,7 +17,7 @@ from wiki.policy import policy_version
 from wiki.storage import open_directory, require_ready
 from .models import IndexGeneration, IndexedNote, LinkEdge, RelationState, ResolvedRelation, ScanState
 
-RESOLVER_VERSION = 'graph-2'
+RESOLVER_VERSION = 'graph-3'
 
 
 def namespace_version():
