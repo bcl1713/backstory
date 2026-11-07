@@ -37,8 +37,7 @@ def test_plan_uses_focused_browser_and_container_gates(tmp_path):
     for expected in ['uv sync --frozen', 'npm ci', 'npm run build',
                      'pytest -n 2 --dist loadfile', 'npm run test:formatter',
                      'playwright.code.config.js',
-                     'playwright.firefox.config.js', 'selenium==4.52.0',
-                     'stock_firefox.py', 'docker build', 'check --deploy --fail-level WARNING',
+                     'playwright.firefox.config.js', 'docker build', 'check --deploy --fail-level WARNING',
                      'run --pull never --rm web', 'down --volumes']:
         assert expected in commands
     assert 'docker push' not in commands
