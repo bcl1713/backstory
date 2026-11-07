@@ -11,20 +11,24 @@ draft/conflict navigation guard. Pending idle-save is cancelled on graph entry.
 
 ## Explore connections
 
-Local starts with incoming/outgoing links at **two hops** when opened from a note.
+Local starts at **two outgoing hops** when opened from a note.
 The visible hop controls and `[` / `]` change depth from **one to eight hops** while
 graph navigation has focus. Brackets remain ordinary input in search or the editor.
-Depth is shortest explicit-link distance from the stable center, through eligible
-notes in either direction. Selection does not change the center. Shrinking removes
+Depth is shortest outgoing-link distance from the stable center, through eligible
+notes. A note that only links into the neighborhood does not join it. Incoming
+links remain available in selected-note details. Selection does not change the
+center; **Center selected note** starts an outgoing search from that note. Shrinking removes
 out-of-scope results; the center is selected if the old selection leaves scope.
-Surviving coordinates, orientation and zoom remain. Query budgets can make large
-neighborhoods partial even below eight hops; the summary reports that limitation.
+Surviving coordinates, orientation and zoom remain. Bounded work yields
+continuations until the entire selected-depth neighborhood is loaded. Incomplete
+index evidence or loading failures remain visible in the summary.
 
 **All notes** starts automatic loading of every eligible wiki component, including
 disconnected notes. Bounded pages accumulate without repeated Load more clicks;
 empty continuing pages advance too. Canonical nodes and directed aggregate edges
-are deduplicated; repeated aggregate counts replace earlier counts. Local pages
-still offer **Load more** when a neighborhood requires continuation. Folder, exact
+are deduplicated; repeated aggregate counts replace earlier counts. Local views
+also follow continuations automatically. All eligible directed links between
+included nodes remain visible, including same-depth, back and reciprocal links. Folder, exact
 tag and literal path/title/name filters use the shared JSON/WebMCP service. Active
 filters are shown beside the local/whole-wiki scope, including their values.
 

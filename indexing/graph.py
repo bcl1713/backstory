@@ -397,7 +397,8 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
     _limit(node_limit, 200)
     _limit(edge_limit, 500)
     context = Query({'kind': 'graph', 'path': path, 'depth': depth, 'folder': folder, 'tag': tag,
-                     'query': query, 'node_limit': node_limit, 'edge_limit': edge_limit}, cursor)
+                     'query': query, 'node_limit': node_limit, 'edge_limit': edge_limit,
+                     **({'membership': 'outgoing-v1'} if path else {})}, cursor)
     if context.index.state == 'unavailable':
         return context.finish(GraphPage)
     if path and depth > 1:
@@ -412,8 +413,7 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
         # no persisted frontier and can seek directly to later neighbors.
         direct = context.relation_rows().filter(resource_type='note', occurrence__occurrence_kind='link')
         indexed_neighborhood = (Q(path=path) |
-                                Q(path__in=direct.filter(source=path).values('destination')) |
-                                Q(path__in=direct.filter(destination=path).values('source')))
+                                Q(path__in=direct.filter(source=path).values('destination')))
         if not _matches(path, folder, tag, query).filter(generation=context.generation).exists():
             center = None
     eligible_rows = _filtered_nodes(context.generation, folder, tag, query)
