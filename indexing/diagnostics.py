@@ -23,9 +23,9 @@ class RedactIndexDiagnostic(logging.Filter):
         event = {}
         if isinstance(source, dict):
             choices = {
-                'operation': {'enqueue', 'worker', 'worker_failure_state', 'search', 'resolve'},
+                'operation': {'enqueue', 'worker', 'worker_failure_state', 'search', 'resolve', 'graph'},
                 'reason_code': {'index_database_busy', 'index_database_error', 'index_storage_error',
-                                'index_io_error', 'index_enqueue_error', 'search_budget_exceeded'},
+                                'index_io_error', 'index_enqueue_error', 'search_budget_exceeded', 'graph_budget_exceeded'},
                 'exception_class': {'OperationalError', 'Error', 'StorageError', 'OSError',
                                     'RuntimeError', 'ValueError', 'TypeError', 'Exception'},
             }
@@ -80,7 +80,7 @@ def failure_reason(error):
 def record_failure(operation, error, *, budget_triggered=False):
     """Emit bounded, structured evidence; never compromise a completed save."""
     code, name = sqlite_details(error)
-    reason = 'search_budget_exceeded' if budget_triggered else failure_reason(error)
+    reason = ('graph_budget_exceeded' if operation == 'graph' else 'search_budget_exceeded') if budget_triggered else failure_reason(error)
     # Fixed classes avoid trusting names from application-defined exceptions.
     exception_class = next((kind.__name__ for kind in
                             (OperationalError, sqlite3.Error, StorageError, OSError,
