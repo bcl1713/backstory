@@ -63,7 +63,7 @@ export class GraphView {
       this.unavailable = true; this.container.dataset.renderer = 'unavailable';
       queueMicrotask(() => { if (!this.destroyed) this.actions.onUnavailable?.('WebGL is unavailable. Your loaded notes remain available in the list.'); });
     }
-    this.resize = new ResizeObserver(() => { if (!this.syncSize()) return; if (!this.sized && this.loaded && this.camera.width > 0) this.camera.fit(this.simulation.nodes, true); this.sized = true; this.draw(); });
+    this.resize = new ResizeObserver(() => { if (!this.syncSize()) return; if (!this.sized && this.loaded && !this.cameraControlled && this.camera.width > 0) this.camera.fit(this.simulation.nodes, true); this.sized = true; this.draw(); });
     this.resize.observe(container); this.syncSize();
     this.themeObserver = new MutationObserver(() => { this.updateTheme(); this.draw(); });
     this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-color-scheme', 'data-theme'] });
@@ -109,13 +109,18 @@ export class GraphView {
     this.labels.width = Math.round(bounds.width * this.pixelRatio); this.labels.height = Math.round(bounds.height * this.pixelRatio); return true;
   }
   setGraph(data, current) {
-    this.release(null, true); this.data = data; this.current = current;
+    const topology = JSON.stringify([data.nodes.map(node => node.path), data.edges.map(edge => [edge.source, edge.destination])]);
+    const changed = topology !== this.topology;
+    this.data = data; this.current = current;
+    if (!changed) { this.themeDirty = true; this.draw(); return; }
+    this.topology = topology; this.release(null, true);
     this.simulation.setGraph(data.nodes, data.edges);
-    if (!this.loaded) {
+    if (!this.loaded && data.nodes.length) {
       // Large layouts warm up through resumable animation work, never a
       // synchronous whole-graph step while a new page is being installed.
       if (data.nodes.length <= 256) for (let i = 0; i < 12; i++) this.simulation.step();
-      this.camera.fit(this.simulation.nodes, true); this.loaded = true;
+      if (!this.cameraControlled) this.camera.fit(this.simulation.nodes, true);
+      this.loaded = true;
     }
     if (this.paused) this.simulation.settle(0);
     if (this.batch) { this.scene.remove(this.batch.group); this.batch.dispose(); }
@@ -145,11 +150,11 @@ export class GraphView {
     if (this.paused) { this.simulation.settle(0); this.camera.snap(); this.stop(); } else { this.simulation.reheat(); this.wake(); }
     this.actions.onPause?.(this.paused); this.draw();
   }
-  fit() { this.camera.fit(this.simulation.nodes, this.paused); this.draw(); this.wake(); }
-  resetOrientation() { this.camera.resetOrientation(this.paused); this.draw(); this.wake(); }
-  orbit(dx, dy) { this.camera.orbit(dx, dy, this.paused); this.draw(); this.wake(); }
-  zoom(factor, point) { this.camera.zoom(factor, point, this.paused); this.draw(); this.wake(); }
-  pan(dx, dy) { this.camera.pan(dx, dy, this.paused); this.draw(); this.wake(); }
+  fit() { if (!this.simulation.nodes.size) return; this.cameraControlled = true; this.camera.fit(this.simulation.nodes, this.paused); this.draw(); this.wake(); }
+  resetOrientation() { this.cameraControlled = true; this.camera.resetOrientation(this.paused); this.draw(); this.wake(); }
+  orbit(dx, dy) { this.cameraControlled = true; this.camera.orbit(dx, dy, this.paused); this.draw(); this.wake(); }
+  zoom(factor, point) { this.cameraControlled = true; this.camera.zoom(factor, point, this.paused); this.draw(); this.wake(); }
+  pan(dx, dy) { this.cameraControlled = true; this.camera.pan(dx, dy, this.paused); this.draw(); this.wake(); }
   keydown(event) {
     if (event.target !== this.container || event.isComposing || event.altKey || event.metaKey || event.ctrlKey || event.getModifierState?.('AltGraph')) return;
     const direction = { ArrowLeft: 'left', h: 'left', ArrowRight: 'right', l: 'right', ArrowUp: 'up', k: 'up', ArrowDown: 'down', j: 'down' }[event.key];
@@ -176,6 +181,7 @@ export class GraphView {
     return path;
   }
   pointerDown(event) {
+    this.cameraControlled = true;
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || this.unavailable) return;
     const point = this.point(event); this.pointers.set(event.pointerId, point);
     this.container.focus({ preventScroll: true }); this.container.setPointerCapture(event.pointerId);

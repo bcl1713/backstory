@@ -398,9 +398,14 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
     _limit(edge_limit, 500)
     context = Query({'kind': 'graph', 'path': path, 'depth': depth, 'folder': folder, 'tag': tag,
                      'query': query, 'node_limit': node_limit, 'edge_limit': edge_limit,
-                     **({'membership': 'outgoing-v1'} if path else {})}, cursor)
+                     **({'membership': 'outgoing-v2'} if path else {})}, cursor)
     if context.index.state == 'unavailable':
         return context.finish(GraphPage)
+    if path and cursor is None:
+        from .graph_traversal import small_page
+        small = small_page(context, path, depth, folder, tag, query, node_limit, edge_limit)
+        if small is not None:
+            return small
     if path and depth > 1:
         from .graph_traversal import local_page
         return local_page(context, path, depth, folder, tag, query, node_limit, edge_limit)

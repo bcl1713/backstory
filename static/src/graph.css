@@ -90,7 +90,24 @@
   [data-graph-summary] { margin-block: .25rem .5rem; }
 }
 
-.graph-panel [data-graph-status]:empty { display: none; }
+/* Progress and recovery occupy fixed slots, including their empty states. */
+.graph-load-control { display: grid; min-width: 10rem; min-height: 3.25rem; }
+.graph-load-control > button { grid-area: 1 / 1; }
+.graph-panel [data-graph-graphics-retry][hidden] { display: inline-block !important; visibility: hidden; }
+.graph-panel [data-graph-depth-controls][hidden] { display: flex !important; visibility: hidden; }
+[data-graph-status] { height: 5rem; min-height: 5rem; overflow: auto; box-sizing: border-box; margin-block: .25rem; }
+[data-graph-summary] { height: 3em; overflow: auto; margin-block: .25rem .5rem; }
+.graph-workspace { height: clamp(20rem, 56dvh, 44rem); grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+.graph-map { height: 100%; box-sizing: border-box; }
+.graph-workspace > [data-graph-list], .graph-sidebar { min-height: 0; overflow: auto; }
+.graph-sidebar { max-height: 100%; }
+@media (max-width: 850px) {
+  .graph-workspace { height: calc(clamp(20rem, 56dvh, 44rem) + 28dvh + 1rem); grid-template-rows: clamp(20rem, 56dvh, 44rem) minmax(0, 1fr); }
+  .graph-sidebar { max-height: 28dvh; }
+}
+@media (max-width: 650px) {
+  .graph-workspace { height: calc(max(17rem, 48dvh) + 28dvh + .5rem); grid-template-rows: max(17rem, 48dvh) minmax(0, 1fr); }
+}
 
 .graph-sidebar { min-width: 0; }
 [data-graph-settings] { margin-bottom: .75rem; }
