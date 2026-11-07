@@ -134,10 +134,12 @@ are needed: application source and checked-in built assets are unchanged.
 
 Logs: `/tmp/backstory-parallel-20261107/issue-117-{renderers,code,stock-smoke}.log`;
 collection diagnostic preserved as `issue-117-collection-failure.log` alongside
-those logs. Runtime is the existing project Python3.14.4 virtualenv, Node22.23.4,
+those logs. Runtime is the existing project Python3.14.4 virtualenv, Node22.12.0,
 Playwright1.64.1/Firefox157 revision1555, original checked-in application assets.
 Cumulative verification was under five minutes; no 15-minute checkpoint needed.
-These focused results are **not** a new full-gate receipt.
+These focused results are **not** a new full-gate receipt. Local Node22.12.0
+is within the application engine range; the release gate separately enforces
+Node22.23.4. Browser/runtime packages were unchanged.
 
 After the browser run, added `graph-controls.spec.js` to the main project's
 selection to preserve concurrently implemented #119 acceptance. That file is
