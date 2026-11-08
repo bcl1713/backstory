@@ -11,13 +11,7 @@ for(const width of [1180,390]) test(`cumulative exploration, hints and perspecti
  const env={...process.env,DJANGO_SETTINGS_MODULE:'backstory.settings',BACKSTORY_WIKI_ROOT:`${runtime}/wiki`,BACKSTORY_DATA_DIR:`${runtime}/data`,BACKSTORY_IDENTITY_PATH:'.backstory-marker',BACKSTORY_COOKIE_MODE:'localhost',BACKSTORY_ALLOWED_HOSTS:'localhost,127.0.0.1'};
  const indexed=spawnSync('.venv/bin/python',['-c',"import django; django.setup(); from indexing.queue import request_scan; from indexing.worker import run_batch; request_scan('verify')\nfor n in range(2000):\n r=run_batch(now=10000000000+n)\n if not r.pending: break\nelse: raise SystemExit(9)"],{env,encoding:'utf8'});expect(indexed.status,indexed.stderr).toBe(0);
  const errors=[];page.on('pageerror',e=>errors.push(e.message));
- let heldExpansion=null, releaseExpansion;
- if(width===390)await page.route('**/tools/graph/?*',async route=>{const url=new URL(route.request().url());url.searchParams.set('node_limit','4');url.searchParams.set('edge_limit','2');
-  if(!heldExpansion && url.searchParams.get('expand')==='Explore C.md' && url.searchParams.has('cursor')){
-   const response=await route.fetch({url:url.toString()});heldExpansion=response;await new Promise(resolve=>releaseExpansion=resolve);await route.fulfill({response}).catch(()=>{});return;
-  }
-  return route.continue({url:url.toString()});});
- const expansionRequests=[];let graphRequests=0;page.on('request',r=>{if(new URL(r.url()).pathname==='/tools/graph/'){graphRequests++;const expanded=new URL(r.url()).searchParams.get('expand');if(expanded)expansionRequests.push(expanded);}});
+ let graphRequests=0;page.on('request',r=>{if(new URL(r.url()).pathname==='/tools/graph/snapshot/')graphRequests++;});
  await page.goto('/accounts/login/');await page.getByLabel('Username',{exact:true}).fill('slice');await page.getByLabel('Password',{exact:true}).fill('synthetic-slice-browser-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();
  await page.goto('/notes/Explore%20A.md');await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
  await page.evaluate(()=>document.dispatchEvent(new Event('backstory:open-graph')));
@@ -33,22 +27,15 @@ for(const width of [1180,390]) test(`cumulative exploration, hints and perspecti
  for(const path of ['Explore B.md','Explore X.md'])expect(passive.labels.find(l=>l.path===path).text).toContain(`f ${passive.codes[path]} ·`);
  await expect(panel.getByRole('button',{name:'Node hints (f)',exact:true})).toBeVisible();
  await map.screenshot({path:info.outputPath(`one-hop-default-${width}.png`)});
+ const selectionRequests=graphRequests;
  const target=await map.evaluate(el=>el.graphView.projected.get('Explore C.md'));
  await map.scrollIntoViewIfNeeded();const bounds=await map.boundingBox();
  if(width===390)await page.touchscreen.tap(bounds.x+target.x,bounds.y+target.y);else await page.mouse.click(bounds.x+target.x,bounds.y+target.y);
- if(width===390){
-  await expect.poll(()=>Boolean(heldExpansion)).toBe(true);
-  await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);
-  await panel.getByRole('button',{name:'Pause loading',exact:true}).click();
-  await page.evaluate(()=>{Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));});releaseExpansion();
-  await page.evaluate(()=>{Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));});
-  await panel.getByRole('button',{name:'Resume loading',exact:true}).click();
- }
  await expect(summary).toContainText('6 notes · 7 directed links · Complete');
  const expanded=await map.evaluate(el=>{const v=el.graphView;return {root:v.root,selected:v.selected,focused:v.focused,camera:v.snapshot().camera,positions:v.simulation.all.map(n=>[n.path,n.x,n.y,n.z]),depth:v.simulation.depths.get('Explore E.md'),paused:v.paused};});
  expect(expanded.root).toBe('Explore A.md');expect(expanded.selected).toBe('Explore C.md');expect(expanded.focused).toBe('Explore C.md');expect(expanded.camera).toEqual(original.camera);expect(expanded.positions.slice(0,4)).toEqual(original.positions);expect(expanded.depth).toBe(4);expect(expanded.paused).toBe(true);
  await map.evaluate(el=>{el.graphView.actions.onSelect('Explore B.md',true);el.graphView.actions.onSelect('Explore X.md',true);});
- await expect.poll(()=>expansionRequests.includes('Explore B.md')&&expansionRequests.includes('Explore X.md')).toBe(true);
+ expect(graphRequests).toBe(selectionRequests);
  await expect(summary).toContainText('6 notes · 7 directed links · Complete');
  await map.evaluate(el=>{const v=el.graphView;v.simulation.all.forEach((n,i)=>Object.assign(n,v.camera.world({x:45+i*(v.camera.width-90)/5,y:90+i*35})));v.draw();});
  await map.focus();await page.keyboard.press('f');await expect(map).toHaveAttribute('data-hint-mode','true');

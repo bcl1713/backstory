@@ -1,5 +1,5 @@
 import { GraphView } from './graph-view.js';
-import { GraphPages } from './graph-pages.js';
+import { GraphSnapshot } from './graph-snapshot.js';
 import { indexProgress } from './graph-index-status.js';
 import { DEFAULT_FORCES, loadForces, saveForces } from './graph-preferences.js';
 
@@ -11,19 +11,6 @@ const element = (name, text, attributes = {}) => {
   for (const [key, value] of Object.entries(attributes)) el.setAttribute(key, String(value));
   return el;
 };
-const safeNote = node => {
-  if (typeof node.path !== 'string' || typeof node.title !== 'string' || typeof node.href !== 'string') return false;
-  try {
-    const url = new URL(node.href, location.origin);
-    return url.origin === location.origin && url.pathname.startsWith('/notes/') && decodeURIComponent(url.pathname.slice(7)) === node.path;
-  } catch { return false; }
-};
-const safePage = page => page && page.untrusted_content === true && page.authoritative === false &&
-  (page.next_cursor === null || typeof page.next_cursor === 'string' && page.next_cursor.length > 0 && page.next_cursor.length <= 4096) &&
-  Array.isArray(page.nodes) && page.nodes.length <= 200 && Array.isArray(page.edges) && page.edges.length <= 500 &&
-  page.nodes.every(safeNote) && page.edges.every(edge => typeof edge.source === 'string' &&
-    typeof edge.destination === 'string' && Number.isSafeInteger(edge.occurrence_count) && edge.occurrence_count > 0);
-
 async function readJSON(url, signal) {
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal, headers: { Accept: 'application/json' } });
   if (response.redirected || new URL(response.url).origin !== location.origin || !response.headers.get('content-type')?.startsWith('application/json')) throw new Error('invalid_response');
@@ -34,7 +21,7 @@ async function readJSON(url, signal) {
   return data;
 }
 
-export function mountGraph(root, { currentPath = '', initial = null, onClose = () => {} } = {}) {
+export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) {
   const find = selector => root.querySelector(selector);
   const panel = find('[data-graph-panel]') || root;
   const form = find('[data-graph-filters]');
@@ -65,32 +52,22 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   const life = new AbortController();
   const listen = (el, name, fn, options = {}) => el.addEventListener(name, fn, { ...options, signal: life.signal });
   const say = text => { if (status.textContent !== text) status.textContent = text; };
-  const pages = new GraphPages();
-  let closed = false, sequence = 0, detailSequence = 0, request = null, detailRequest = null, debounce = null;
+  const snapshot = new GraphSnapshot(location.origin);
+  let closed = false, sequence = 0, request = null, debounce = null, refreshTimer = null;
   let page = null, selected = currentPath || null, focused = currentPath || null;
-  let listMode = preferredList, graphicsAvailable = true, trail = [], nextCursor = null, activeParams = null;
-  let pendingPositions = null, pendingVersion = null;
-  let explorationToken = null, requestParams = null, evidenceSuspended = false, completingExpansion = null;
-  const expandedPaths = new Set(), expansionQueue = new Set();
-  const evidenceStamp = data => data && JSON.stringify([data.generation, data.mutation, data.relation_epoch, data.eligibility_version]);
-  let view = null, loadingPaused = false, loadingError = false, loadingReason = '', autoTimer;
+  let listMode = preferredList, graphicsAvailable = true, trail = [], activeParams = null;
+  let pendingPositions = null, suspendedSelection = null;
+  let view = null, loadingPaused = false, loadingError = false, loadingReason = '';
   let storage; try { storage = window.localStorage; } catch { /* Preferences remain page-local. */ }
   let forces = loadForces(storage);
-  const cancelAutomatic = () => { clearTimeout(autoTimer); autoTimer = null; };
+  const cancelAutomatic = () => { clearTimeout(refreshTimer); refreshTimer = null; };
   const wholeWiki = () => !activeParams?.path;
-  if (indexDisclosure) listen(indexDisclosure, 'toggle', () => { if (indexDisclosure.open) void refreshIndexProgress(); else stopIndexProgress(); });
-  const automaticallyContinue = () => {
+  const filterKey = params => JSON.stringify(['folder', 'tag', 'query'].map(key => params?.[key] || ''));
+  const scheduleRefresh = () => {
     cancelAutomatic();
-    if (closed || request || loadingPaused || loadingError) return;
-    if (nextCursor) {
-      // Yield to input/rendering without adding an artificial network delay.
-      autoTimer = setTimeout(() => { autoTimer = null; void load({ cursor: nextCursor, append: true }); }, 0);
-    } else if (explorationToken && activeParams?.path && expansionQueue.size) {
-      const path = expansionQueue.values().next().value;
-      if (expandedPaths.has(path)) { expansionQueue.delete(path); automaticallyContinue(); return; }
-      autoTimer = setTimeout(() => { autoTimer = null; expansionQueue.delete(path); void load({ append:true, params:{...activeParams, expand:path, exploration:explorationToken} }); },0);
-    }
+    if (!closed && !document.hidden) refreshTimer = setTimeout(() => { refreshTimer = null; void load(); }, 15000);
   };
+  if (indexDisclosure) listen(indexDisclosure, 'toggle', () => { if (indexDisclosure.open) void refreshIndexProgress(); else stopIndexProgress(); });
 
   find('[data-graph-filter-options]').open = false;
   find('[data-graph-map-options]').open = false;
@@ -137,13 +114,13 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     panel.classList.toggle('graph-list-mode', listMode);
     find('[data-graph-list]').hidden = !listMode;
     map.hidden = listMode;
-    if (listMode) view?.stop(); else view?.wake();
+    if (listMode) view?.stop(); else { view?.draw(); view?.wake(); }
     find('[data-graph-list-toggle]').setAttribute('aria-pressed', String(listMode));
     find('[data-graph-hints]').disabled = listMode || !graphicsAvailable;
   }
   function controls() {
     const global = wholeWiki(), depth = Number(input('depth').value), filters = ['query', 'folder', 'tag'].filter(name => (activeParams?.[name] || '').trim());
-    find('[data-graph-cancel]').hidden = loadingPaused || loadingError || !(request || nextCursor);
+    find('[data-graph-cancel]').hidden = loadingPaused || loadingError || !(request);
     find('[data-graph-resume]').hidden = !loadingPaused || loadingError;
     find('[data-graph-restart]').hidden = !loadingError;
     find('[data-graph-depth-controls]').hidden = global;
@@ -155,7 +132,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     find('[data-graph-global]').setAttribute('aria-pressed', String(global));
     find('[data-graph-scope]').textContent = `${global ? 'Whole wiki' : `Local · ${depth} hop${depth === 1 ? '' : 's'} · ${activeParams?.path || input('path').value}`}${filters.length ? ` · Filtered by ${filters.map(name => `${name}: ${activeParams[name]}`).join(', ')}` : ''}`;
     const state = loadingError ? 'Partial — loading stopped' : loadingPaused ? 'Loading paused · Partial' :
-      request || nextCursor ? 'Loading…' : pages.complete ? 'Complete' :
+      request ? 'Loading…' : snapshot.complete ? 'Complete' :
       page?.limiting_reasons?.includes('index_updating') || page?.freshness?.state === 'partial' ?
         'Loaded available results · Index updating' : 'Loaded available results · Incomplete evidence';
     find('[data-graph-summary]').textContent = !page ? '' :
@@ -203,188 +180,139 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     }
     if (!page?.nodes.length) list.append(element('li', loadingError ?
       loadingReason === 'graph_query_limited' ? 'The graph query limit was reached. Try fewer hops or narrower filters.' : 'Loading stopped. Check the graph status for recovery options.' :
-      request || nextCursor ? 'Loading connections…' : page && pages.complete ? 'No notes match this scope.' : 'Loaded available results. Relationships are still updating.'));
+      request ? 'Loading connections…' : page && snapshot.complete ? 'No notes match this scope.' : 'Loaded available results. Relationships are still updating.'));
     const edges = find('[data-graph-edges]'); edges.replaceChildren();
     for (const edge of (page?.edges || []).slice(edgeOffset, edgeOffset + listWindow)) edges.append(element('li', `${edge.source} → ${edge.destination} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`));
   }
-  function clearEvidence({ keepExploration = false } = {}) {
-    if (!keepExploration) { explorationToken = null; expandedPaths.clear(); expansionQueue.clear(); requestParams = null; completingExpansion = null; }
-    pages.clear(); page = null; nextCursor = null; selected = focused = null; nodeOffset = edgeOffset = 0;
-    detailSequence++; detailRequest?.abort(); detailRequest = null;
+  function clearEvidence({ suspend = false } = {}) {
+    if (suspend) snapshot.suspend(); else { snapshot.clear(); pendingPositions = suspendedSelection = null; }
+    page = null; selected = focused = null; nodeOffset = edgeOffset = 0;
+    // Hidden-tab draw is intentionally skipped by the renderer. Keep its old
+    // pixels concealed until accepted evidence has been drawn again.
+    if (suspend) map.hidden = true;
     details.replaceChildren(element('h2', 'Selected note'), element('p', 'Select a note to see its connections.'));
+    find('[data-graph-diagnostics]').textContent = '';
     view?.setGraph({ nodes: [], edges: [] }, currentPath, activeParams?.path || null); view?.setSelection(null, null);
     renderList(); controls();
   }
-  function revokeEvidence() {
-    sequence++; cancelAutomatic(); request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence();
-  }
   function suspendEvidence() {
-    // Keep presentation identities and coordinates, never graph evidence. The
-    // next load validates the namespace and each returned path before reuse.
+    // Coordinates and expansion identities can survive only a successful check
+    // in the same opaque scope. Labels, revisions and edge evidence cannot.
     if (page && view) {
-      pendingPositions = new Map([...(pendingPositions || []), ...view.simulation.nodes]);
-      pendingVersion = evidenceStamp(page);
+      pendingPositions = new Map(view.simulation.nodes);
+      suspendedSelection = { selected, focused, navigationFocus: map.contains(document.activeElement) };
     }
-    const priorSelected = selected, priorFocused = focused;
-    clearEvidence({ keepExploration:true }); selected = priorSelected; focused = priorFocused; evidenceSuspended = true;
+    clearEvidence({ suspend:true });
   }
   function showDetails(path) {
-    const ticket = ++detailSequence;
-    detailRequest?.abort(); detailRequest = new AbortController();
-    const node = page?.nodes.find(node => node.path === path);
+    const node = snapshot.nodes.get(path);
     details.replaceChildren(element('h2', 'Selected note'));
     if (!node) { details.append(element('p', 'Select a note to see its connections.')); return; }
     details.append(element('h3', node.title), element('p', path), element('a', 'Open selected note', { href: node.href }));
     const centerButton = element('button', 'Expand selected note', { type: 'button' });
     centerButton.addEventListener('click', () => center(path)); details.append(centerButton);
-    const freshness = element('p', 'Loading connections…'); details.append(freshness);
-    const incoming = element('ul'), outgoing = element('ul');
-    const evidenceDetails = element('details'); evidenceDetails.append(element('summary', 'Technical evidence'));
-    const evidenceText = element('p'); evidenceDetails.append(evidenceText);
-    details.append(element('h3', 'Incoming'), incoming, element('h3', 'Outgoing and references'), outgoing, evidenceDetails);
-    const seen = new Set(); let evidenceLoading = false;
-    async function loadEvidence(cursor) {
-      if (evidenceLoading) return; evidenceLoading = true;
-      try {
-        const query = new URLSearchParams({ path, direction: 'both', limit: '50', ...(cursor ? { cursor } : {}) });
-        const evidence = await readJSON('/tools/links/?' + query, detailRequest.signal);
-        if (closed || ticket !== detailSequence || selected !== path) return;
-        if (evidence.eligibility_version !== page?.eligibility_version ||
-            ['generation', 'mutation', 'relation_epoch'].some(key => evidence[key] !== page?.[key])) throw new Error('restart_required');
-        if (!Array.isArray(evidence.items) || evidence.items.length > 100) throw new Error('invalid_response');
-        freshness.textContent = evidence.projection_complete ? 'Saved connections' : 'Updating saved connections';
-        evidenceText.textContent = `Indexed revision ${node.revision} · relation epoch ${evidence.relation_epoch} · observed ${evidence.observed_at}. Source locations are advisory; fragments are unchecked.`;
-        for (const item of evidence.items) {
-          if (seen.has(item.occurrence_id)) continue; seen.add(item.occurrence_id);
-          const li = element('li');
-          li.append(element('span', `${item.source === path ? item.destination || item.target || '(same note)' : item.source}${item.state !== 'resolved' ? ' · ' + item.state : ''}`));
-          const sourceInfo = element('details'); sourceInfo.append(element('summary', 'Source evidence'),
-            element('p', `${item.source} · ${item.occurrence_kind}/${item.kind} · ${item.position_precision} line ${item.position?.[0] || '?'}, column ${item.position?.[1] || '?'}`), element('code', item.source_revision));
-          li.append(sourceInfo);
-          if (item.source !== path) li.append(element('a', 'Open source', { href: linkTo(item.source) }));
-          if (item.destination && item.resource_type === 'note') li.append(element('a', 'Open destination', { href: linkTo(item.destination) }));
-          if (item.choices?.length) li.append(element('p', `Possible matches: ${item.choices.join(', ')}`));
-          (item.source === path ? outgoing : incoming).append(li);
-        }
-        if (evidence.next_cursor) {
-          const more = element('button', 'More connections', { type: 'button' });
-          more.addEventListener('click', () => { more.remove(); void loadEvidence(evidence.next_cursor); }); details.append(more);
-        } else if (!seen.size) outgoing.append(element('li', evidence.projection_complete ? 'No saved connections.' : 'Connections are still updating.'));
-      } catch (error) {
-        if (!closed && ticket === detailSequence && error.name !== 'AbortError') {
-          // A denied endpoint, expired session or changed policy must not leave
-          // old node titles, counts or details available in retained client UI.
-          if (error.message !== 'graph_query_limited') revokeEvidence();
-          say(error.message === 'authentication_required' ? 'Session expired. Sign in again to load connections.' : 'Connections changed or are unavailable. Refresh to try again.');
-        }
-      } finally { evidenceLoading = false; }
+    details.append(element('p', snapshot.complete ? 'Saved connections' : 'Updating saved connections'));
+    const connections = snapshot.connections(path);
+    for (const [direction, title] of [['incoming','Incoming'], ['outgoing','Outgoing and references']]) {
+      const list = element('ul'); details.append(element('h3', title), list);
+      for (const edge of connections[direction]) {
+        const other = direction === 'incoming' ? edge.source : edge.destination;
+        const row = element('li', `${other} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`);
+        row.append(element('a', direction === 'incoming' ? 'Open source' : 'Open destination', {href:snapshot.nodes.get(other).href}));
+        const evidence = element('details'); evidence.append(element('summary', 'Source evidence'),
+          element('p', `${edge.source} · ${edge.position_precision || 'advisory'} line ${edge.position?.[0] || '?'}, column ${edge.position?.[1] || '?'}`),
+          element('code', edge.source_revision || ''));
+        row.append(evidence); list.append(row);
+      }
+      if (!connections[direction].length) list.append(element('li', snapshot.complete ? 'No saved connections.' : 'Connections are still updating.'));
     }
-    void loadEvidence();
+    const evidence = element('details'); evidence.append(element('summary', 'Technical evidence'),
+      element('p', `Indexed revision ${node.revision} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. Source locations are advisory; fragments are unchecked. Snapshot contains resolved note connections.`));
+    details.append(evidence);
+  }
+  function renderExploration({ fit = false } = {}) {
+    page = snapshot.explore(activeParams.path || null, activeParams.depth);
+    if (!page) return;
+    if (!page.nodes.some(node => node.path === selected)) selected = page.nodes.some(node => node.path === activeParams.path) ? activeParams.path : null;
+    if (!page.nodes.some(node => node.path === focused)) focused = selected || page.nodes[0]?.path || null;
+    let mapFailure = false;
+    try {
+      view?.setGraph(page, currentPath, activeParams.path || null);
+      view?.setSelection(selected, focused);
+    } catch { mapFailure = true; unavailable(); }
+    if (fit && page.nodes.length && !mapFailure && !view?.cameraControlled) view?.fit();
+    renderList(); showDetails(selected); presentation(); controls();
+    find('[data-graph-diagnostics]').textContent = `Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. ${page.limiting_reasons.join(', ')} Indexed saved content, not a disk snapshot. Hops refer to loaded edges; unsaved edits are excluded.`;
+    if (!view?.hints?.active) say(mapFailure ? 'Map resource limit reached. All loaded records remain available in the connection list.' : '');
   }
   function select(path, takeFocus) {
     if (!page?.nodes.some(node => node.path === path)) return;
     selected = path; if (takeFocus) focused = path;
-    view?.setSelection(selected, focused);
-    renderList(); showDetails(path); controls(); say(`Selected ${path}. Enter on the map opens it.`);
-    if (activeParams?.path && !expandedPaths.has(path)) { expansionQueue.add(path); automaticallyContinue(); }
+    if (activeParams.path) snapshot.expand(path);
+    renderExploration(); say(`Selected ${path}. Enter on the map opens it.`);
   }
-  function offerOneHop() {
-    if (!activeParams?.path || Number(activeParams.depth) <= 1) return;
-    const recover = element('button', 'Try one hop', { type: 'button' });
-    recover.addEventListener('click', () => { input('depth').value = '1'; loadingPaused = false; void load({ fit: true }); });
-    status.append(' ', recover);
+  function updateExploration({ fit = false } = {}) {
+    const params = parameters();
+    if (!snapshot.data || filterKey(params) !== filterKey(activeParams)) { void load({fit}); return; }
+    activeParams = params; renderExploration({fit});
   }
-  function accept(data, { append = false, fit = false } = {}) {
-    if (!safePage(data)) throw new Error('invalid_response');
-    pages.accept(data, append);
-    page = pages.data; nextCursor = page.next_cursor;
-    if (typeof data.exploration === 'string' && data.exploration.length <= 4096) explorationToken = data.exploration;
-    if (!nextCursor && activeParams?.path) { expandedPaths.add(requestParams?.expand || completingExpansion || activeParams.path); completingExpansion = null; }
-    if (!nextCursor && !page.nodes.some(node => node.path === selected)) selected = page.nodes.some(node => node.path === activeParams?.path) ? activeParams.path : null;
-    if (!nextCursor && !page.nodes.some(node => node.path === focused)) focused = page.nodes[0]?.path || null;
-    let mapFailure = false;
-    try {
-      if (pages.changed) view?.setGraph(page, currentPath, activeParams?.path || null);
-      if (pages.changed && page.nodes.length || !nextCursor && (selected !== view?.selected || focused !== view?.focused)) view?.setSelection(selected, focused);
-    }
-    catch { mapFailure = true; unavailable(); }
-    if (fit && page.nodes.length && !mapFailure && !view?.cameraControlled) view?.fit();
-    if (pages.changed || !append) renderList();
-    if (page.nodes.some(node => node.path === selected) && (!append || !details.textContent.includes(selected))) showDetails(selected);
-    presentation(); controls();
-    find('[data-graph-diagnostics]').textContent = `Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. ${page.limiting_reasons?.join(', ') || ''} Indexed saved content, not a disk snapshot. Hops refer to loaded edges; unsaved edits are excluded.`;
-    if (page.limiting_reasons?.includes('neighborhood_limit')) {
-      say('Partial graph: the neighborhood limit was reached. Try fewer hops or narrower filters.');
-      offerOneHop();
-    } else if (!view?.hints?.active) say(mapFailure ? 'Map resource limit reached. All loaded records remain available in the connection list.' : '');
-  }
-  async function load({ cursor, fit = false, append = false, params = null } = {}) {
-    evidenceSuspended = false;
+  async function load({ fit = false } = {}) {
+    if (closed || document.hidden) return;
     clearTimeout(debounce); debounce = null; cancelAutomatic(); const ticket = ++sequence;
-    const retainedPositions = !append && page?.nodes.length && view ?
-      new Map([...(pendingPositions || []), ...view.simulation.nodes]) : pendingPositions;
-    const retainedVersion = page ? evidenceStamp(page) : pendingVersion;
-    if (!append) { pendingPositions = retainedPositions; pendingVersion = retainedVersion; }
-    request?.abort(); request = new AbortController();
-    loadingError = false; loadingReason = '';
-    if (!append) {
-      const scope = parameters();
-      const reuse = explorationToken && JSON.stringify(scope) === JSON.stringify(activeParams);
-      const priorSelected = selected, priorFocused = focused;
-      clearEvidence({ keepExploration:Boolean(reuse) }); selected = priorSelected; focused = priorFocused;
-      activeParams = scope;
-      requestParams = {...scope, ...(reuse ? {exploration:explorationToken} : {})};
-    } else if (params) { requestParams = params; completingExpansion = params.expand || null; }
-    if (!activeParams) activeParams = parameters();
-    if (!requestParams) requestParams = activeParams;
+    request?.abort(); const controller = new AbortController(); request = controller;
+    loadingPaused = false; loadingError = false; loadingReason = '';
+    const params = parameters();
+    if (activeParams && filterKey(params) !== filterKey(activeParams)) clearEvidence();
+    activeParams = params;
     say(page ? 'Updating connections…' : 'Loading connections…'); controls();
     try {
-      const query = { ...requestParams, ...(cursor ? { cursor, ...(explorationToken ? {exploration:explorationToken} : {}) } : {}) };
-      const data = await readJSON('/tools/graph/?' + new URLSearchParams(query), request.signal);
-      if (!closed && ticket === sequence) {
-        // Coordinates alone can survive a successful revalidation in the same
-        // eligibility namespace. Failed/obsolete requests drop this local copy.
-        if (retainedPositions && retainedVersion !== evidenceStamp(data)) {
-          pendingPositions = pendingVersion = null; selected = focused = null;
-        }
-        if (pendingPositions && pendingVersion === evidenceStamp(data) && view) {
-          // Restore only paths validated in this response. The remaining map
-          // contains coordinates only, never old graph evidence or titles.
-          for (const node of data.nodes || []) if (!view.simulation.nodes.has(node.path) && pendingPositions.has(node.path)) {
-            view.simulation.nodes.set(node.path, pendingPositions.get(node.path));
-          }
-        }
-        accept(data, { append, fit });
-        if (!nextCursor) pendingPositions = pendingVersion = null;
+      const query = new URLSearchParams();
+      for (const key of ['folder','tag','query']) if (params[key]?.trim()) query.set(key,params[key]);
+      const data = await readJSON('/tools/graph/snapshot/?' + query, controller.signal);
+      if (closed || document.hidden || controller.signal.aborted || ticket !== sequence) return;
+      const hadScope = snapshot.scope !== null;
+      const sameScope = snapshot.accept(data);
+      const restoreNavigationFocus = sameScope && suspendedSelection?.navigationFocus;
+      if (!sameScope && hadScope) {
+        pendingPositions = suspendedSelection = null; selected = focused = null;
+        view?.setGraph({nodes:[],edges:[]},currentPath,activeParams.path || null);
       }
+      if (sameScope && pendingPositions && view) {
+        for (const node of data.nodes) if (pendingPositions.has(node.path)) view.simulation.nodes.set(node.path,pendingPositions.get(node.path));
+        selected = suspendedSelection?.selected || selected; focused = suspendedSelection?.focused || focused;
+      }
+      pendingPositions = suspendedSelection = null;
+      // Depth/root may have changed locally while the transport was in flight.
+      activeParams = parameters(); renderExploration({fit});
+      if (restoreNavigationFocus && !listMode) map.focus({preventScroll:true});
     } catch (error) {
-      if (!closed && ticket === sequence && error.name !== 'AbortError') {
-        loadingError = true; loadingReason = error.message;
-        if (error.name !== 'RangeError' && error.message !== 'continuation_stalled' && error.message !== 'graph_query_limited') { pendingPositions = pendingVersion = null; clearEvidence(); }
-        say(error.name === 'RangeError' ? 'Loading stopped because this browser ran out of graph resources. Loaded results are incomplete. Try narrower filters or restart loading.' : error.message === 'authentication_required' ? 'Session expired. Sign in again to load the graph.' :
+      if (!closed && ticket === sequence && !controller.signal.aborted) {
+        loadingError = true; loadingReason = error.message; clearEvidence();
+        say(error.message === 'authentication_required' ? 'Session expired. Sign in again to load the graph.' :
           error.message === 'restart_required' ? 'Connections changed. Restart loading to revalidate this view.' :
-          error.message === 'graph_query_limited' ? 'The graph query limit was reached. Try fewer hops or narrower filters.' :
+          error.message === 'graph_query_limited' ? 'The graph query limit was reached. Try narrower filters or restart loading.' :
           error.message === 'graph_database_error' ? 'Connections could not load because of a database error. Refresh to try again.' :
-          error.message === 'continuation_stalled' ? 'Loading stopped because the continuation did not advance. Restart loading or narrow your filters.' : 'Unable to load connections. Restart loading to try again.');
-        renderList();
-        if (error.message === 'graph_query_limited') offerOneHop();
+          'Unable to load connections. Restart loading to try again.');
       }
-    } finally { if (ticket === sequence) { request = null; controls(); automaticallyContinue(); } }
+    } finally {
+      if (ticket === sequence) { request = null; controls(); scheduleRefresh(); }
+    }
   }
   function center(path) {
     if (!path) return;
     if (activeParams?.path) { select(path, true); return; }
     input('path').value = currentPath || path;
-    loadingPaused = false; void load({ fit:true });
+    loadingPaused = false; updateExploration({ fit:true });
   }
   listen(form, 'submit', event => { event.preventDefault(); loadingPaused = false; void load({ fit: true }); });
-  for (const name of ['query', 'path', 'folder', 'tag']) listen(input(name), 'input', () => { clearTimeout(debounce); cancelAutomatic(); sequence++; request?.abort(); request = null; loadingPaused = false; pendingPositions = pendingVersion = null; clearEvidence(); debounce = setTimeout(() => { debounce = null; void load(); }, 180); });
-  listen(input('depth'), 'change', () => { loadingPaused = false; void load(); });
+  for (const name of ['query', 'folder', 'tag']) listen(input(name), 'input', () => { clearTimeout(debounce); cancelAutomatic(); sequence++; request?.abort(); request = null; loadingPaused = false; clearEvidence(); debounce = setTimeout(() => { debounce = null; void load(); }, 180); });
+  listen(input('path'), 'input', () => updateExploration());
+  listen(input('depth'), 'change', () => updateExploration());
   function changeDepth(delta) {
     if (!input('path').value) { say('Hop depth applies to a local neighborhood. Choose Local first.'); return; }
     const next = Number(input('depth').value) + delta;
     if (next < 1 || next > 8) { say(next < 1 ? 'Minimum local depth is one hop.' : 'Maximum local depth is eight hops; query resource limits may make the view partial.'); return; }
-    input('depth').value = String(next); loadingPaused = false; void load();
+    input('depth').value = String(next); updateExploration();
   }
   listen(find('[data-graph-depth-down]'), 'click', () => changeDepth(-1));
   listen(find('[data-graph-depth-up]'), 'click', () => changeDepth(1));
@@ -406,8 +334,8 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   });
   listen(find('[data-graph-clear]'), 'click', () => { input('query').value = ''; void load(); });
   listen(find('[data-graph-local]'), 'click', () => { if (!activeParams?.path) center(currentPath || selected); });
-  listen(find('[data-graph-global]'), 'click', () => { input('path').value = ''; input('depth').disabled = false; loadingPaused = false; void load({ fit: true }); });
-  listen(find('[data-graph-back]'), 'click', () => { loadingPaused = false; input('path').value = trail.pop() || currentPath; find('[data-graph-back]').disabled = !trail.length; void load({ fit: true }); });
+  listen(find('[data-graph-global]'), 'click', () => { input('path').value = ''; input('depth').disabled = false; updateExploration({ fit: true }); });
+  listen(find('[data-graph-back]'), 'click', () => { loadingPaused = false; input('path').value = trail.pop() || currentPath; find('[data-graph-back]').disabled = !trail.length; updateExploration({ fit: true }); });
   listen(find('[data-graph-list-toggle]'), 'click', () => { view?.cancelHints(); listMode = !listMode || !graphicsAvailable; if (graphicsAvailable) preferredList = listMode; presentation(); });
   listen(find('[data-graph-hints]'), 'click', () => view?.hints?.active ? view.cancelHints(true) : view?.beginHints());
   listen(find('[data-graph-fit]'), 'click', () => view?.fit());
@@ -423,9 +351,12 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     event.target.setAttribute('aria-valuetext', label); find('[data-graph-bloom-value]').textContent = label;
   });
   listen(find('[data-graph-refresh]'), 'click', () => { loadingPaused = false; void load(); });
-  listen(find('[data-graph-cancel]'), 'click', () => { loadingPaused = true; sequence++; cancelAutomatic(); request?.abort(); request = null; controls(); say('Loading paused. Resume loading to continue. Motion is unchanged.'); });
-  listen(find('[data-graph-resume]'), 'click', () => { loadingPaused = false; if (evidenceSuspended) void load(); else if (nextCursor) void load({ cursor: nextCursor, append: true }); else if (requestParams?.expand) void load({append:true,params:requestParams}); else void load(); });
-  listen(find('[data-graph-restart]'), 'click', () => { loadingPaused = false; explorationToken = null; void load(); });
+  listen(find('[data-graph-cancel]'), 'click', () => {
+    loadingPaused = true; sequence++; cancelAutomatic(); request?.abort(); request = null;
+    clearEvidence(); controls(); say('Loading paused. Resume loading to continue. Motion is unchanged.');
+  });
+  listen(find('[data-graph-resume]'), 'click', () => { loadingPaused = false; void load(); });
+  listen(find('[data-graph-restart]'), 'click', () => { loadingPaused = false; void load(); });
   listen(find('[data-graph-graphics-retry]'), 'click', () => {
     view?.destroy(); view = null; createView();
     if (!graphicsAvailable) return;
@@ -447,9 +378,9 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   displayForces();
   listen(find('[data-graph-help-toggle]'), 'click', toggleHelp);
   // Returning from a hidden tab must revalidate retained private evidence.
-  listen(document, 'visibilitychange', () => { if (document.hidden) { stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); request = null; suspendEvidence(); } else if (!closed) { if (indexDisclosure?.open) void refreshIndexProgress(); if (!loadingPaused) void load(); } });
+  listen(document, 'visibilitychange', () => { if (document.hidden) { stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); request = null; suspendEvidence(); } else if (!closed) { if (indexDisclosure?.open) void refreshIndexProgress(); void load(); } });
   listen(window, 'pagehide', () => { stopIndexProgress(); sequence++; cancelAutomatic(); clearTimeout(debounce); debounce = null; request?.abort(); request = null; suspendEvidence(); view?.stop(); });
-  listen(window, 'pageshow', event => { if (event.persisted && !closed && !loadingPaused) void load(); });
+  listen(window, 'pageshow', event => { if (event.persisted && !closed) void load(); });
   find('[data-graph-hints]').hidden = false;
   find('[data-graph-controls]').hidden = false; find('[data-graph-clear]').hidden = false;
   find('[data-graph-list-toggle]').hidden = false;
@@ -457,21 +388,31 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   find('[data-graph-pause]').setAttribute('aria-pressed', String(view?.paused || false));
   view?.setBloom(find('[data-graph-bloom]').value); presentation();
   activeParams = parameters();
-  if (initial) { accept(initial, { fit: true }); automaticallyContinue(); } else void load({ fit: true });
+  // Initial server data supports the fallback list only. Enhanced exploration
+  // always starts with a newly authorized full snapshot.
+  void load({ fit: true });
   return {
     focusSearch,
     focusNavigation() { if (listMode) find('[data-graph-list-toggle]').focus({ preventScroll: true }); else map.focus({ preventScroll: true }); },
-    destroy() { closed = true; stopIndexProgress(); sequence++; detailSequence++; clearTimeout(debounce); cancelAutomatic(); request?.abort(); detailRequest?.abort(); life.abort(); view?.destroy(); pendingPositions = pendingVersion = null; pages.clear(); page = null; nextCursor = null;
+    destroy() { closed = true; stopIndexProgress(); sequence++; clearTimeout(debounce); cancelAutomatic(); request?.abort(); life.abort(); view?.destroy(); pendingPositions = suspendedSelection = null; snapshot.clear(); page = null; selected = focused = null;
       find('[data-graph-nodes]').replaceChildren(); find('[data-graph-edges]').replaceChildren();
-      details.replaceChildren(); find('[data-graph-summary]').textContent = ''; say('');
+      for (const kind of ['notes', 'links']) {
+        const navigation = find(`[data-graph-${kind}-navigation]`); navigation.replaceChildren(); navigation.hidden = true;
+      }
+      for (const name of ['nodeCount', 'edgeCount']) map.dataset[name] = '0';
+      for (const name of ['root', 'selected', 'focused']) delete map.dataset[name];
+      map.setAttribute('aria-label', '3D note relationship map');
+      details.replaceChildren(); find('[data-graph-summary]').textContent = ''; find('[data-graph-diagnostics]').textContent = ''; say('');
     },
   };
 }
 const direct = document.querySelector('[data-graph-page]');
 if (direct) {
   try {
-    mountGraph(direct, { currentPath: direct.dataset.graphPath, initial: JSON.parse(document.querySelector('#graph-initial-data').textContent),
+    mountGraph(direct, { currentPath: direct.dataset.graphPath,
       onClose: () => { const path = direct.dataset.graphPath; location.assign(path ? linkTo(path) : '/'); } });
-    direct.querySelector('[data-graph-server-list]').hidden = true;
+    direct.querySelector('[data-graph-server-list]')?.remove();
+    document.querySelector('#graph-initial-data')?.remove();
+    document.querySelector('#graph-initial-params')?.remove();
   } catch { /* Keep the server-rendered connection list. */ }
 }

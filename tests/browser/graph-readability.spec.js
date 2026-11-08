@@ -10,7 +10,7 @@ test('dense phone labels, directed spring contrast, bloom and disclosed index ph
   const edges=[], add=(a,b)=>edges.push({source:nodes[a].path,destination:nodes[b].path,occurrence_count:1});
   for(let i=1;i<93;i++)add(0,i);
   for(let i=1;i<93;i++){add(i,i===92?1:i+1);add(i,i>90?i-90:i+2);}add(2,0);add(3,1);
-  const meta={state:'ok',authoritative:false,untrusted_content:true,projection_complete:true,generation:1,mutation:1,relation_epoch:1,observed_at:'2026-11-08T00:00:00Z',freshness:{state:'ready'},limiting_reasons:[],next_cursor:null};
+  const meta={schema_version:1,scope:'synthetic-policy',snapshot_id:'synthetic-snapshot',state:'ok',authoritative:false,untrusted_content:true,projection_complete:true,generation:1,mutation:1,relation_epoch:1,observed_at:'2026-11-08T00:00:00Z',freshness:{state:'ready'},limiting_reasons:[],next_cursor:null};
   await page.route(/\/tools\/graph\//,r=>r.fulfill({json:{...meta,nodes,edges}}));
   await page.route(/\/tools\/links\//,r=>r.fulfill({json:{...meta,items:[]}}));
   let indexRequests=0;
