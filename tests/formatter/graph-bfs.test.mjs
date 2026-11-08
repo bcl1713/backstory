@@ -82,7 +82,12 @@ test('resumed large steps produce the same forces and positions as a complete fi
   const edges = all.slice(1).map(n => edge('n0', n.path));
   const sliced = new GraphPhysics(all, edges, 'n0'), complete = new GraphPhysics(all, edges, 'n0');
   complete.step();
-  for (let i = 0; i < 1000 && sliced.steps === 0; i++) sliced.advance(1 / 60);
+  // Isolate resumed numerical equivalence from the intentionally variable number
+  // of cheap steps that fit a real frame budget. This clock yields once per call.
+  const descriptor = Object.getOwnPropertyDescriptor(performance, 'now'); let tick = 0;
+  Object.defineProperty(performance, 'now', {configurable:true,value:()=>tick++ * 6});
+  try { for (let i = 0; i < 1000 && sliced.steps === 0; i++) sliced.advance(1 / 60); }
+  finally { if (descriptor) Object.defineProperty(performance,'now',descriptor); else delete performance.now; }
   assert.equal(sliced.steps, 1);
   assert.deepEqual(sliced.all, complete.all);
 });

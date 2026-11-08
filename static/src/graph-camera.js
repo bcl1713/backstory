@@ -13,7 +13,7 @@ export class GraphCamera {
     const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw), cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     return { right: { x: cy, y: 0, z: -sy }, up: { x: sy * sp, y: -cp, z: cy * sp }, back: { x: sy * cp, y: sp, z: cy * cp } };
   }
-  eye() { const b = this.basis().back; return { x: this.x + b.x * this.distance, y: this.y + b.y * this.distance, z: this.z + b.z * this.distance }; }
+  eye(basis = this.basis()) { const b = basis.back; return { x: this.x + b.x * this.distance, y: this.y + b.y * this.distance, z: this.z + b.z * this.distance }; }
   world(point, plane = { x: this.x, y: this.y, z: this.z }) {
     const { right, up, back } = this.basis();
     const depth = this.distance - ((plane.x - this.x) * back.x + (plane.y - this.y) * back.y + ((plane.z ?? 0) - this.z) * back.z);
@@ -23,11 +23,13 @@ export class GraphCamera {
       y: this.y + back.y * centerDepth + right.y * u + up.y * v,
       z: this.z + back.z * centerDepth + right.z * u + up.z * v };
   }
-  screen(point) {
-    const { right, up, back } = this.basis(), x = point.x - this.x, y = point.y - this.y, z = (point.z ?? 0) - this.z;
+  screen(point, result = {}, basis = this.basis()) {
+    const { right, up, back } = basis, x = point.x - this.x, y = point.y - this.y, z = (point.z ?? 0) - this.z;
     const depth = this.distance - (x * back.x + y * back.y + z * back.z), scale = this.focal / Math.max(.01, depth);
-    return { x: this.width / 2 + (x * right.x + y * right.y + z * right.z) * scale,
-      y: this.height / 2 + (x * up.x + y * up.y + z * up.z) * scale, depth, scale, visible: depth > 1 && depth < 1000000 };
+    result.x = this.width / 2 + (x * right.x + y * right.y + z * right.z) * scale;
+    result.y = this.height / 2 + (x * up.x + y * up.y + z * up.z) * scale;
+    result.depth = depth; result.scale = scale; result.visible = depth > 1 && depth < 1000000;
+    return result;
   }
   snap() { for (const key of ['x', 'y', 'z', 'yaw', 'pitch', 'distance']) this[key] = this['target' + key[0].toUpperCase() + key.slice(1)]; }
   zoom(factor, point = { x: this.width / 2, y: this.height / 2 }, immediate = false) {
@@ -62,8 +64,8 @@ export class GraphCamera {
   }
   tick(elapsed, immediate = false) {
     if (immediate) this.snap();
-    const weight = 1 - Math.exp(-12 * Math.min(.067, Math.max(0, elapsed))); let delta = 0;
-    for (const key of ['x', 'y', 'z', 'yaw', 'pitch', 'distance']) { const target = this['target' + key[0].toUpperCase() + key.slice(1)]; this[key] += (target - this[key]) * weight; delta += Math.abs(target - this[key]); }
-    if (delta <= .0005) this.snap(); return delta > .0005;
+    const weight = 1 - Math.exp(-12 * Math.min(.067, Math.max(0, elapsed))); let delta = 0, changed = false;
+    for (const key of ['x', 'y', 'z', 'yaw', 'pitch', 'distance']) { const target = this['target' + key[0].toUpperCase() + key.slice(1)], previous = this[key]; this[key] += (target - this[key]) * weight; delta += Math.abs(target - this[key]); changed ||= previous !== this[key]; }
+    if (delta <= .0005) this.snap(); return changed || delta > .0005;
   }
 }

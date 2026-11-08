@@ -130,10 +130,24 @@ Lines and arrowheads meet the projected world-space node boundaries.
 
 
 Physics uses unique-pair springs, damping, collision/repulsion, weak centering,
-bounded timesteps/catch-up, deterministic neighbor seeding and cooling. Large
-layouts use a bounded spatial approximation. Simulation stops when settled or at
-the work budget; hidden/list/closed graphs stop animation. Reduced motion starts
-without animation and keeps camera changes immediate. DPR and label work are capped.
+fixed timesteps, deterministic neighbor seeding and cooling. Every layout advances
+cooperatively against a six-millisecond deadline checked between work chunks, with
+at most four completed catch-up steps per frame. Real chunk cost can exceed the
+deadline; this is not a hard execution-time or FPS promise. There is no fixed
+32-chunk or one-step-per-frame ceiling, and opening a graph does not run synchronous
+warmup steps. Large layouts retain their bounded spatial approximation.
+
+Integration stages reusable position/velocity buffers and publishes a whole step
+atomically. Incomplete work cannot mix old/new node positions in arrows, labels or
+picking. Camera and input remain independent; unfinished solver slices do not
+redraw an otherwise unchanged scene. Projection, picking buckets and edge geometry
+reuse storage, and camera-only animation avoids stationary node-buffer uploads.
+Pause, topology changes, pins and lifecycle cancellation invalidate unfinished work;
+empty/revoked graphs and close clear staged workspace and derived picking records.
+Simulation stops when settled or at its work limit. Hidden/list/closed graphs stop
+animation. Reduced motion starts without animation and keeps camera changes
+immediate. DPR and label work are capped. The implementation remains cooperative
+CPU work on the main thread; it does not add interpolation lag or worker messaging.
 
 Installed theme semantic colors and typography update without replacing graph
 state. Forced colors removes decoration and retains readable glyphs. Selection is
