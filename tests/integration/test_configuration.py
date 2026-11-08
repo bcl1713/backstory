@@ -9,6 +9,8 @@ import pytest
 
 NUMBERS = {
     'BACKSTORY_INDEX_BATCH_SIZE': 20,
+    'BACKSTORY_INDEX_METADATA_BATCH_SIZE': 256,
+    'BACKSTORY_INDEX_WATCH_LIMIT': 8192,
     'BACKSTORY_INDEX_YIELD_SECONDS': 1.0,
     'BACKSTORY_INDEX_INCREMENTAL_SECONDS': 300,
     'BACKSTORY_INDEX_VERIFY_SECONDS': 86400,
@@ -171,3 +173,17 @@ def test_existing_secret_does_not_hide_unwritable_private_data(tmp_path):
         assert secret.read_text() == 'synthetic-secret-canary-' * 4
     finally:
         data.chmod(0o700)
+
+
+@pytest.mark.parametrize('value', ['secret-canary', ''])
+def test_watcher_mode_rejects_unknown_values_without_echo(tmp_path, value):
+    result = load(tmp_path, {'BACKSTORY_INDEX_WATCH_MODE': value})
+    assert result.returncode != 0
+    assert 'BACKSTORY_INDEX_WATCH_MODE' in result.stderr
+    assert 'secret-canary' not in result.stderr
+    assert not (tmp_path / 'data').exists()
+
+
+def test_polling_mode_is_supported_without_extra_setup(tmp_path):
+    result = load(tmp_path, {'BACKSTORY_INDEX_WATCH_MODE': 'poll'})
+    assert result.returncode == 0, result.stderr

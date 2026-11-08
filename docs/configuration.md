@@ -171,11 +171,35 @@ broker, worker count or credentials are needed.
 
 | Name | Purpose | Accepted value; default | Safe example and omission/error consequence |
 | --- | --- | --- | --- |
-| `BACKSTORY_INDEX_BATCH_SIZE` | Maximum note work per bounded batch, including priority saves. | Positive integer; default `20`; worker caps effective work at `20`. | `10`. Omitted uses default; larger valid values retain the cap; smaller values reduce work per batch. Invalid/native-empty/nonpositive values stop startup. |
-| `BACKSTORY_INDEX_YIELD_SECONDS` | Interruptible delay between batches (also when idle). | Finite number of seconds >= `1`; default `1`; fractional values accepted. | `1.5`. Larger delays slow indexing. Omitted uses default; NaN/infinity, subsecond, negative or malformed values stop startup. |
+| `BACKSTORY_INDEX_BATCH_SIZE` | Maximum note work per bounded batch, including priority saves. | Positive integer; default `20`; worker caps effective work at `128`. | `10`. Omitted uses default; larger valid values retain the cap; smaller values reduce work per batch. Invalid/native-empty/nonpositive values stop startup. |
+| `BACKSTORY_INDEX_YIELD_SECONDS` | Maximum idle/backoff delay; active work yields adaptively in short quanta. | Finite number of seconds >= `1`; default `1`; fractional values accepted. | `1.5`. New queued saves and native events wake within 0.1 seconds regardless of idle delay. Omitted uses default; NaN/infinity, subsecond, negative or malformed values stop startup. |
 | `BACKSTORY_INDEX_INCREMENTAL_SECONDS` | Incremental discovery/stat reconciliation interval. | Positive integer seconds; default `300`. | `600`. Omitted uses default; larger intervals delay external-change discovery; invalid/nonpositive values stop startup. |
 | `BACKSTORY_INDEX_VERIFY_SECONDS` | Content verification interval for changes stat checks might miss. | Positive integer seconds; default `86400`. | `43200`. Omitted uses default; larger intervals delay full verification; invalid/nonpositive values stop startup. |
 | `BACKSTORY_INDEX_QUEUE_LIMIT` | Bound on coalesced priority note jobs. | Positive integer; default `1000`. | `500`. At capacity, reconciliation is requested instead of growing the queue. Omitted uses default; invalid/nonpositive values stop startup. |
+| `BACKSTORY_INDEX_METADATA_BATCH_SIZE` | Metadata/dependency entries per bounded batch, separately from content work. | Positive integer; default `256`, ceiling `1024`; metadata processing also yields after about 0.1 seconds. | `128`. Unchanged files consume this budget without reading note bodies. |
+| `BACKSTORY_INDEX_WATCH_MODE` | Service-owned notifications or explicit polling fallback. | `auto` (default) or `poll`. | `poll` for network, FUSE or sync mounts whose notifications are unreliable. Invalid/empty values stop startup. |
+| `BACKSTORY_INDEX_WATCH_LIMIT` | Maximum watched directory handles. | Positive integer; default `8192`, ceiling `65536`. | `4096`. Exhaustion degrades to polling and durably requests verification. |
+
+The three Compose variants forward these settings. Native notifications currently
+use Linux inotify. Unsupported systems, watch exhaustion, overflow, lost coverage
+and worker restarts durably request content verification; native setup failures
+retry after 30 seconds while ordinary polling continues. Startup registers parent
+watches before enumerating descendants and requests reconciliation again after
+coverage completes. Directory moves refresh bounded watch coverage and reconcile
+old/new paths through content verification; directory-heavy changes can therefore
+reread unrelated notes while ordinary file edits remain path-only. The queue coalesces paths with a 0.2-second debounce, a two-second
+maximum wait and independent event versions; a missing file receives a replacement
+grace period from the first observed absence before safe deletion confirmation. A continuous stream cannot postpone
+a queued edit indefinitely. Attachments are checked for existence/kind only.
+
+Keep the five-minute metadata reconciliation and daily content verification even
+with healthy notifications: delivery and matching stat fields do not prove content
+identity. `poll` retains both schedules and explicit Refresh/Verify/Rebuild controls.
+An unchanged warm pass checks metadata in bounded sets, batches seen bookkeeping,
+and leaves content, FTS, relationships and unchanged dependency rows untouched.
+The index status JSON exposes phase, metadata/parsed/dependency counters, queue
+backlog, last reconciliation/verification and allowlisted watcher/fallback state;
+these diagnostics contain no note paths or content.
 
 ### Generated host-bind provenance (do not enter manually)
 

@@ -1,5 +1,6 @@
 import { GraphView } from './graph-view.js';
 import { GraphPages } from './graph-pages.js';
+import { indexProgress } from './graph-index-status.js';
 import { DEFAULT_FORCES, loadForces, saveForces } from './graph-preferences.js';
 
 let preferredList = false;
@@ -40,6 +41,26 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   const input = name => form.elements.namedItem(name);
   const status = find('[data-graph-status]');
   const details = find('[data-graph-details]');
+  const indexDisclosure = find('[data-graph-index-status]'), indexText = find('[data-graph-index-progress]');
+  if (indexDisclosure) indexDisclosure.open = false;
+  if (indexText) indexText.textContent = 'Open for current indexing progress.';
+  let indexTimer, indexRequest;
+  const stopIndexProgress = () => { clearTimeout(indexTimer); indexRequest?.abort(); indexRequest = null; };
+  async function refreshIndexProgress() {
+    stopIndexProgress();
+    if (!indexDisclosure?.open || closed) return;
+    const controller = new AbortController(); indexRequest = controller;
+    try {
+      const response = await fetch('/index/status/', { credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal,headers:{Accept:'application/json'} });
+      if (!response.ok || response.redirected || new URL(response.url).origin !== location.origin || !response.headers.get('content-type')?.startsWith('application/json')) throw new Error('status_unavailable');
+      const data = await response.json();
+      if (!controller.signal.aborted && indexDisclosure.open && !closed) indexText.textContent = indexProgress(data);
+    } catch (error) {
+      if (!controller.signal.aborted) indexText.textContent = 'Index progress is unavailable. Refresh or sign in again to try.';
+    } finally {
+      if (indexRequest === controller) { indexRequest = null; if (indexDisclosure.open && !closed) indexTimer = setTimeout(refreshIndexProgress, 2000); }
+    }
+  }
   const map = find('[data-graph-map]');
   const life = new AbortController();
   const listen = (el, name, fn, options = {}) => el.addEventListener(name, fn, { ...options, signal: life.signal });
@@ -55,6 +76,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   let forces = loadForces(storage);
   const cancelAutomatic = () => { clearTimeout(autoTimer); autoTimer = null; };
   const wholeWiki = () => !activeParams?.path;
+  if (indexDisclosure) listen(indexDisclosure, 'toggle', () => { if (indexDisclosure.open) void refreshIndexProgress(); else stopIndexProgress(); });
   const automaticallyContinue = () => {
     cancelAutomatic();
     if (!closed && nextCursor && !request && !loadingPaused && !loadingError) {
@@ -368,7 +390,11 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   const pans = { left: [-80, 0], right: [80, 0], up: [0, -80], down: [0, 80] };
   for (const button of root.querySelectorAll('[data-graph-pan]')) listen(button, 'click', () => view?.pan(...pans[button.dataset.graphPan]));
   listen(find('[data-graph-pause]'), 'click', () => view?.setPaused(!view.paused));
-  listen(find('[data-graph-bloom]'), 'input', event => { view?.setBloom(event.target.value); find('[data-graph-bloom-value]').textContent = ['Off', 'Default', 'High'][Number(event.target.value)]; });
+  listen(find('[data-graph-bloom]'), 'input', event => {
+    view?.setBloom(event.target.value);
+    const label = ['Off', 'Default', 'High'][Number(event.target.value) / 2];
+    event.target.setAttribute('aria-valuetext', label); find('[data-graph-bloom-value]').textContent = label;
+  });
   listen(find('[data-graph-refresh]'), 'click', () => { loadingPaused = false; void load(); });
   listen(find('[data-graph-cancel]'), 'click', () => { loadingPaused = true; sequence++; cancelAutomatic(); request?.abort(); request = null; controls(); say('Loading paused. Resume loading to continue. Motion is unchanged.'); });
   listen(find('[data-graph-resume]'), 'click', () => { loadingPaused = false; if (nextCursor) void load({ cursor: nextCursor, append: true }); else void load(); });
@@ -394,8 +420,8 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   displayForces();
   listen(find('[data-graph-help-toggle]'), 'click', toggleHelp);
   // Returning from a hidden tab must revalidate retained private evidence.
-  listen(document, 'visibilitychange', () => { if (document.hidden) { sequence++; cancelAutomatic(); request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence(); } else if (!closed && !loadingPaused) void load(); });
-  listen(window, 'pagehide', () => { sequence++; cancelAutomatic(); clearTimeout(debounce); debounce = null; request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence(); view?.stop(); });
+  listen(document, 'visibilitychange', () => { if (document.hidden) { stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence(); } else if (!closed) { if (indexDisclosure?.open) void refreshIndexProgress(); if (!loadingPaused) void load(); } });
+  listen(window, 'pagehide', () => { stopIndexProgress(); sequence++; cancelAutomatic(); clearTimeout(debounce); debounce = null; request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence(); view?.stop(); });
   listen(window, 'pageshow', event => { if (event.persisted && !closed && !loadingPaused) void load(); });
   find('[data-graph-controls]').hidden = false; find('[data-graph-clear]').hidden = false;
   find('[data-graph-list-toggle]').hidden = false;
@@ -407,7 +433,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   return {
     focusSearch,
     focusNavigation() { if (listMode) find('[data-graph-list-toggle]').focus({ preventScroll: true }); else map.focus({ preventScroll: true }); },
-    destroy() { closed = true; sequence++; detailSequence++; clearTimeout(debounce); cancelAutomatic(); request?.abort(); detailRequest?.abort(); life.abort(); view?.destroy(); pendingPositions = pendingVersion = null; pages.clear(); page = null; nextCursor = null;
+    destroy() { closed = true; stopIndexProgress(); sequence++; detailSequence++; clearTimeout(debounce); cancelAutomatic(); request?.abort(); detailRequest?.abort(); life.abort(); view?.destroy(); pendingPositions = pendingVersion = null; pages.clear(); page = null; nextCursor = null;
       find('[data-graph-nodes]').replaceChildren(); find('[data-graph-edges]').replaceChildren();
       details.replaceChildren(); find('[data-graph-summary]').textContent = ''; say('');
     },

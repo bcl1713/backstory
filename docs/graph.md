@@ -91,6 +91,11 @@ centers it; `/` searches; `?` shows help; `+`/`−` zoom; `[`/`]` adjust local d
 connection list provides canonical paths, real links and ordinary keyboard actions
 independent of changing coordinates. □ marks current, ◇ selected, and a reticle
 focused. Arrows preserve direction. Position and size do not imply meaning.
+Links in the selected note's outgoing shortest-path spring structure stand out;
+every equal shortest-path parent participates. Other directed links remain faint
+context, including cross-links, backward links and unreachable components. This
+distinction follows selection and loaded topology even while motion is paused.
+Forced colors keeps all links legible.
 
 Physics uses unique-pair springs, damping, collision/repulsion, weak centering,
 bounded timesteps/catch-up, deterministic neighbor seeding and cooling. Large
@@ -103,6 +108,8 @@ state. Forced colors removes decoration and retains readable glyphs. Selection i
 the strongest bloom source; brightness falls with shortest explicit-link hops in
 **loaded eligible edges**, with edges using their farther endpoint's tier. Cycles,
 reciprocal edges, occurrence counts and screen proximity cannot amplify emission.
+Default uses the former High intensity; High adds stronger bloom above it.
+Non-spring links and their halos remain quiet at either setting.
 Off is a true Off. Adaptive quality reduces decorative cost with hysteresis and
 recovers when frames improve, while respecting forced colors and user Off.
 
@@ -161,3 +168,16 @@ implementation, not this renderer. No new benchmark or device matrix is required
 Actual assistant-host WebMCP discovery/invocation remains a separate, authorized
 post-deployment check. Browser registration stubs do not establish host acceptance.
 Publication builds/releases artifacts; it does not redeploy a live wiki.
+
+Dense maps place labels around nearby node and focus marks, rather than drawing
+important titles over one another. Selected, focused and current-note identities
+get placement priority; a short leader ties an offset label to its node. Fewer
+ordinary labels appear where the map is crowded. Titles may be shortened on the
+map; the connection list and selected-note details retain full titles. These
+choices affect labels only, not loaded notes, links or outgoing-hop membership.
+
+Open **Index progress** for the active indexing phase, checked metadata and
+dependencies, parsed notes, queued changes, last reconciliation/content
+verification, and notification health. Progress is refreshed only while this
+disclosure and the page are open. An empty queue or equal discovered/processed
+counts does not mean dependency checks or relationship projection have finished.
