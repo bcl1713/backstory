@@ -37,7 +37,7 @@ test('directed spring context stays quiet across root changes, appended shortcut
   };
   view.setGraph(data, 'a'); inspect(['a:b', 'a:c', 'b:d', 'c:d']);
   const before = view.simulation.all.map(n => [n.x, n.y, n.z]);
-  view.setSelection('b', 'b'); inspect(['b:d', 'b:c', 'b:a']);
+  view.setSelection('b', 'b'); inspect(['a:b', 'a:c', 'b:d', 'c:d']);
   assert.deepEqual(view.simulation.all.map(n => [n.x, n.y, n.z]), before);
   view.setSelection('a', 'b');
   data.edges.push({ source: 'a', destination: 'd' });
@@ -105,7 +105,7 @@ test('paused view refreshes spring roots and appended shortcuts without moving c
   assert.equal(view.focused, 'b');
   assert.equal(view.simulation.active, false);
   view.setSelection('removed', 'b');
-  assert.equal(view.simulation.springs.length, 0);
+  assert.equal(view.simulation.springs.length, 2, 'a missing visual selection does not replace the opening root');
   assert.equal(view.simulation.active, false);
   view.batch.dispose();
 });

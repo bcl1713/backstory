@@ -63,6 +63,7 @@ class LinkPage(PageMetadata):
 
 @dataclass(frozen=True, kw_only=True)
 class GraphPage(PageMetadata):
+    exploration: str | None = None
     nodes: tuple[GraphNode, ...] = ()
     edges: tuple[GraphEdge, ...] = ()
     boundary_connections: bool = False

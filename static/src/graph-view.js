@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { GraphPhysics } from './graph-physics.js';
 import { GraphCamera } from './graph-camera.js';
 import { layoutLabels } from './graph-labels.js';
+import { GraphHints } from './graph-hints.js';
+import { nodeRadius, connectionGeometry } from './graph-geometry.js';
 import { hopTiers, emission, nearestNode, AdaptiveQuality, BLOOM_DEFAULT, BLOOM_HIGH } from './graph-layout.js';
 
 function geometry(count, color = false, alpha = false) {
@@ -18,12 +20,13 @@ export function createGraphBatches(nodes, edges) {
   marks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   const lines = new THREE.LineSegments(geometry(edges.length * 2, true, true), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .62, depthWrite: false }));
   const arrows = new THREE.Mesh(geometry(edges.length * 3, true, true), new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: .85, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true }));
-  const haloMaterial = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { dpr: { value: 1 } },
-    vertexShader: 'attribute vec3 color; varying vec3 glow; uniform float dpr; void main(){ glow=color; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); gl_PointSize=48.*dpr; }',
+  const haloMaterial = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { viewportHeight: { value: 1 } },
+    vertexShader: 'attribute vec3 color; attribute float diameter; varying vec3 glow; uniform float viewportHeight; void main(){ glow=color; vec4 p=modelViewMatrix*vec4(position,1.); gl_Position=projectionMatrix*p; gl_PointSize=diameter*projectionMatrix[1][1]*viewportHeight/(2.*max(.01,-p.z)); }',
     fragmentShader: `varying vec3 glow; void main(){ float r=length(gl_PointCoord-vec2(.5))*2.; if(r>1.) discard; float a=pow(1.-r,2.)*.6; gl_FragColor=vec4(glow,a*max(max(glow.r,glow.g),glow.b));
 #include <colorspace_fragment>
 }` });
   const halos = new THREE.Points(geometry(nodes.length, true), haloMaterial);
+  halos.geometry.setAttribute('diameter', new THREE.BufferAttribute(new Float32Array(nodes.length), 1));
   const strips = geometry(edges.length * 6, true, true);
   const uv = new Float32Array(edges.length * 12);
   for (let i = 0; i < edges.length; i++) uv.set([0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1], i * 12);
@@ -49,7 +52,11 @@ export class GraphView {
     this.canvas = document.createElement('canvas'); this.canvas.setAttribute('aria-hidden', 'true');
     this.labels = document.createElement('canvas'); this.labels.setAttribute('aria-hidden', 'true'); this.labelContext = this.labels.getContext('2d');
     this.swatch = document.createElement('canvas'); this.swatch.width = this.swatch.height = 1; this.swatchContext = this.swatch.getContext('2d', { willReadFrequently: true });
-    container.replaceChildren(this.canvas, this.labels); container.graphView = this;
+    this.hints = new GraphHints(); this.hintButtons = new Map();
+    this.hintLayer = document.createElement('div'); this.hintLayer.className = 'graph-hints';
+    this.hintLayer.setAttribute('role', 'group'); this.hintLayer.setAttribute('aria-label', 'Node selection hints');
+    this.hintLayer.hidden = true;
+    container.replaceChildren(this.canvas, this.labels, this.hintLayer); container.graphView = this;
     this.scene = new THREE.Scene(); this.renderCamera = new THREE.PerspectiveCamera(45, 1, 1, 1000000);
     this.matrix = new THREE.Matrix4(); this.color = new THREE.Color();
     const listen = (el, name, fn, options = {}) => el.addEventListener(name, fn, { ...options, signal: this.life.signal });
@@ -70,6 +77,7 @@ export class GraphView {
     this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-color-scheme', 'data-theme'] });
     this.updateTheme();
     listen(container, 'keydown', event => this.keydown(event));
+    listen(container, 'focusout', event => { if (!container.contains(event.relatedTarget)) this.cancelHints(); });
     listen(container, 'pointerdown', event => this.pointerDown(event));
     listen(container, 'pointermove', event => this.pointerMove(event));
     listen(container, 'pointerup', event => this.release(event, false));
@@ -109,10 +117,11 @@ export class GraphView {
     if (this.renderer && !this.unavailable) { this.renderer.setPixelRatio(this.pixelRatio); this.renderer.setSize(bounds.width, bounds.height, false); }
     this.labels.width = Math.round(bounds.width * this.pixelRatio); this.labels.height = Math.round(bounds.height * this.pixelRatio); return true;
   }
-  setGraph(data, current) {
+  setGraph(data, current, root = current) {
     const topology = JSON.stringify([data.nodes.map(node => node.path), data.edges.map(edge => [edge.source, edge.destination])]);
     const changed = topology !== this.topology;
-    this.data = data; this.current = current;
+    if (!data.nodes.length) this.cancelHints();
+    this.data = data; this.current = current; this.root = root; this.simulation.setRoot(root);
     if (!changed) { this.themeDirty = true; this.draw(); return; }
     this.topology = topology; this.release(null, true);
     this.simulation.setGraph(data.nodes, data.edges);
@@ -132,8 +141,10 @@ export class GraphView {
   setSelection(selected, focused) {
     this.selected = selected; this.focused = focused;
     this.simulation.setSelection(selected);
+    if (this.root === null) this.simulation.setRoot(selected);
     if (this.paused) this.simulation.settle(0);
     this.tiers = hopTiers(this.data.nodes, this.data.edges, selected); this.themeDirty = true;
+    this.container.dataset.root = this.root || '';
     this.container.dataset.selected = selected || ''; this.container.dataset.focused = focused || '';
     const node = this.data.nodes.find(n => n.path === focused);
     this.container.setAttribute('aria-label', `3D note relationship map${node ? ` · Focused ${node.title}, ${node.path}` : ''}`);
@@ -156,8 +167,64 @@ export class GraphView {
   orbit(dx, dy) { this.cameraControlled = true; this.camera.orbit(dx, dy, this.paused); this.draw(); this.wake(); }
   zoom(factor, point) { this.cameraControlled = true; this.camera.zoom(factor, point, this.paused); this.draw(); this.wake(); }
   pan(dx, dy) { this.cameraControlled = true; this.camera.pan(dx, dy, this.paused); this.draw(); this.wake(); }
+  beginHints() {
+    if (this.unavailable || this.container.hidden) return;
+    this.hints.begin({ ...this.data, selected: this.selected, projected: this.projected, width: this.camera.width, height: this.camera.height });
+    this.hintButtons.clear(); this.hintLayer.replaceChildren();
+    for (const hint of this.hints.assignments) {
+      const button = document.createElement('button'); button.type = 'button'; button.tabIndex = -1;
+      button.textContent = hint.code; button.dataset.graphHint = hint.code;
+      button.setAttribute('aria-label', `${hint.code}: Select ${hint.title}, ${hint.path}`);
+      button.addEventListener('click', () => this.completeHint(hint.path));
+      this.hintLayer.append(button); this.hintButtons.set(hint.path, button);
+    }
+    this.container.focus({ preventScroll: true });
+    this.actions.onHint?.(this.hints.active ? 'Node hints: type a code to select and expand. Escape cancels; Backspace edits.' : 'No nodes are visible for hints.');
+    this.draw();
+  }
+  cancelHints(announce = false) {
+    if (!this.hints?.active && !this.hintButtons?.size) return;
+    this.hints.cancel(); this.hintButtons.clear(); this.hintLayer.replaceChildren(); this.hintLayer.hidden = true;
+    this.container.dataset.hintMode = 'false';
+    if (announce) { this.actions.onHint?.('Node hints cancelled.'); this.draw(); }
+  }
+  completeHint(path) {
+    this.cancelHints(); this.container.focus({ preventScroll: true });
+    if (this.data.nodes.some(node => node.path === path)) this.actions.onSelect?.(path, true);
+    else this.actions.onHint?.('That node is no longer available. Enter hint mode again.');
+    this.draw();
+  }
+  drawHints() {
+    if (!this.hints?.active) { if (this.hintLayer) this.hintLayer.hidden = true; return; }
+    this.hintLayer.hidden = false; this.container.dataset.hintMode = 'true';
+    const paths = new Set(this.data.nodes.map(n=>n.path));
+    const assignments = this.hints.assignments.filter(h => h.code.startsWith(this.hints.prefix) && paths.has(h.path));
+    const byPath = new Map(assignments.map(h=>[h.path,h]));
+    const placements = layoutLabels({ nodes: assignments.map(h => ({path:h.path,title:h.code})),
+      projected: this.projected, width: this.camera.width, height: this.camera.height,
+      measure: text => Math.max(16,text.length * 9), maximum: assignments.length, hintMode:true, previous:this.hintSlots });
+    this.hintSlots = new Map(placements.map(p => [p.path,p.slot]));
+    for (const button of this.hintButtons.values()) button.hidden = true;
+    for (const placement of placements) {
+      const button = this.hintButtons.get(placement.path); if (!button) continue;
+      button.hidden = false; button.style.width = `${placement.rect.w}px`; button.style.left = `${placement.rect.x}px`; button.style.top = `${placement.rect.y}px`;
+      const hint = byPath.get(placement.path); button.textContent = hint.code;
+      const p = this.projected.get(placement.path), ctx = this.labelContext;
+      if (ctx) { ctx.strokeStyle=this.theme.focus; ctx.lineWidth=1; ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(placement.anchor.x,placement.anchor.y);ctx.stroke(); }
+    }
+  }
   keydown(event) {
     if (event.target !== this.container || event.isComposing || event.altKey || event.metaKey || event.ctrlKey || event.getModifierState?.('AltGraph')) return;
+    if (this.hints?.active) {
+      if (event.key === 'Tab') { this.cancelHints(true); return; }
+      event.preventDefault(); event.stopPropagation();
+      const result = this.hints.key(event.key);
+      if (result.path) { this.completeHint(result.path); return; }
+      if (result.cancelled) { this.cancelHints(true); this.actions.onHint?.('Node hints cancelled.'); }
+      else this.actions.onHint?.(result.invalid ? 'No matching hint. Backspace edits; Escape cancels.' : `Node hints: ${this.hints.prefix || 'type a code'}`);
+      this.draw(); return;
+    }
+    if (event.key === 'f') { event.preventDefault(); event.stopPropagation(); this.beginHints(); return; }
     const direction = { ArrowLeft: 'left', h: 'left', ArrowRight: 'right', l: 'right', ArrowUp: 'up', k: 'up', ArrowDown: 'down', j: 'down' }[event.key];
     if (direction) {
       const visible = new Map([...this.projected].filter(([path, p]) => path === this.focused || p.visible && p.x >= 0 && p.x <= this.camera.width && p.y >= 0 && p.y <= this.camera.height));
@@ -183,7 +250,9 @@ export class GraphView {
   }
   pointerDown(event) {
     this.cameraControlled = true;
+    if (event.target.closest?.('.graph-hints')) return;
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || this.unavailable) return;
+    this.cancelHints();
     const point = this.point(event); this.pointers.set(event.pointerId, point);
     this.container.focus({ preventScroll: true }); this.container.setPointerCapture(event.pointerId);
     if (this.pointers.size > 1) { if (this.drag?.path) this.simulation.unpin(this.drag.path); this.drag = null; this.gesture = this.gestureState(); return; }
@@ -248,15 +317,16 @@ export class GraphView {
     const batch = this.batch, camera = this.camera, eye = camera.eye(), { right, back: view } = camera.basis();
     this.renderCamera.aspect = camera.width / camera.height; this.renderCamera.position.set(eye.x, eye.y, eye.z); this.renderCamera.lookAt(camera.x, camera.y, camera.z); this.renderCamera.updateProjectionMatrix(); this.renderCamera.updateMatrixWorld();
     const bloom = this.quality.bloom(this.intensity, this.forced.matches);
-    batch.halos.visible = batch.edgeHalos.visible = bloom > 0; batch.halos.material.uniforms.dpr.value = this.pixelRatio;
+    batch.halos.visible = batch.edgeHalos.visible = bloom > 0; batch.halos.material.uniforms.viewportHeight.value = camera.height * this.pixelRatio;
     if (this.themeDirty) this.applyColors(bloom);
     this.renderer.setClearColor(this.theme.background);
     this.projected.clear(); this.pickGrid = new Map();
     this.data.nodes.forEach((node, index) => {
-      const n = this.simulation.nodes.get(node.path), p = camera.screen(n); this.projected.set(node.path, p);
-      const radius = (node.path === this.selected ? 7 : 5) / Math.max(.0001, p.scale);
+      const n = this.simulation.nodes.get(node.path), p = camera.screen(n);
+      const radius = nodeRadius(node.path, this.selected); p.radius = radius * p.scale; this.projected.set(node.path, p);
       this.matrix.makeScale(radius, radius, radius); this.matrix.setPosition(n.x, n.y, n.z); batch.nodes.setMatrixAt(index, this.matrix);
       batch.halos.geometry.attributes.position.setXYZ(index, n.x, n.y, n.z);
+      batch.halos.geometry.attributes.diameter.setX(index, radius * 9.6);
       if (p.visible && p.x > -36 && p.x < camera.width + 36 && p.y > -36 && p.y < camera.height + 36) {
         const key = `${Math.floor(p.x / 36)},${Math.floor(p.y / 36)}`; let bucket = this.pickGrid.get(key);
         if (!bucket) this.pickGrid.set(key, bucket = []);
@@ -266,32 +336,15 @@ export class GraphView {
     });
     this.data.edges.forEach((edge, index) => {
       const a = this.simulation.nodes.get(edge.source), b = this.simulation.nodes.get(edge.destination); if (!a || !b) return;
-      const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, length = Math.max(.01, Math.hypot(dx, dy, dz));
-      const scale = Math.max(.0001, this.projected.get(edge.destination).scale), inset = Math.min(length * .3, 9 / scale);
-      const tip = [b.x - dx / length * inset, b.y - dy / length * inset, b.z - dz / length * inset];
-      batch.edges.geometry.attributes.position.setXYZ(index * 2, a.x, a.y, a.z); batch.edges.geometry.attributes.position.setXYZ(index * 2 + 1, ...tip);
-      const size = Math.min(length * .25, 6 / scale), back = [tip[0] - dx / length * size, tip[1] - dy / length * size, tip[2] - dz / length * size];
-      // A camera-facing perpendicular gives arrowheads visible in every orbit.
-      let sx = dy * view.z - dz * view.y, sy = dz * view.x - dx * view.z, sz = dx * view.y - dy * view.x;
-      const side = Math.hypot(sx, sy, sz); if (side < .001) { sx = right.x; sy = right.y; sz = right.z; }
-      const magnitude = Math.max(.001, Math.hypot(sx, sy, sz));
-      if (bloom > 0) {
-        const startWidth = 7 / Math.max(.0001, this.projected.get(edge.source).scale) / magnitude;
-        const endWidth = 7 / scale / magnitude;
-        const corners = [[a.x + sx * startWidth, a.y + sy * startWidth, a.z + sz * startWidth],
-          [a.x - sx * startWidth, a.y - sy * startWidth, a.z - sz * startWidth],
-          [tip[0] + sx * endWidth, tip[1] + sy * endWidth, tip[2] + sz * endWidth],
-          [tip[0] - sx * endWidth, tip[1] - sy * endWidth, tip[2] - sz * endWidth]];
-        for (const [v, c] of [0, 1, 2, 2, 1, 3].entries()) batch.edgeHalos.geometry.attributes.position.setXYZ(index * 6 + v, ...corners[c]);
-      }
-      const width = size * .5 / magnitude;
-      batch.arrows.geometry.attributes.position.setXYZ(index * 3, ...tip);
-      batch.arrows.geometry.attributes.position.setXYZ(index * 3 + 1, back[0] + sx * width, back[1] + sy * width, back[2] + sz * width);
-      batch.arrows.geometry.attributes.position.setXYZ(index * 3 + 2, back[0] - sx * width, back[1] - sy * width, back[2] - sz * width);
+      const shape = connectionGeometry(a,b,nodeRadius(edge.source,this.selected),nodeRadius(edge.destination,this.selected),{right,back:view});
+      batch.edges.geometry.attributes.position.setXYZ(index * 2, ...shape.start);
+      batch.edges.geometry.attributes.position.setXYZ(index * 2 + 1, ...shape.tip);
+      shape.arrow.forEach((point,v) => batch.arrows.geometry.attributes.position.setXYZ(index*3+v,...point));
+      if (bloom > 0) shape.halo.forEach((point,v) => batch.edgeHalos.geometry.attributes.position.setXYZ(index*6+v,...point));
     });
-    batch.nodes.instanceMatrix.needsUpdate = true;
+    batch.nodes.instanceMatrix.needsUpdate = true; batch.halos.geometry.attributes.diameter.needsUpdate = true;
     for (const object of [batch.halos, batch.edges, batch.edgeHalos, batch.arrows]) object.geometry.attributes.position.needsUpdate = true;
-    this.renderer.render(this.scene, this.renderCamera); this.drawLabels();
+    this.renderer.render(this.scene, this.renderCamera); this.drawLabels(); this.drawHints();
     Object.assign(this.container.dataset, { motion: this.paused ? 'paused' : this.simulation.active ? 'moving' : 'settled', lowWork: String(this.quality.level > 0), quality: String(this.quality.level), cameraYaw: String(camera.yaw), cameraPitch: String(camera.pitch), bloomEffective: String(bloom) });
   }
   drawLabels() {
@@ -299,24 +352,27 @@ export class GraphView {
     const camera = this.camera; ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0); ctx.clearRect(0, 0, camera.width, camera.height);
     ctx.font = `12px ${this.fontFamily}`; ctx.lineJoin = 'round'; ctx.lineWidth = 4;
     const labels = layoutLabels({ nodes: this.data.nodes, projected: this.projected,
-      width: camera.width, height: camera.height, selected: this.selected, focused: this.focused, current: this.current,
-      measure: text => ctx.measureText(text).width, maximum: this.quality.labels, previous: this.labelSlots });
+      width: camera.width, height: camera.height, selected: this.selected, focused: this.focused, current: this.current, edges: this.data.edges,
+      measure: (text,secondary) => { ctx.font = `${secondary ? 11 : 12}px ${this.fontFamily}`; return ctx.measureText(text).width; }, maximum: this.hints?.active ? 0 : this.quality.labels, previous: this.labelSlots });
     this.labelSlots = new Map(labels.map(label => [label.path, label.slot]));
     this.labelPlacements = labels;
     // Leaders and backed text keep an offset identity tied to its node, even
     // when a dense priority cluster needs a viewport-margin placement.
     for (const label of labels) {
       const p = this.projected.get(label.path), { rect, anchor } = label;
+      ctx.globalAlpha = label.secondary ? .78 : 1;
       ctx.strokeStyle = label.path === this.selected ? this.theme.highlight : label.path === this.focused ? this.theme.focus : this.theme.label;
       ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(anchor.x, anchor.y); ctx.stroke();
     }
     // All backed labels cover crossing leaders, including a later node's line.
     for (const label of labels) {
       const { rect } = label;
+      ctx.font = `${label.secondary ? 11 : 12}px ${this.fontFamily}`; ctx.globalAlpha = label.secondary ? .78 : 1;
       ctx.fillStyle = this.theme.background; ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
       ctx.strokeStyle = this.theme.background; ctx.fillStyle = this.theme.label; ctx.lineWidth = 3;
       ctx.strokeText(label.text, rect.x + 4, rect.y + 14); ctx.fillText(label.text, rect.x + 4, rect.y + 14);
     }
+    ctx.globalAlpha = 1;
     // State cues do not depend on label budget or placement success.
     for (const path of new Set([this.current, this.selected, this.focused])) {
       const p = this.projected.get(path);
@@ -345,7 +401,7 @@ export class GraphView {
   }
   stop() { if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; }
   destroy() {
-    this.release(null, true); this.destroyed = true; this.stop(); this.life.abort(); this.resize.disconnect(); this.themeObserver.disconnect();
+    this.cancelHints(); this.release(null, true); this.destroyed = true; this.stop(); this.life.abort(); this.resize.disconnect(); this.themeObserver.disconnect();
     this.batch?.dispose(); this.renderer?.dispose(); this.simulation.destroy(); this.projected.clear(); this.pickGrid?.clear();
     if (this.container.graphView === this) delete this.container.graphView; this.container.replaceChildren();
   }

@@ -12,7 +12,7 @@ from .tool_views import _json, _tool
 
 
 SCHEMAS = {
-    'graph': {'path', 'depth', 'folder', 'tag', 'query', 'cursor', 'node_limit', 'edge_limit'},
+    'graph': {'path', 'depth', 'folder', 'tag', 'query', 'cursor', 'node_limit', 'edge_limit', 'expand', 'exploration'},
     'links': {'path', 'direction', 'cursor', 'limit'},
     'issues': {'folder', 'issue', 'cursor', 'limit'},
 }
@@ -32,6 +32,8 @@ def arguments(request, kind, *, form=False):
             result[name] = int(raw)
     if 'path' in result:
         result['path'] = authorize_content(request, result['path'], query_parameter='path')
+    if 'expand' in result:
+        result['expand'] = authorize_content(request, result['expand'], query_parameter='expand')
     if 'folder' in result:
         result['folder'] = authorize_content(request, result['folder'], 'folder', query_parameter='folder')
     authorize_content(request, '', 'folder')

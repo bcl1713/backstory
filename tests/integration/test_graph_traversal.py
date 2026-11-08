@@ -334,6 +334,8 @@ def test_resumable_discovery_emits_progress_and_skips_outside_last_layer_eligibi
     for n in range(1000):
         if not run_batch(now=10000000000+n).pending:
             break
+    from indexing import graph_traversal
+    monkeypatch.setattr(graph_traversal, 'WORK_ROWS', 20)
     nodes, edges, pages = collect(graph, 'root.md', depth=2)
     assert pages[0].nodes and pages[0].next_cursor
     assert nodes == {'root.md', 'r.md'} | {f'leaf{i}.md' for i in range(35)}
@@ -411,3 +413,142 @@ def test_filesystem_latency_does_not_spend_graph_sql_budget(wiki, monkeypatch):
     assert nodes == {'root.md', 'bridge.md', 'leaf.md'}
     assert edges == {('root.md', 'bridge.md'): 1, ('bridge.md', 'leaf.md'): 1}
     assert pages[-1].projection_complete
+
+
+def explore(graph, token=None, expand=None, **kwargs):
+    """Collect one opening, expansion, or accumulated revalidation action."""
+    cursor, pages, nodes, edges = None, [], set(), {}
+    for _ in range(200):
+        page = graph.query_graph('r.md', exploration=token, expand=expand, cursor=cursor, **kwargs)
+        paths = {node.path for node in page.nodes}
+        for edge in page.edges:
+            assert {edge.source, edge.destination} <= paths
+            edges[edge.source, edge.destination] = edge.occurrence_count
+        nodes.update(paths)
+        pages.append(page)
+        token, cursor = page.exploration, page.next_cursor
+        assert token
+        if cursor is None:
+            return nodes, edges, pages
+    pytest.fail('exploration action did not terminate')
+
+
+def test_cumulative_expansion_keeps_chain_diamond_cycle_and_cross_neighborhood_evidence(wiki):
+    graph = build_graph(wiki, {'r.md': '[[a]] [[b]]', 'a.md': '[[c]]',
+                               'b.md': '[[d]]', 'c.md': '[[d]] [[a]]',
+                               'd.md': '[[c]] [[c#Again]] [[end]]', 'end.md': '# End'})
+    nodes, edges, pages = explore(graph, node_limit=2, edge_limit=1)
+    assert nodes == {'r.md', 'a.md', 'b.md'}
+    more, delta, pages = explore(graph, pages[-1].exploration, 'a.md', node_limit=2, edge_limit=1)
+    nodes.update(more)
+    edges.update(delta)
+    assert nodes == {'r.md', 'a.md', 'b.md', 'c.md'}
+    more, delta, pages = explore(graph, pages[-1].exploration, 'b.md', node_limit=2, edge_limit=1)
+    nodes.update(more)
+    edges.update(delta)
+    assert nodes == {'r.md', 'a.md', 'b.md', 'c.md', 'd.md'}
+    assert edges == {('r.md', 'a.md'): 1, ('r.md', 'b.md'): 1,
+                     ('a.md', 'c.md'): 1, ('b.md', 'd.md'): 1,
+                     ('c.md', 'a.md'): 1, ('c.md', 'd.md'): 1, ('d.md', 'c.md'): 2}
+    restored, evidence, _ = explore(graph, pages[-1].exploration, node_limit=2, edge_limit=1)
+    assert restored == nodes and evidence == edges
+
+
+def test_completed_expansion_reuses_adjacency_and_lost_response_replays(wiki, monkeypatch):
+    from indexing import graph_traversal
+    graph = build_graph(wiki, {'r.md': '[[a]]', 'a.md': '[[b]]', 'b.md': '# B'})
+    _, _, opened = explore(graph)
+    original_token = opened[-1].exploration
+    first = graph.query_graph('r.md', exploration=original_token, expand='a.md')
+    replay = graph.query_graph('r.md', exploration=original_token, expand='a.md')
+    assert replay.nodes == first.nodes and replay.edges == first.edges
+    assert replay.exploration == first.exploration
+    def no_repeat(*args, **kwargs):
+        pytest.fail('completed adjacency was fetched again')
+    monkeypatch.setattr(graph_traversal, '_adjacent', no_repeat)
+    nodes, edges, pages = explore(graph, first.exploration, 'a.md')
+    assert not nodes and not edges and pages[-1].next_cursor is None
+
+
+@pytest.mark.parametrize('change', ['mutation', 'publication', 'policy', 'bridge'])
+def test_exploration_token_rejects_stale_state_and_changed_filters(wiki, settings, change):
+    from django.db.models import F
+    from indexing.models import IndexGeneration, RelationState
+    graph = build_graph(wiki, {'r.md': '[[a]]', 'a.md': '[[b]]', 'b.md': '# B'})
+    _, _, pages = explore(graph)
+    token = pages[-1].exploration
+    with pytest.raises(StorageError, match='graph_cursor_expired'):
+        graph.query_graph('r.md', exploration=token, expand='a.md', query='b')
+    if change == 'mutation':
+        IndexGeneration.objects.update(mutation=F('mutation') + 1)
+    elif change == 'publication':
+        RelationState.objects.update(publication=F('publication') + 1)
+    elif change == 'policy':
+        settings.BACKSTORY_EXCLUSIONS = ['a.md']
+    else:
+        (wiki / 'a.md').unlink()
+    with pytest.raises(StorageError, match='graph_cursor_expired'):
+        graph.query_graph('r.md', exploration=token, expand='a.md')
+
+
+def test_ordinary_93_member_scope_batches_indexed_work(wiki, record_property):
+    from django.db import connection
+    from tests.fixtures.graph import populate_two_hop_hub
+    from indexing import graph
+    populate_two_hop_hub(wiki)
+    statements = []
+    def count(execute, sql, params, many, context):
+        statements.append(sql)
+        return execute(sql, params, many, context)
+    with connection.execute_wrapper(count):
+        nodes, edges, pages = collect(graph, 'Population Root.md', depth=2)
+    record_property('batched_population', json.dumps({'requests': len(pages), 'sql': len(statements)}))
+    assert len(nodes) == 93 and len(edges) == 278
+    assert len(pages) <= 6
+    assert len(statements) < 200
+
+
+def test_cumulative_chain_outgrows_single_request_witness_budget(wiki):
+    files = {'r.md': '[[n1]]', **{f'n{i}.md': f'[[n{i + 1}]]' for i in range(1, 305)},
+             'n305.md': '# End'}
+    graph = build_graph(wiki, files)
+    nodes, _, pages = explore(graph, depth=8)
+    for selected in range(8, 305, 8):
+        more, _, pages = explore(graph, pages[-1].exploration, f'n{selected}.md', depth=8)
+        assert all(page.limits['examined'] <= 300 for page in pages)
+        nodes.update(more)
+    assert len(nodes) == 306 and 'n305.md' in nodes
+
+
+@pytest.mark.parametrize('work_rows', [1, 400])
+def test_visibility_refresh_recovers_accumulation_during_lost_expansion_page(wiki, monkeypatch, work_rows):
+    from indexing import graph_traversal
+    monkeypatch.setattr(graph_traversal, 'WORK_ROWS', work_rows)
+    graph = build_graph(wiki, {'r.md': '[[a]]', 'a.md': '[[b]] [[c]] [[d]]',
+                               'b.md': '# B', 'c.md': '# C', 'd.md': '# D'})
+    _, _, opened = explore(graph, node_limit=2, edge_limit=1)
+    token = opened[-1].exploration
+    pending = graph.query_graph('r.md', exploration=token, expand='a.md', node_limit=2, edge_limit=1)
+    assert pending.next_cursor
+    # The fetch completed server-side while the hidden tab aborted before
+    # receiving it. Revalidate using its last received exploration token.
+    restored, evidence, pages = explore(graph, token, node_limit=2, edge_limit=1)
+    assert restored == {'r.md', 'a.md', 'b.md', 'c.md', 'd.md'}
+    assert evidence == {('r.md', 'a.md'): 1, ('a.md', 'b.md'): 1,
+                        ('a.md', 'c.md'): 1, ('a.md', 'd.md'): 1}
+    assert pages[-1].projection_complete
+    repeated, repeated_edges, _ = explore(graph, pages[-1].exploration, 'a.md', node_limit=2, edge_limit=1)
+    assert not repeated and not repeated_edges
+
+
+def test_expansion_anchor_revocation_between_pages_rejects_descendant_evidence(wiki):
+    graph = build_graph(wiki, {'r.md': '[[a]]', 'a.md': '[[b]] [[c]] [[d]]',
+                               'b.md': '# B', 'c.md': '# C', 'd.md': '# D'})
+    _, _, pages = explore(graph, node_limit=2, edge_limit=1)
+    page = graph.query_graph('r.md', exploration=pages[-1].exploration, expand='a.md',
+                             node_limit=2, edge_limit=1)
+    assert page.next_cursor
+    (wiki / 'a.md').unlink()
+    with pytest.raises(StorageError, match='graph_cursor_expired'):
+        graph.query_graph('r.md', exploration=page.exploration, expand='a.md', cursor=page.next_cursor,
+                          node_limit=2, edge_limit=1)

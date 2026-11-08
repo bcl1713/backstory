@@ -14,22 +14,26 @@ draft/conflict navigation guard. Pending idle-save is cancelled on graph entry.
 Local starts at **two outgoing hops** when opened from a note.
 The visible hop controls and `[` / `]` change depth from **one to eight hops** while
 graph navigation has focus. Brackets remain ordinary input in search or the editor.
-Depth is shortest outgoing-link distance from the stable center, through eligible
-notes. A note that only links into the neighborhood does not join it. Incoming
-links remain available in selected-note details. Selection does not change the
-center; **Center selected note** starts an outgoing search from that note. Shrinking removes
-out-of-scope results; the center is selected if the old selection leaves scope.
-Surviving coordinates, orientation and zoom remain. Bounded work yields
-continuations until the entire selected-depth neighborhood is loaded. Incomplete
-index evidence or loading failures remain visible in the summary.
+The note that opens a local exploration stays its **opening root**. Initially its
+configured outgoing depth is loaded. Selecting any node, including one at the
+outer hop level, adds that node's configured outgoing neighborhood to the graph.
+Previously explored nodes and all eligible directed links stay loaded. Selection
+changes emphasis, while directed BFS hops and equal shortest-parent springs stay
+rooted at the opening note. New shorter paths update those depths and springs.
+Selection never refits, recenters or reseeds the view. Surviving positions,
+orientation, zoom, focus, pause and reduced motion remain intact.
 
-Deeper local views publish confirmed connections during discovery, with full
-indexed occurrence counts. Final-layer work chooses between indexed source
-occurrences and member-pair seeks, so a hub's unrelated outgoing links do not
-force a long series of empty pages. SQL has an emergency per-statement watchdog
-(2,000,000 VM steps or one second); endpoint validation and setup between SQL
-statements do not spend that allowance. Cooperative traversal slices and
-continuations bound ordinary work independently of this watchdog.
+Indexed outgoing adjacency is batched and retained in an expiring, stamp-bound
+exploration session. Repeated completed selections need no new neighborhood
+request. Continuations advance automatically for larger work; there is no fixed
+graph-size ceiling. Refresh and returning from a hidden tab revalidate accumulated
+evidence before showing it again. Changing root, filters or depth starts a new
+scope. An incoming-only note does not join merely by linking into the graph.
+
+SQL retains its emergency per-statement watchdog (2,000,000 VM steps or one
+second). Per-response work, endpoint eligibility and automatic continuations
+bound large traversals independently. Generation, mutation, relation and
+eligibility changes revoke old exploration tokens and cursors.
 
 **All notes** starts automatic loading of every eligible wiki component, including
 disconnected notes. Bounded pages accumulate without repeated Load more clicks;
@@ -48,11 +52,6 @@ pause is independent of **Pause motion**. Errors and expired/stalled cursors exp
 **Restart loading**; authorization/storage/namespace failures clear retained evidence.
 Scope/filter/depth changes cancel obsolete requests. Close releases pending work.
 A request with a different index/eligibility version cannot mix with earlier pages.
-
-The client retains at most 10,000 nodes/30,000 edges and 10,000 continuing pages per view. If reached, the unconsumed
-continuation remains available through **Continue in a new view** or narrower
-filters. A new window explicitly discards the previous window and remains Partial;
-it never calls the whole scope complete. API response limits are unchanged.
 
 **Graph settings → Forces** starts collapsed. Spring strength, Repulsion and
 Gravity apply live from **0.25× to 4× default**, in quarter steps. Linked pairs use
@@ -77,7 +76,8 @@ The direct `/graph/` page has a server-rendered paged connection list without JS
 The lazy, locally bundled Three.js `WebGLRenderer` uses true xyz coordinates,
 instanced nodes, shared line/arrow buffers and batched soft halos. No CDN or
 external rendering service is used. Labels use a bounded canvas overlay; there
-is no DOM or draw call per node/edge. All loaded nodes remain in the scene/list.
+is no permanent DOM or draw call per node/edge. Hint mode temporarily mounts named
+keyboard target buttons for visible nodes. All loaded nodes remain in the scene/list.
 
 Drag the background to orbit around a stable focus; Shift-drag or two-finger drag
 pans. Pinch/the wheel zooms. Drag a node to stretch its real link springs and tug
@@ -87,15 +87,30 @@ the page. Labeled Fit, Reset orientation, orbit, pan and zoom controls avoid
 requiring gestures. Pause motion and reduced motion preserve navigation.
 
 Arrow keys or h/j/k/l focus and inspect a visible node. Enter opens it; Space
-centers it; `/` searches; `?` shows help; `+`/`−` zoom; `[`/`]` adjust local depth. Tab leaves the map. The
+expands its neighborhood; `/` searches; `?` shows help; `+`/`−` zoom; `[`/`]` adjust local depth. Tab leaves the map. The
 connection list provides canonical paths, real links and ordinary keyboard actions
 independent of changing coordinates. □ marks current, ◇ selected, and a reticle
 focused. Arrows preserve direction. Position and size do not imply meaning.
-Links in the selected note's outgoing shortest-path spring structure stand out;
+Links in the opening root's outgoing shortest-path spring structure stand out;
 every equal shortest-path parent participates. Other directed links remain faint
 context, including cross-links, backward links and unreachable components. This
-distinction follows selection and loaded topology even while motion is paused.
+distinction follows the opening root and loaded topology even while motion is paused.
 Forced colors keeps all links legible.
+
+Choose **Node hints (f)** or press `f` while the map has focus. Type the displayed
+code to select and expand a node; immediate outbound neighbors receive the easiest
+codes. Codes are prefix-free and stay assigned to the same nodes throughout an
+in-progress sequence, even during movement or appended results. Backspace edits;
+Escape cancels; Tab leaves hint mode. Search and editor typing are unaffected.
+
+The selected node and its immediate neighbors get label priority. Secondary
+labels use smaller, quieter text only where they fit, and density reduces the
+simultaneous label budget. Full titles remain accessible through named targets
+and selected-note evidence. Mesh radii and soft glow are world-space geometry:
+zooming out shrinks their footprints. Text, hint codes and focus feedback remain
+readable in screen space; pointer/touch picking keeps its independent target size.
+Lines and arrowheads meet the projected world-space node boundaries.
+
 
 Physics uses unique-pair springs, damping, collision/repulsion, weak centering,
 bounded timesteps/catch-up, deterministic neighbor seeding and cooling. Large

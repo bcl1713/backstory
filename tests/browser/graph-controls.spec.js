@@ -338,7 +338,7 @@ test('local loading pause preserves motion state and a changed depth rejects an 
   expect(await map(page).evaluate(el => el.graphView.paused)).toBe(true);
 });
 
-for (const width of [1180, 390]) test(`selected-root BFS retains dense links and camera through reselection at ${width}px`, async ({ page }, info) => {
+for (const width of [1180, 390]) test(`opening-root BFS retains dense links and camera through reselection at ${width}px`, async ({ page }, info) => {
   await page.setViewportSize({ width, height: 900 });
   const all = [node('Slice.md'), ...Array.from({ length: 119 }, (_, i) => node(`Dense${i}.md`))];
   const links = [0, 1].flatMap(hub => all.slice(2).map(n => ({ source: all[hub].path, destination: n.path, occurrence_count: 3 })));
@@ -353,7 +353,7 @@ for (const width of [1180, 390]) test(`selected-root BFS retains dense links and
   const before = await map(page).evaluate(el => ({ camera: el.graphView.snapshot().camera, positions: el.graphView.simulation.all.map(n => [n.path,n.x,n.y,n.z]) }));
   expect(await map(page).evaluate(el => el.graphView.simulation.springs.length)).toBe(119);
   await map(page).evaluate(el => el.graphView.actions.onSelect('Dense0.md', true));
-  expect(await map(page).evaluate(el => el.graphView.simulation.springs.length)).toBe(118);
+  expect(await map(page).evaluate(el => el.graphView.simulation.springs.length)).toBe(119);
   const after = await map(page).evaluate(el => ({ camera: el.graphView.snapshot().camera, positions: el.graphView.simulation.all.map(n => [n.path,n.x,n.y,n.z]) }));
   expect(after).toEqual(before);
   expect(await map(page).evaluate(el => el.graphView.data.edges.length)).toBe(237);
