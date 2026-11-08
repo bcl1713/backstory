@@ -32,6 +32,7 @@
     "tests/formatter/graph-labels.test.mjs": "f7b7596fc2b2d509abafd17c7daf6fad985a1cb5e833fc43a636ff1a790029ba",
     "uv.lock": "b31bd1046c490b4d03539fd6e37fa3a77d7214c7b670438d7e9d7db2ca53825a",
     "wiki/templates/wiki/graph-panel.html": "6bb21fa3264e70a8dc3815b951cedb5bcf231e41c18383d3496e903c2b5736b0",
-    "wiki/templates/wiki/graph.html": "20f5d116a47edd4f164a0d4d03030dd92100f692b6271717fcbef442e3840bb7"
+    "wiki/templates/wiki/graph.html": "20f5d116a47edd4f164a0d4d03030dd92100f692b6271717fcbef442e3840bb7",
+    "tests/browser/diagram-clipping.spec.js": "21f642ca88fc5e3fbc26e7bd2750ac6ee334cd65b1e45bde196b2c59b2e34ca8"
   }
 }

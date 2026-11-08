@@ -124,3 +124,13 @@ closes the transient layer before exercising pagination in either renderer.
 Both affected Firefox viewport cases passed (7.1s). This is a test-setup change;
 application sources and visual evidence remain unchanged. The failed candidate
 has no successful receipt; the updated test commit requires a new exact gate.
+
+Candidate `8cddff06dec3ce633e2236139b992c9cfdf4d1bf` passed the corrected graph
+pagination cases and the same Python/formatter/code gates, but a Vega-Lite
+clipping case timed out during `page.setViewportSize` immediately after the
+login redirect, before chart navigation or any rendering assertion. Its trace
+shows the page remained on the wiki home. The clipping fixture now establishes
+its initial viewport at context creation; later responsive-size/geometry checks
+remain unchanged. All six Firefox clipping cases passed (11.5s). Application
+sources are unchanged. This failed candidate is retained without a receipt;
+its test-setup correction requires another exact merge candidate and gate.

@@ -1,6 +1,9 @@
 import {test,expect} from '@playwright/test';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {runtime} from './support/server.js';
+// Establish the initial viewport before login navigation. Resizing immediately
+// after the redirect can leave Firefox waiting for a viewport acknowledgement.
+test.use({viewport:{width:390,height:900}});
 const mermaid='flowchart TD\n'+Array.from({length:18},(_,i)=>`N${i}[Stage ${i+1}]${i?'':' '}`).join('\n')+'\n'+Array.from({length:17},(_,i)=>`N${i} --> N${i+1}`).join('\n');
 const dot='digraph { '+Array.from({length:18},(_,i)=>`n${i}[label="Stage ${i+1}"];`).join(' ')+Array.from({length:17},(_,i)=>`n${i}->n${i+1};`).join(' ')+' }';
 const chart=JSON.stringify({data:{values:[{category:'A',value:2},{category:'B',value:4}]},mark:'bar',encoding:{x:{field:'category',type:'nominal'},y:{field:'value',type:'quantitative'}}});
@@ -8,7 +11,7 @@ const fixtures=[['mermaid',mermaid,'Mermaid flowchart.'],['graphviz',dot,'Graphv
 test.beforeAll(async()=>{await mkdir(`${runtime}/reports`,{recursive:true});for(const [engine,body] of fixtures)await writeFile(`${runtime}/wiki/Clipping-${engine}.md`,'Before\n\n```'+engine+'\n'+body+'\n```\n\n# Following section\n\nAfter.\n');});
 for(const [engine,,status] of fixtures)for(const mode of ['notes','preview'])test(`${engine} complete viewport without nested clipping in ${mode}`,async({page,browserName},info)=>{
  await page.goto('/accounts/login/');await page.getByLabel('Username').fill('slice');await page.getByLabel('Password').fill('synthetic-slice-browser-only');await page.getByRole('button',{name:'Sign in',exact:true}).click();
- await page.setViewportSize({width:390,height:900});await page.goto(`/${mode}/Clipping-${engine}.md`);
+ await page.goto(`/${mode}/Clipping-${engine}.md`);
  await expect(page.getByText(status,{exact:true})).toBeVisible();
  const original=mode==='notes'?await page.locator('[data-markdown-editor]').evaluate(el=>el.markdownEditor.getSource()):null;
  const iframe=page.locator('.lp-diagram iframe'),identity=await iframe.elementHandle(),frame=await identity.contentFrame();
