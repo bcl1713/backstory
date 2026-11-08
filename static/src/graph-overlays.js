@@ -8,14 +8,15 @@ export function graphOverlays(root, { navigation, onShow = () => {}, onHide = ()
     if (!active) return false;
     onHide(active.dataset.graphOverlay); active.hidden = true; active = null;
     for (const toggle of toggles) toggle.setAttribute('aria-expanded','false');
-    if (restore) (returnFocus?.isConnected && !returnFocus.closest('[hidden]') && root.contains(returnFocus) ? returnFocus : navigation()).focus({preventScroll:true});
+    const destination = typeof returnFocus === 'function' ? returnFocus() : returnFocus;
+    if (restore) (destination?.isConnected && !destination.closest('[hidden]') && root.contains(destination) ? destination : navigation()).focus({preventScroll:true});
     returnFocus = null; return true;
   }
   function show(name, opener = document.activeElement) {
     const sheet = sheets.find(el => el.dataset.graphOverlay === name); if (!sheet) return;
     if (active === sheet) { close(); return; }
     // Switching layers keeps the original graph/toolbar focus destination.
-    const previousFocus = active?.contains(opener) ? returnFocus : opener;
+    const previousFocus = typeof opener !== 'function' && active?.contains(opener) ? returnFocus : opener;
     close({restore:false}); active = sheet; returnFocus = previousFocus;
     active.hidden = false;
     for (const toggle of toggles) toggle.setAttribute('aria-expanded',String(toggle.dataset.graphToggle === name));

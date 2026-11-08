@@ -147,11 +147,16 @@ test('selected identity remains available when dense local label slots are full'
   await expect(panel.locator('[data-graph-selection]')).toContainText('Selected · Synthetic 1 long readable identity');
 });
 
-test('Inspect returns focus to its loaded-note row',async({page})=>{
+test('Inspect returns focus to its loaded-note row after revalidation',async({page})=>{
+  await page.clock.install();
   const {panel}=await setup(page);await page.keyboard.press('Escape');
   await panel.getByRole('button',{name:'Connection list',exact:true}).click();
   const inspect=panel.getByRole('button',{name:'Inspect Synthetic 1 long readable identity',exact:true});
-  await inspect.click();await panel.getByRole('button',{name:'Close evidence',exact:true}).click();
+  await inspect.click();
+  await page.route('**/tools/graph/snapshot/**',r=>r.fulfill({json:{...payload,generation:2,observed_at:'2026-11-08T00:02:00Z'}}));
+  await page.clock.fastForward(15001);
+  await expect(panel.locator('[data-graph-diagnostics]')).toContainText('00:02:00Z');
+  await panel.getByRole('button',{name:'Close evidence',exact:true}).click();
   await expect(inspect).toBeFocused();
 });
 

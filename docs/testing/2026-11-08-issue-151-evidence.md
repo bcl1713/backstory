@@ -97,3 +97,20 @@ scenarios; no claim of independent exact-merge review is made.
 Remaining limits: no physical software-keyboard test, no Firefox WebGL in this
 executor, and no release/candidate validation. These do not replace the required
 candidate gate and independent review before a future merge.
+
+
+## Premerge follow-up
+
+Independent review of proposed merge `c5cc3e8d1f646f4a355598a9686f80f6b1b04421`
+found an additional focus-return edge case: periodic revalidation replaced a list
+Inspect opener while its Evidence sheet was open. The immediate-close test had
+not covered that sequence. The revised regression reproduced loss of row focus;
+return destinations now support a stable resolver that finds the current row by
+note identity. The asset build and four affected desktop/phone focus scenarios
+passed after the fix. Unaffected focused evidence above is retained.
+
+The obsolete candidate gate was interrupted through the runner's cleanup path
+and marked failed before landing; no successful receipt was created or reused.
+The changed source requires a new proposed merge and its own complete gate and
+independent review. Release receipts and final review records are retained in
+the trusted executor's candidate store, outside application source.

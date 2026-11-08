@@ -202,7 +202,11 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
       const inspect = element('button', `Inspect ${node.title}`, { type: 'button', 'data-graph-inspect': node.path, 'aria-pressed': String(node.path === selected) });
       // These listeners disappear with the row, rather than accumulating abort
       // callbacks on the long-lived graph for every continuation.
-      inspect.addEventListener('click', () => { select(node.path, false); layers.show('evidence',document.activeElement); });
+      inspect.addEventListener('click', () => {
+        select(node.path, false);
+        // Revalidation can replace this row while its evidence sheet is open.
+        layers.show('evidence', () => [...list.querySelectorAll('[data-graph-inspect]')].find(el => el.dataset.graphInspect === node.path));
+      });
       const openLink = element('a', `Open ${node.path}`, { href: node.href });
       if (node.path === currentPath) openLink.setAttribute('aria-current', 'page');
       li.append(element('strong', node.title), element('div', node.path), inspect, openLink); list.append(li);
