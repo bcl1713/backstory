@@ -3,9 +3,10 @@ export const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.
 const PAD = 4, HEIGHT = 20, CELL = 48;
 
 export function layoutLabels({ nodes, projected, width, height, selected, focused, current,
-  measure, maximum = 48, previous = new Map() }) {
+  measure, maximum = 48, previous = new Map(), edges = [], hintMode = false }) {
   if (width < 40 || height < 28 || maximum <= 0) return [];
-  const priority = path => path === selected ? 3 : path === focused ? 2 : path === current ? 1 : 0;
+  const neighbors = new Set(edges.flatMap(e => e.source === selected ? [e.destination] : e.destination === selected ? [e.source] : []));
+  const priority = path => path === selected ? 5 : path === focused ? 4 : neighbors.has(path) ? 3 : path === current ? 2 : hintMode ? 1 : 0;
   const onScreen = p => p?.visible && p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height;
   // Spatial lookup includes *all* displayed marks, even nodes without a label.
   const grid = new Map();
@@ -17,9 +18,11 @@ export function layoutLabels({ nodes, projected, width, height, selected, focuse
   };
   for (const [path, p] of projected) {
     if (!onScreen(p)) continue;
-    const radius = priority(path) ? 19 : 8, rect = { x: p.x - radius, y: p.y - radius, w: radius * 2, h: radius * 2 };
+    const radius = Math.max(p.radius || 0, priority(path) >= 4 || path === current ? 19 : 8), rect = { x: p.x - radius, y: p.y - radius, w: radius * 2, h: radius * 2 };
     for (const key of cells(rect)) { if (!grid.has(key)) grid.set(key, []); grid.get(key).push(rect); }
   }
+  const visibleCount = [...projected.values()].filter(onScreen).length;
+  if (!hintMode) maximum = Math.min(maximum, Math.max(3, Math.floor(width * height / (3500 + visibleCount * 50))));
   const important = nodes.filter(n => priority(n.path)).sort((a,b) => priority(b.path)-priority(a.path));
   // Ordinary candidates have a fixed ceiling, independent of total graph size.
   const candidates = [...important, ...nodes.filter(n => !priority(n.path) && onScreen(projected.get(n.path))).slice(0, Math.max(128, maximum * 8))];
@@ -31,10 +34,11 @@ export function layoutLabels({ nodes, projected, width, height, selected, focuse
     if (placed.length >= maximum) break;
     const p = projected.get(node.path); if (!onScreen(p)) continue;
     const title = Array.from(String(node.title || node.path));
+    const secondary = !priority(node.path);
     const maxWidth = Math.min(240, (width - PAD * 2) * .58), shortened = [...title];
     let text = shortened.join('');
-    while (measure(text) + 8 > maxWidth && shortened.length > 1) { shortened.pop(); text = shortened.join('') + '…'; }
-    const w = Math.min(width-PAD*2, measure(text)+8);
+    while (measure(text, secondary) + 8 > maxWidth && shortened.length > 1) { shortened.pop(); text = shortened.join('') + '…'; }
+    const w = Math.min(width-PAD*2, measure(text, secondary)+8);
     const positions = [];
     // Slot identities stay constant while orbiting/zooming. Keep the previous
     // valid slot before trying alternatives, so labels do not flip every frame.
@@ -69,7 +73,7 @@ export function layoutLabels({ nodes, projected, width, height, selected, focuse
     if (!position) continue;
     const rect = { x:position.x,y:position.y,w,h:HEIGHT };
     const anchor = { x:Math.max(rect.x,Math.min(rect.x+rect.w,p.x)), y:Math.max(rect.y,Math.min(rect.y+rect.h,p.y)) };
-    placed.push({ path:node.path,text,rect,anchor,slot:position.slot,priority:priority(node.path) }); occupied.push(rect);
+    placed.push({ path:node.path,text,rect,anchor,slot:position.slot,priority:priority(node.path),secondary }); occupied.push(rect);
   }
   return placed;
 }

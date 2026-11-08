@@ -70,6 +70,8 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   let page = null, selected = currentPath || null, focused = currentPath || null;
   let listMode = preferredList, graphicsAvailable = true, trail = [], nextCursor = null, activeParams = null;
   let pendingPositions = null, pendingVersion = null;
+  let explorationToken = null, requestParams = null, evidenceSuspended = false, completingExpansion = null;
+  const expandedPaths = new Set(), expansionQueue = new Set();
   const evidenceStamp = data => data && JSON.stringify([data.generation, data.mutation, data.relation_epoch, data.eligibility_version]);
   let view = null, loadingPaused = false, loadingError = false, loadingReason = '', autoTimer;
   let storage; try { storage = window.localStorage; } catch { /* Preferences remain page-local. */ }
@@ -79,9 +81,14 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   if (indexDisclosure) listen(indexDisclosure, 'toggle', () => { if (indexDisclosure.open) void refreshIndexProgress(); else stopIndexProgress(); });
   const automaticallyContinue = () => {
     cancelAutomatic();
-    if (!closed && nextCursor && !request && !loadingPaused && !loadingError) {
-      // Yield between bounded requests so controls, input and rendering stay live.
-      autoTimer = setTimeout(() => { autoTimer = null; void load({ cursor: nextCursor, append: true }); }, 40);
+    if (closed || request || loadingPaused || loadingError) return;
+    if (nextCursor) {
+      // Yield to input/rendering without adding an artificial network delay.
+      autoTimer = setTimeout(() => { autoTimer = null; void load({ cursor: nextCursor, append: true }); }, 0);
+    } else if (explorationToken && activeParams?.path && expansionQueue.size) {
+      const path = expansionQueue.values().next().value;
+      if (expandedPaths.has(path)) { expansionQueue.delete(path); automaticallyContinue(); return; }
+      autoTimer = setTimeout(() => { autoTimer = null; expansionQueue.delete(path); void load({ append:true, params:{...activeParams, expand:path, exploration:explorationToken} }); },0);
     }
   };
 
@@ -115,7 +122,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     try {
       view = new GraphView(map, {
         onSelect: (path, focus) => select(path, focus), onOpen: open, onCenter: path => center(path),
-        onSearch: focusSearch, onEscape: escape, onHelp: toggleHelp,
+        onSearch: focusSearch, onEscape: escape, onHelp: toggleHelp, onHint:say,
         onPause: paused => { find('[data-graph-pause]').setAttribute('aria-pressed', String(paused)); },
         onUnavailable: unavailable,
         onRestored: () => { graphicsAvailable = true; find('[data-graph-graphics-retry]').hidden = true; say('Map ready. Switch to the map to continue.'); },
@@ -199,11 +206,12 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     const edges = find('[data-graph-edges]'); edges.replaceChildren();
     for (const edge of (page?.edges || []).slice(edgeOffset, edgeOffset + listWindow)) edges.append(element('li', `${edge.source} → ${edge.destination} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`));
   }
-  function clearEvidence() {
+  function clearEvidence({ keepExploration = false } = {}) {
+    if (!keepExploration) { explorationToken = null; expandedPaths.clear(); expansionQueue.clear(); requestParams = null; completingExpansion = null; }
     pages.clear(); page = null; nextCursor = null; selected = focused = null; nodeOffset = edgeOffset = 0;
     detailSequence++; detailRequest?.abort(); detailRequest = null;
     details.replaceChildren(element('h2', 'Selected note'), element('p', 'Select a note to see its connections.'));
-    view?.setGraph({ nodes: [], edges: [] }, currentPath); view?.setSelection(null, null);
+    view?.setGraph({ nodes: [], edges: [] }, currentPath, activeParams?.path || null); view?.setSelection(null, null);
     renderList(); controls();
   }
   function revokeEvidence() {
@@ -217,7 +225,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
       pendingVersion = evidenceStamp(page);
     }
     const priorSelected = selected, priorFocused = focused;
-    clearEvidence(); selected = priorSelected; focused = priorFocused;
+    clearEvidence({ keepExploration:true }); selected = priorSelected; focused = priorFocused; evidenceSuspended = true;
   }
   function showDetails(path) {
     const ticket = ++detailSequence;
@@ -226,7 +234,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     details.replaceChildren(element('h2', 'Selected note'));
     if (!node) { details.append(element('p', 'Select a note to see its connections.')); return; }
     details.append(element('h3', node.title), element('p', path), element('a', 'Open selected note', { href: node.href }));
-    const centerButton = element('button', 'Center selected note', { type: 'button' });
+    const centerButton = element('button', 'Expand selected note', { type: 'button' });
     centerButton.addEventListener('click', () => center(path)); details.append(centerButton);
     const freshness = element('p', 'Loading connections…'); details.append(freshness);
     const incoming = element('ul'), outgoing = element('ul');
@@ -277,6 +285,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     selected = path; if (takeFocus) focused = path;
     view?.setSelection(selected, focused);
     renderList(); showDetails(path); controls(); say(`Selected ${path}. Enter on the map opens it.`);
+    if (activeParams?.path && !expandedPaths.has(path)) { expansionQueue.add(path); automaticallyContinue(); }
   }
   function offerOneHop() {
     if (!activeParams?.path || Number(activeParams.depth) <= 1) return;
@@ -288,11 +297,13 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     if (!safePage(data)) throw new Error('invalid_response');
     pages.accept(data, append);
     page = pages.data; nextCursor = page.next_cursor;
+    if (typeof data.exploration === 'string' && data.exploration.length <= 4096) explorationToken = data.exploration;
+    if (!nextCursor && activeParams?.path) { expandedPaths.add(requestParams?.expand || completingExpansion || activeParams.path); completingExpansion = null; }
     if (!nextCursor && !page.nodes.some(node => node.path === selected)) selected = page.nodes.some(node => node.path === activeParams?.path) ? activeParams.path : null;
     if (!nextCursor && !page.nodes.some(node => node.path === focused)) focused = page.nodes[0]?.path || null;
     let mapFailure = false;
     try {
-      if (pages.changed) view?.setGraph(page, currentPath);
+      if (pages.changed) view?.setGraph(page, currentPath, activeParams?.path || null);
       if (pages.changed && page.nodes.length || !nextCursor && (selected !== view?.selected || focused !== view?.focused)) view?.setSelection(selected, focused);
     }
     catch { mapFailure = true; unavailable(); }
@@ -304,9 +315,10 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     if (page.limiting_reasons?.includes('neighborhood_limit')) {
       say('Partial graph: the neighborhood limit was reached. Try fewer hops or narrower filters.');
       offerOneHop();
-    } else say(mapFailure ? 'Map resource limit reached. All loaded records remain available in the connection list.' : '');
+    } else if (!view?.hints?.active) say(mapFailure ? 'Map resource limit reached. All loaded records remain available in the connection list.' : '');
   }
   async function load({ cursor, fit = false, append = false, params = null } = {}) {
+    evidenceSuspended = false;
     clearTimeout(debounce); debounce = null; cancelAutomatic(); const ticket = ++sequence;
     const retainedPositions = !append && page?.nodes.length && view ?
       new Map([...(pendingPositions || []), ...view.simulation.nodes]) : pendingPositions;
@@ -315,14 +327,18 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     request?.abort(); request = new AbortController();
     loadingError = false; loadingReason = '';
     if (!append) {
+      const scope = parameters();
+      const reuse = explorationToken && JSON.stringify(scope) === JSON.stringify(activeParams);
       const priorSelected = selected, priorFocused = focused;
-      clearEvidence(); selected = priorSelected; focused = priorFocused;
-    }
-    activeParams = params || (cursor ? activeParams : parameters());
+      clearEvidence({ keepExploration:Boolean(reuse) }); selected = priorSelected; focused = priorFocused;
+      activeParams = scope;
+      requestParams = {...scope, ...(reuse ? {exploration:explorationToken} : {})};
+    } else if (params) { requestParams = params; completingExpansion = params.expand || null; }
     if (!activeParams) activeParams = parameters();
+    if (!requestParams) requestParams = activeParams;
     say(page ? 'Updating connections…' : 'Loading connections…'); controls();
     try {
-      const query = { ...activeParams, ...(cursor ? { cursor } : {}) };
+      const query = { ...requestParams, ...(cursor ? { cursor, ...(explorationToken ? {exploration:explorationToken} : {}) } : {}) };
       const data = await readJSON('/tools/graph/?' + new URLSearchParams(query), request.signal);
       if (!closed && ticket === sequence) {
         // Coordinates alone can survive a successful revalidation in the same
@@ -356,10 +372,9 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   }
   function center(path) {
     if (!path) return;
-    const previous = input('path').value;
-    if (previous !== path && previous) trail.push(previous);
-    trail = trail.slice(-20); input('path').value = path;
-    loadingPaused = false; find('[data-graph-back]').disabled = !trail.length; void load({ fit: true });
+    if (activeParams?.path) { select(path, true); return; }
+    input('path').value = currentPath || path;
+    loadingPaused = false; void load({ fit:true });
   }
   listen(form, 'submit', event => { event.preventDefault(); loadingPaused = false; void load({ fit: true }); });
   for (const name of ['query', 'path', 'folder', 'tag']) listen(input(name), 'input', () => { clearTimeout(debounce); cancelAutomatic(); sequence++; request?.abort(); request = null; loadingPaused = false; pendingPositions = pendingVersion = null; clearEvidence(); debounce = setTimeout(() => { debounce = null; void load(); }, 180); });
@@ -389,10 +404,11 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     } else if (event.target !== map) { event.preventDefault(); event.stopImmediatePropagation(); escape(); }
   });
   listen(find('[data-graph-clear]'), 'click', () => { input('query').value = ''; void load(); });
-  listen(find('[data-graph-local]'), 'click', () => center(currentPath || selected));
+  listen(find('[data-graph-local]'), 'click', () => { if (!activeParams?.path) center(currentPath || selected); });
   listen(find('[data-graph-global]'), 'click', () => { input('path').value = ''; input('depth').disabled = false; loadingPaused = false; void load({ fit: true }); });
   listen(find('[data-graph-back]'), 'click', () => { loadingPaused = false; input('path').value = trail.pop() || currentPath; find('[data-graph-back]').disabled = !trail.length; void load({ fit: true }); });
-  listen(find('[data-graph-list-toggle]'), 'click', () => { listMode = !listMode || !graphicsAvailable; if (graphicsAvailable) preferredList = listMode; presentation(); });
+  listen(find('[data-graph-list-toggle]'), 'click', () => { view?.cancelHints(); listMode = !listMode || !graphicsAvailable; if (graphicsAvailable) preferredList = listMode; presentation(); });
+  listen(find('[data-graph-hints]'), 'click', () => view?.hints?.active ? view.cancelHints(true) : view?.beginHints());
   listen(find('[data-graph-fit]'), 'click', () => view?.fit());
   listen(find('[data-graph-reset]'), 'click', () => view?.resetOrientation());
   for (const button of root.querySelectorAll('[data-graph-orbit]')) listen(button, 'click', () => view?.orbit(Number(button.dataset.graphOrbit), 0));
@@ -407,13 +423,13 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   });
   listen(find('[data-graph-refresh]'), 'click', () => { loadingPaused = false; void load(); });
   listen(find('[data-graph-cancel]'), 'click', () => { loadingPaused = true; sequence++; cancelAutomatic(); request?.abort(); request = null; controls(); say('Loading paused. Resume loading to continue. Motion is unchanged.'); });
-  listen(find('[data-graph-resume]'), 'click', () => { loadingPaused = false; if (nextCursor) void load({ cursor: nextCursor, append: true }); else void load(); });
-  listen(find('[data-graph-restart]'), 'click', () => { loadingPaused = false; void load(); });
+  listen(find('[data-graph-resume]'), 'click', () => { loadingPaused = false; if (evidenceSuspended) void load(); else if (nextCursor) void load({ cursor: nextCursor, append: true }); else if (requestParams?.expand) void load({append:true,params:requestParams}); else void load(); });
+  listen(find('[data-graph-restart]'), 'click', () => { loadingPaused = false; explorationToken = null; void load(); });
   listen(find('[data-graph-graphics-retry]'), 'click', () => {
     view?.destroy(); view = null; createView();
     if (!graphicsAvailable) return;
     find('[data-graph-graphics-retry]').hidden = true; listMode = false;
-    if (page) { view.setGraph(page, currentPath); view.setSelection(selected, focused); view.fit(); }
+    if (page) { view.setGraph(page, currentPath, activeParams?.path || null); view.setSelection(selected, focused); view.fit(); }
     presentation();
   });
   const displayForces = () => {

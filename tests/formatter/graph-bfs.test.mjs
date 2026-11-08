@@ -43,6 +43,8 @@ test('shortcut pages, removals and selection changes refresh cached BFS without 
   assert.equal(sim.nodes.get('b'), b);
   assert.deepEqual([b.x, b.y, b.z], position);
   sim.setSelection('b');
+  assert.deepEqual(pairs(sim), ['a:b', 'a:c', 'c:d'], 'selection preserves opening root');
+  sim.setRoot('b');
   assert.deepEqual(pairs(sim), ['b:c', 'c:d']);
   assert.deepEqual([b.x, b.y, b.z], position);
   sim.setGraph(nodes('a', 'b', 'c'), edges);

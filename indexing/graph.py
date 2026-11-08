@@ -386,7 +386,8 @@ def _selected_pairs(context, pairs):
 
 
 @_bounded
-def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, node_limit=200, edge_limit=500):
+def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, node_limit=200, edge_limit=500,
+                exploration=None, expand=None):
     if path is not None:
         _path(path)
     if type(depth) is not int or not 1 <= depth <= LIMITS['depth']:
@@ -396,17 +397,34 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
     _string(query, 256, 'invalid_search_query')
     _limit(node_limit, 200)
     _limit(edge_limit, 500)
-    context = Query({'kind': 'graph', 'path': path, 'depth': depth, 'folder': folder, 'tag': tag,
-                     'query': query, 'node_limit': node_limit, 'edge_limit': edge_limit,
-                     **({'membership': 'outgoing-v3'} if path else {})}, cursor)
+    if expand is not None:
+        if not path or not exploration:
+            raise StorageError('invalid_arguments')
+    if exploration is not None and not path:
+        raise StorageError('invalid_arguments')
+    arguments = {'kind': 'graph', 'path': path, 'depth': depth, 'folder': folder, 'tag': tag,
+                 'query': query, 'node_limit': node_limit, 'edge_limit': edge_limit,
+                 **({'membership': 'outgoing-v4'} if path else {})}
+    context = Query({**arguments, **({'expand': expand} if expand else {})}, cursor)
+    context.exploration_hash = hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest()
+    context.expansion = expand
+    context.exploration_checkpoint = None
+    context.has_cursor = cursor is not None
+    if exploration is not None:
+        try:
+            _string(exploration, 4096, 'graph_cursor_expired', empty=False)
+            data = signing.loads(exploration, salt='graph-exploration-v1', max_age=3600)
+            from .graph_traversal import valid_checkpoint
+            if data['q'] != context.exploration_hash or data['s'] != context.stamp or not valid_checkpoint(data['a']):
+                raise ValueError
+            context.exploration_checkpoint = data['a']
+        except (StorageError, signing.BadSignature, ValueError, TypeError, KeyError):
+            raise StorageError('graph_cursor_expired', 409) from None
+    if expand is not None:
+        _path(expand)
     if context.index.state == 'unavailable':
         return context.finish(GraphPage)
-    if path and depth == 1 and cursor is None:
-        from .graph_traversal import small_page
-        small = small_page(context, path, depth, folder, tag, query, node_limit, edge_limit)
-        if small is not None:
-            return small
-    if path and depth > 1:
+    if path:
         from .graph_traversal import local_page
         return local_page(context, path, depth, folder, tag, query, node_limit, edge_limit)
     center = None

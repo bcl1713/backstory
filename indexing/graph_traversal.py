@@ -16,6 +16,7 @@ import sqlite3
 import time
 
 from django.conf import settings
+from django.core import signing
 from django.db import connection
 
 from wiki.contracts import StorageError
@@ -23,9 +24,9 @@ from .diagnostics import record_failure
 from .graph_contracts import GraphEdge, GraphPage
 
 TTL = 3600
-WORK_ROWS = 100
-WORK_FRONTIERS = 16
-WORK_SECONDS = .025
+WORK_ROWS = 400
+WORK_FRONTIERS = 128
+WORK_SECONDS = .075
 _cleanup_directory = None
 _cleanup_entries = None
 
@@ -69,8 +70,10 @@ def _session(context):
     directory = Path(settings.BACKSTORY_DATA_DIR) / 'graph-traversals'
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     _cleanup(directory)
-    checkpoint = context.after
+    checkpoint = context.after if context.has_cursor else context.exploration_checkpoint or context.after
     resume = checkpoint['phase'] == 'traversal'
+    if context.has_cursor and context.exploration_checkpoint and context.exploration_checkpoint != checkpoint:
+        raise _expired()
     if resume:
         token = checkpoint['session']
         if int(token[:10]) <= time.time():
@@ -91,7 +94,7 @@ def _session(context):
             database.executescript('''
                 CREATE TABLE metadata (id INTEGER PRIMARY KEY CHECK(id=1), query TEXT,
                     stamp TEXT, revision INTEGER, phase TEXT, after INTEGER,
-                    incomplete INTEGER, reasons TEXT, boundary INTEGER, replay TEXT, emitted INTEGER DEFAULT 0);
+                    incomplete INTEGER, reasons TEXT, boundary INTEGER, replay TEXT, emitted INTEGER DEFAULT 0, action TEXT DEFAULT '', pending TEXT DEFAULT '');
                 CREATE TABLE members (id INTEGER PRIMARY KEY, path TEXT UNIQUE,
                     depth INTEGER, ancestors TEXT, display INTEGER,
                     after INTEGER DEFAULT 0, done INTEGER DEFAULT 0, mode INTEGER DEFAULT 0);
@@ -99,17 +102,27 @@ def _session(context):
                 CREATE TABLE pairs (id INTEGER PRIMARY KEY, source TEXT, destination TEXT,
                     emitted INTEGER DEFAULT 0, UNIQUE(source,destination));
                 CREATE INDEX pending ON pairs(emitted,id);
+                CREATE TABLE adjacency (source TEXT, destination TEXT, occurrence_id INTEGER,
+                    PRIMARY KEY(source,occurrence_id));
+                CREATE TABLE cached_sources (path TEXT PRIMARY KEY);
+                CREATE TABLE expansions (path TEXT PRIMARY KEY);
             ''')
             database.execute('INSERT INTO metadata(id,query,stamp,revision,phase,after,incomplete,reasons,boundary,replay) VALUES(1,?,?,0,\'discover\',0,0,\'[]\',0,NULL)',
-                             (context.query_hash, json.dumps(context.stamp)))
+                             (context.exploration_hash, json.dumps(context.stamp)))
             database.commit()
         database.execute('BEGIN IMMEDIATE')
         meta = dict(database.execute('SELECT * FROM metadata WHERE id=1').fetchone())
-        replay = resume and checkpoint['after'] == meta['revision'] - 1 and meta['replay'] is not None
-        if (meta['query'] != context.query_hash or json.loads(meta['stamp']) != context.stamp
-                or resume and meta['revision'] != checkpoint['after'] and not replay):
+        refresh = resume and not context.has_cursor and context.expansion is None
+        replay = (resume and not refresh and checkpoint['after'] == meta['revision'] - 1
+                  and meta['replay'] is not None and meta['action'] == (context.expansion or ''))
+        recover_refresh = refresh and checkpoint['after'] == meta['revision'] - 1
+        if (meta['query'] != context.exploration_hash or json.loads(meta['stamp']) != context.stamp
+                or resume and meta['revision'] != checkpoint['after'] and not replay and not recover_refresh):
+            raise _expired()
+        if context.has_cursor and meta['action'] != (context.expansion or ''):
             raise _expired()
         meta['is_replay'] = replay
+        meta['new_action'] = resume and not context.has_cursor and not replay
         yield database, meta, token
         database.commit()
     except sqlite3.Error as error:
@@ -144,6 +157,56 @@ def _adjacent(context, path, after, limit):
         occurrence__occurrence_kind='link').values(
             'occurrence_id', 'source', 'destination', 'occurrence__position').order_by('occurrence_id'))
     return ids, rows
+
+
+def _cached_adjacent(context, database, front, limit):
+    """Reuse complete source windows, including former boundary destinations."""
+    if database.execute('SELECT 1 FROM cached_sources WHERE path=?', (front['path'],)).fetchone():
+        rows = [dict(row) for row in database.execute(
+            'SELECT source,destination,occurrence_id FROM adjacency WHERE source=? AND occurrence_id>? '
+            'ORDER BY occurrence_id LIMIT ?', (front['path'], front['after'], limit))]
+        return [row['occurrence_id'] for row in rows], rows
+    ids, rows = _adjacent(context, front['path'], front['after'], limit)
+    database.executemany('INSERT OR IGNORE INTO adjacency VALUES(?,?,?)',
+                         [(row['source'], row['destination'], row['occurrence_id']) for row in rows])
+    if len(ids) < limit:
+        database.execute('INSERT OR IGNORE INTO cached_sources VALUES(?)', (front['path'],))
+    return ids, rows
+
+
+def _terminal_batch(context, database, meta, depth):
+    """Intersect a bounded group of terminal sources in one indexed query.
+
+    A small membership uses exact pair probes, avoiding each leaf's count,
+    query setup, and unrelated raw-heavy outgoing occurrences.
+    """
+    from .graph import _selected_pairs
+    count = database.execute('SELECT COUNT(*) FROM members').fetchone()[0]
+    if count > 128:
+        return False
+    fronts = database.execute('SELECT * FROM members WHERE done=0 ORDER BY depth,id LIMIT ?',
+                             (max(1, 2048 // max(count, 1)),)).fetchall()
+    if not fronts or any(front['depth'] != depth for front in fronts):
+        return False
+    members = database.execute('SELECT * FROM members ORDER BY id').fetchall()
+    paths = {p for m in [*fronts, *members] for p in [*json.loads(m['ancestors']), m['path']]}
+    if not context.can_check(paths):
+        return False
+    context.prime(paths)
+    for member in members:
+        if _witness(context, member) is None:
+            return False
+    wanted = {(front['path'], member['path']) for front in fronts for member in members
+              if member['id'] > front['after']}
+    pairs = _selected_pairs(context, wanted) if context.valid else []
+    for row in pairs:
+        source, target = _member(database, row['source']), _member(database, row['destination'])
+        if source['display'] != target['display']:
+            meta['boundary'] = 1
+        database.execute('INSERT OR IGNORE INTO pairs(source,destination) VALUES(?,?)',
+                         (row['source'], row['destination']))
+    database.executemany('UPDATE members SET done=1 WHERE id=?', [(front['id'],) for front in fronts])
+    return True
 
 
 def _member(database, path):
@@ -199,6 +262,11 @@ def _discover(context, database, meta, depth, folder, tag, text):
     consumed = 0
     progressed = False
     for _ in range(WORK_FRONTIERS):
+        if _terminal_batch(context, database, meta, depth):
+            progressed = True
+            if time.monotonic() >= deadline:
+                return
+            continue
         front = database.execute('SELECT * FROM members WHERE done=0 ORDER BY depth,id LIMIT 1').fetchone()
         if front is None:
             meta['phase'], meta['after'] = 'edges', 0
@@ -211,7 +279,7 @@ def _discover(context, database, meta, depth, folder, tag, text):
         if front['depth'] == depth and _terminal_mode(context, database, front) == 2:
             ids, rows = _member_pairs(context, database, front, window)
         else:
-            ids, rows = _adjacent(context, front['path'], front['after'], window)
+            ids, rows = _cached_adjacent(context, database, front, window)
         if front['depth'] == depth:
             # Membership is settled before final-layer scans. Unrelated targets
             # cannot join; do not spend filesystem eligibility on them.
@@ -238,6 +306,8 @@ def _discover(context, database, meta, depth, folder, tag, text):
                 ancestors = [*json.loads(front['ancestors']), front['path']]
                 database.execute('INSERT OR IGNORE INTO members(path,depth,ancestors,display) VALUES(?,?,?,?)',
                                  (target, front['depth'] + 1, json.dumps(ancestors), int(target in display)))
+                database.execute('UPDATE members SET depth=?,ancestors=?,done=0,after=0,mode=0 WHERE path=? AND depth>?',
+                                 (front['depth'] + 1, json.dumps(ancestors), target, front['depth'] + 1))
             if (folder or tag or text) and ((source in display) != (target in display)):
                 meta['boundary'] = 1
             # BFS settles membership before the terminal-layer intersection.
@@ -262,6 +332,8 @@ def _emit(context, database, meta, node_limit, edge_limit):
     if meta['phase'] in {'discover', 'edges'} and node_limit >= 2:
         candidates = database.execute('SELECT * FROM pairs WHERE emitted=0 ORDER BY id LIMIT ?',
                                       (WORK_ROWS,)).fetchall()
+        witnesses = [_member(database, row[column]) for row in candidates for column in ('source', 'destination')]
+        context.prime(p for member in witnesses for p in [*json.loads(member['ancestors']), member['path']])
         for row in candidates:
             if progressed and time.monotonic() >= deadline:
                 break
@@ -298,6 +370,7 @@ def _emit(context, database, meta, node_limit, edge_limit):
     if meta['phase'] == 'nodes':
         candidates = database.execute('SELECT * FROM members WHERE id>? ORDER BY id LIMIT ?',
                                       (meta['after'], WORK_ROWS)).fetchall()
+        context.prime(p for member in candidates for p in [*json.loads(member['ancestors']), member['path']])
         for member in candidates:
             if progressed and time.monotonic() >= deadline:
                 return nodes, edges
@@ -314,58 +387,6 @@ def _emit(context, database, meta, node_limit, edge_limit):
         if len(candidates) < WORK_ROWS:
             meta['phase'] = 'done'
     return nodes, edges
-
-
-# One-hop compatibility fast path. Deeper scopes always stream through the
-# resumable traversal; they have no small-neighborhood threshold. Raw-heavy
-# one-hop scopes retain the indexed one-hop pager in graph.py.
-SMALL_MEMBERS = 32
-
-
-def small_page(context, path, depth, folder, tag, text, node_limit, edge_limit):
-    from .graph import _filtered_nodes, _selected_pairs
-    from .models import LinkEdge
-    deadline = time.monotonic() + WORK_SECONDS
-    root = context.eligible(path)
-    if root is None:
-        return context.finish(GraphPage)
-    members, queue, consumed = {path: root}, [(path, 0)], 0
-    for source, distance in queue:
-        if distance == depth:
-            continue
-        if time.monotonic() >= deadline or consumed >= WORK_ROWS:
-            return None
-        ids, rows = _adjacent(context, source, 0, WORK_ROWS - consumed + 1)
-        consumed += len(ids)
-        if consumed > WORK_ROWS:
-            return None
-        context.prime(row['destination'] for row in rows)
-        for row in rows:
-            target = row['destination']
-            node = context.eligible(target)
-            if node and target not in members:
-                members[target] = node
-                queue.append((target, distance + 1))
-                if len(members) > SMALL_MEMBERS:
-                    return None
-    display = set(_filtered_nodes(context.generation, folder, tag, text).filter(path__in=members)
-                  .values_list('path', flat=True))
-    if len(display) > node_limit or time.monotonic() >= deadline:
-        return None
-    # A fixed-size VALUES table drives exact indexed pair lookups. Never walk
-    # generation order or eligibility-check out-of-scope last-layer targets.
-    pairs = _selected_pairs(context, {(a, b) for a in members for b in members if a != b})
-    shown = [row for row in pairs if row['source'] in display and row['destination'] in display]
-    if len(shown) > edge_limit:
-        return None
-    positions = dict(LinkEdge.objects.filter(pk__in=[row['first'] for row in shown])
-                     .values_list('pk', 'position'))
-    edges = tuple(GraphEdge(row['source'], row['destination'], row['count'],
-                            members[row['source']].revision, row['first'], tuple(positions[row['first']]))
-                  for row in shown)
-    return context.finish(GraphPage, nodes=tuple(members[p] for p in sorted(display)), edges=edges,
-                          boundary_connections=any((row['source'] in display) != (row['destination'] in display)
-                                                   for row in pairs))
 
 
 def local_page(context, path, depth, folder, tag, text, node_limit, edge_limit):
@@ -394,8 +415,35 @@ def _local_page(context, path, depth, folder, tag, text, node_limit, edge_limit)
             context.reasons.update(previous['limiting_reasons'])
             return context.finish(GraphPage, nodes=tuple(nodes), edges=edges,
                                   boundary_connections=previous['boundary_connections'],
-                                  next_cursor=previous['next_cursor'])
+                                  next_cursor=previous['next_cursor'], exploration=previous['exploration'])
+        if meta['new_action']:
+            if context.expansion and meta['phase'] != 'done':
+                raise _expired()
+            if context.expansion:
+                member = _member(database, context.expansion)
+                if member is None or _witness(context, member) is None:
+                    raise _expired()
+                if not database.execute('SELECT 1 FROM expansions WHERE path=?', (context.expansion,)).fetchone():
+                    maximum = database.execute('SELECT COALESCE(MAX(id),0) FROM members').fetchone()[0]
+                    database.execute('UPDATE members SET depth=?,done=0,after=?,mode=2', (depth, maximum))
+                    # Explicit selection admits an independent expansion root
+                    # only after its old witness has passed. New descendants
+                    # carry this root's bounded depth witness on every page.
+                    database.execute("UPDATE members SET depth=0,ancestors='[]',done=0,after=0,mode=0 WHERE path=?",
+                                     (context.expansion,))
+                    meta['pending'] = context.expansion
+                    meta['phase'], meta['after'] = 'discover', 0
+            else:
+                # Visibility refresh revalidates and republishes accumulated
+                # evidence without rediscovering any adjacency. The independent
+                # pending expansion identity survives an aborted fetch.
+                database.execute('UPDATE pairs SET emitted=0')
+                meta['emitted'] = 0
+                database.execute('UPDATE metadata SET emitted=0 WHERE id=1')
+                meta['phase'], meta['after'] = ('discover' if meta['phase'] == 'discover' else 'edges'), 0
+            meta['action'] = context.expansion or ''
         if meta['revision'] == 0:
+            meta['pending'] = path
             node = context.eligible(path)
             if node:
                 display = _filtered_nodes(context.generation, folder, tag, text).filter(path=path).exists()
@@ -423,15 +471,19 @@ def _local_page(context, path, depth, folder, tag, text, node_limit, edge_limit)
             context.reasons.add('discovery_pending')
         more = meta['phase'] != 'done'
         checkpoint = {'phase': 'traversal', 'session': token, 'after': meta['revision'] + 1}
+        exploration = signing.dumps({'q': context.exploration_hash, 's': context.stamp, 'a': checkpoint},
+                                    salt='graph-exploration-v1', compress=True)
+        if not more:
+            database.execute('INSERT OR IGNORE INTO expansions VALUES(?)', (meta['pending'] or path,))
         page = context.finish(GraphPage, nodes=tuple(nodes[p] for p in sorted(nodes)), edges=tuple(edges),
                               boundary_connections=bool(meta['boundary']),
-                              next_cursor=context.cursor(checkpoint) if more else None)
+                              next_cursor=context.cursor(checkpoint) if more else None, exploration=exploration)
         # A payload failure must not consume omitted work. The response asks
         # for smaller bounds; expiry keeps the abandoned state bounded in time.
         if 'payload_limit' in page.limiting_reasons:
             raise StorageError('graph_payload_limited', 503)
         persistent = context.reasons - {'page_limit', 'node_limit', 'edge_limit', 'candidate_limit', 'discovery_pending'}
-        database.execute('UPDATE metadata SET revision=?,phase=?,after=?,incomplete=?,reasons=?,boundary=?,replay=? WHERE id=1',
+        database.execute('UPDATE metadata SET revision=?,phase=?,after=?,incomplete=?,reasons=?,boundary=?,replay=?,action=?,pending=? WHERE id=1',
                          (checkpoint['after'], meta['phase'], meta['after'], int(bool(persistent)),
-                          json.dumps(sorted(persistent)), meta['boundary'], json.dumps(asdict(page))))
+                          json.dumps(sorted(persistent)), meta['boundary'], json.dumps(asdict(page)), meta['action'], meta['pending']))
         return page

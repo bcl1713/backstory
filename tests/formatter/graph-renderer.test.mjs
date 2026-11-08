@@ -37,7 +37,7 @@ test('directed spring context stays quiet across root changes, appended shortcut
   };
   view.setGraph(data, 'a'); inspect(['a:b', 'a:c', 'b:d', 'c:d']);
   const before = view.simulation.all.map(n => [n.x, n.y, n.z]);
-  view.setSelection('b', 'b'); inspect(['b:d', 'b:c', 'b:a']);
+  view.setSelection('b', 'b'); inspect(['a:b', 'a:c', 'b:d', 'c:d']);
   assert.deepEqual(view.simulation.all.map(n => [n.x, n.y, n.z]), before);
   view.setSelection('a', 'b');
   data.edges.push({ source: 'a', destination: 'd' });
@@ -105,7 +105,7 @@ test('paused view refreshes spring roots and appended shortcuts without moving c
   assert.equal(view.focused, 'b');
   assert.equal(view.simulation.active, false);
   view.setSelection('removed', 'b');
-  assert.equal(view.simulation.springs.length, 0);
+  assert.equal(view.simulation.springs.length, 2, 'a missing visual selection does not replace the opening root');
   assert.equal(view.simulation.active, false);
   view.batch.dispose();
 });
@@ -140,4 +140,21 @@ test('camera control before first data suppresses automatic fit', () => {
   view.pan(10,20);
   view.setGraph({nodes:[{path:'a',title:'A'}],edges:[]},'a');
   assert.equal(fits,0); view.batch.dispose();
+});
+
+test('restored coordinates acquire current adjacency before a changed root computes BFS',()=>{
+  const view=Object.assign(Object.create(renderer.GraphView.prototype),{
+    data:{nodes:[],edges:[]},simulation:new GraphPhysics(),camera:new GraphCamera(),
+    scene:new THREE.Scene(),selected:null,focused:null,paused:true,loaded:true,
+    container:{dataset:{},setAttribute(){}},release(){},draw(){},wake(){},
+  });
+  view.setGraph({nodes:[],edges:[]},'a',null);
+  const saved=new GraphPhysics([{path:'a'},{path:'b'}],[],null).nodes;
+  for(const [path,n]of saved)view.simulation.nodes.set(path,n);
+  const positions=[...saved.values()].map(n=>[n.x,n.y,n.z]);
+  view.setGraph({nodes:[{path:'a'},{path:'b'}],edges:[{source:'a',destination:'b'}]},'a','a');
+  assert.equal(view.simulation.depths.get('a'),0);assert.equal(view.simulation.depths.get('b'),1);
+  assert.deepEqual(view.simulation.all.map(n=>[n.x,n.y,n.z]),positions);
+  assert.equal(view.container.dataset.nodeCount,'2');assert.equal(view.paused,true);
+  view.batch.dispose();
 });

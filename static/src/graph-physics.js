@@ -44,7 +44,7 @@ function* treeFor(all) {
   return root;
 }
 export class GraphPhysics {
-  constructor(nodes = [], edges = [], selected = null) { this.nodes = new Map(); this.forces = { ...DEFAULT_FORCES }; this.selected = selected; this.setGraph(nodes, edges); }
+  constructor(nodes = [], edges = [], selected = null) { this.nodes = new Map(); this.forces = { ...DEFAULT_FORCES }; this.root = selected; this.selected = selected; this.setGraph(nodes, edges); }
   setGraph(nodes, edges) {
     const previous = this.nodes;
     this.nodes = new Map(nodes.map(node => [node.path, previous.get(node.path) || {
@@ -64,14 +64,18 @@ export class GraphPhysics {
   }
   setSelection(selected) {
     if (selected === this.selected) return;
-    this.selected = selected; this.updateSprings(); this.reheat();
+    this.selected = selected;
   }
-  // Selection and topology own this cache. A full outgoing BFS keeps every
+  setRoot(root) {
+    if (root === this.root) return;
+    this.root = root; this.updateSprings(); this.reheat();
+  }
+  // Opening root and topology own this cache. A full outgoing BFS keeps every
   // shortest-path parent rather than the first parent discovered by traversal.
   updateSprings() {
     this.depths = new Map([...this.nodes.keys()].map(path => [path, Infinity]));
     const queue = [];
-    if (this.nodes.has(this.selected)) { this.depths.set(this.selected, 0); queue.push(this.selected); }
+    if (this.nodes.has(this.root)) { this.depths.set(this.root, 0); queue.push(this.root); }
     for (let i = 0; i < queue.length; i++) {
       const source = queue[i], depth = this.depths.get(source) + 1;
       for (const destination of this.outgoing.get(source)) if (this.depths.get(destination) === Infinity) {
@@ -86,7 +90,7 @@ export class GraphPhysics {
     // so every active unordered pair has exactly one equal-strength spring.
   }
   // Shared with rendering: rest, pause, occurrence counts and visual hop tiers
-  // do not affect the selected-root directed shortest-parent structure.
+  // do not affect the opening-root directed shortest-parent structure.
   isSpringEdge(source, destination) {
     const depth = this.depths.get(source);
     return Number.isFinite(depth) && this.depths.get(destination) === depth + 1;

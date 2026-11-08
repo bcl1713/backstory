@@ -71,3 +71,20 @@ def test_graph_depth_http_bounds_and_tool_schema(reader, wiki):
         assert response.status_code == 200
         assert len(response.json()['nodes']) == min(depth + 1, 4)
         assert response.json()['limits']['depth'] == 8
+
+
+def test_http_exploration_expands_and_revalidates_authenticated_accumulation(reader, wiki):
+    from django.test import Client
+    build_graph(wiki, {'r.md': '[[a]]', 'a.md': '[[b]]', 'b.md': '# B', 'outside.md': '# Outside'})
+    opened = reader.get('/tools/graph/', {'path': 'r.md'}).json()
+    assert opened['exploration'] and {node['path'] for node in opened['nodes']} == {'r.md', 'a.md'}
+    params = {'path': 'r.md', 'exploration': opened['exploration'], 'expand': 'a.md'}
+    assert Client().get('/tools/graph/', params).status_code == 401
+    expanded = reader.get('/tools/graph/', params)
+    assert expanded.status_code == 200
+    assert 'b.md' in {node['path'] for node in expanded.json()['nodes']}
+    token = expanded.json()['exploration']
+    rejected = reader.get('/tools/graph/', {'path': 'r.md', 'exploration': token, 'expand': 'outside.md'})
+    assert rejected.status_code == 409 and rejected.json()['restart']
+    restored = reader.get('/tools/graph/', {'path': 'r.md', 'exploration': token}).json()
+    assert {node['path'] for node in restored['nodes']} == {'r.md', 'a.md', 'b.md'}
