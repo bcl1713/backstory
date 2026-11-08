@@ -136,6 +136,7 @@
 .graph-hints button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .graph-map[data-hint-mode='true'] { outline: 2px solid var(--focus); outline-offset: -2px; }
 
-.graph-destination-legend { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-block: .2rem .5rem; font-size: .75rem; }
-.graph-destination-legend > span { color: var(--graph-destination); }
-.graph-destination-legend > button { min-height: 2rem; }
+
+.graph-header-actions { display: flex; align-items: center; gap: .5rem; }
+.graph-header [data-graph-hints] { min-width: 2.75rem; min-height: 2.75rem; padding: .25rem; color: var(--heading-4); font: bold 1rem var(--note-font); }
+.graph-header [hidden] { display: none !important; }

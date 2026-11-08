@@ -102,7 +102,7 @@ Their title labels show the actual `f <code>` shortcut before hint mode is opene
 One hop means an outgoing link from the **selected note**; the opening root still
 controls BFS and springs independently.
 
-Choose the always-visible **Node hints (f)** control or press `f` while the map has
+Choose the header’s **f** button (**Node hints**) or press `f` while the map has
 focus, then type a code to select and expand a node. The same assignments supply
 the advertised shortcuts and active hint mode; immediate outbound destinations
 receive the easiest codes. Codes are prefix-free and stay assigned to the same nodes throughout an

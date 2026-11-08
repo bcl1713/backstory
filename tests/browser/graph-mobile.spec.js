@@ -53,6 +53,8 @@ for (const width of [390, 320]) test(`Menu graph leaves useful space and reachab
   await expect(panel(page).locator('[data-graph-scope]')).toContainText('Local');
   await expect(panel(page).locator('[data-graph-scope]')).toContainText('2 hops');
   await reachableClose(page);
+  await expect(panel(page).getByRole('button',{name:'Node hints (f)',exact:true})).toBeVisible();
+  expect(await panel(page).getByRole('button',{name:'Node hints (f)',exact:true}).evaluate(el=>Boolean(el.closest('.graph-header')))).toBe(true);
   const workspace = await panel(page).locator('.graph-workspace').boundingBox();
   expect(workspace.y).toBeLessThan((await page.evaluate(() => innerHeight)) * .5);
   expect(await panel(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);

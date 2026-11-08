@@ -2,7 +2,7 @@
 {% block title %}Graph · Backstory{% endblock %}
 {% block content %}
 <section data-graph-page data-graph-path="{{ graph_params.path|default:'' }}">
-<h1>Graph</h1>
+<header class="graph-header"><h1>Graph</h1><button type="button" data-graph-hints aria-label="Node hints (f)" aria-keyshortcuts="f" title="Node hints (f) · Circles mark one-hop destinations" hidden>f</button></header>
 <p>Explore connections between saved notes.</p>
 {% include 'wiki/graph-panel.html' %}
 <div data-graph-server-list>

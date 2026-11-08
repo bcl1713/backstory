@@ -7,7 +7,7 @@ The implementation uses only selected/outbound titles, prefixed with their actua
 `f <code>` shortcuts. Graph/selection assignments feed both ordinary titles and
 frozen active hints. Destination nodes, labels and directed connections use the
 installed green semantic role, with a circle cue for monochrome/forced colors.
-The hint control and legend remain visible outside collapsed graph controls.
+The header hint control remains visible outside collapsed graph controls.
 No topology, backend query, opening-root BFS, spring or note behavior changed.
 
 Focused working-tree evidence on branch `improve/one-hop-navigation`, based on
@@ -43,3 +43,16 @@ The first candidate's full build exposed one omitted generated artifact:
 A complete local asset build regenerated that map (24 added bytes, no other
 uncommitted generated output). The corrected candidate includes the generated
 bundle and receives its own full gate; earlier receipts are not transferred.
+
+The corrected candidate passed Python, formatter and Firefox code checks; its
+renderer stage found one 320px layout failure (86 other scenarios passed). The
+extra hint/legend row pushed the workspace below the established useful-space
+bound. The hint entry now uses a compact 44px `f` button beside Close graph in the
+existing header, with its accessible name and key description preserved. No new
+row consumes map height. The selected/outbound drawing and advertised codes are
+unchanged. Both 320px/390px Firefox scenarios passed in 7.3s and the matching
+Chromium scenarios passed in 6.6s. Independent review inspected fallback, real-map
+and landscape screenshots with no blockers. Logs:
+`/tmp/backstory-one-hop-header-{firefox,chromium}.log`. The final source receives
+its own exact-candidate gate; earlier failed/interrupted evidence is not reused as
+a passing release receipt.

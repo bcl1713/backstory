@@ -12,8 +12,8 @@ mobile collapsed controls hid entry to the existing hint mode.
   session, so movement cannot change what a displayed code selects. Active hint
   mode still reaches other visible nodes.
 - Destination nodes, their direct outgoing connection and label use the installed
-  green semantic heading-4 role. Add a non-color ring cue and a short visible
-  legend/hint control outside collapsed mobile controls. Preserve forced colors.
+  green semantic heading-4 role. Add a non-color ring cue and a compact header hint control
+  outside collapsed mobile controls; describe the circle in existing graph help. Preserve forced colors.
 - Use existing renderer/hints/label modules; no backend or new neighbor list.
 
 ## Steps
