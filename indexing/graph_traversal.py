@@ -94,10 +94,11 @@ def _session(context):
                     incomplete INTEGER, reasons TEXT, boundary INTEGER, replay TEXT, emitted INTEGER DEFAULT 0);
                 CREATE TABLE members (id INTEGER PRIMARY KEY, path TEXT UNIQUE,
                     depth INTEGER, ancestors TEXT, display INTEGER,
-                    after INTEGER DEFAULT 0, done INTEGER DEFAULT 0);
+                    after INTEGER DEFAULT 0, done INTEGER DEFAULT 0, mode INTEGER DEFAULT 0);
                 CREATE INDEX frontier ON members(done,depth,id);
                 CREATE TABLE pairs (id INTEGER PRIMARY KEY, source TEXT, destination TEXT,
-                    count INTEGER, first INTEGER, position TEXT, UNIQUE(source,destination));
+                    emitted INTEGER DEFAULT 0, UNIQUE(source,destination));
+                CREATE INDEX pending ON pairs(emitted,id);
             ''')
             database.execute('INSERT INTO metadata(id,query,stamp,revision,phase,after,incomplete,reasons,boundary,replay) VALUES(1,?,?,0,\'discover\',0,0,\'[]\',0,NULL)',
                              (context.query_hash, json.dumps(context.stamp)))
@@ -149,6 +150,37 @@ def _member(database, path):
     return database.execute('SELECT * FROM members WHERE path=?', (path,)).fetchone()
 
 
+def _terminal_mode(context, database, front):
+    """Choose the smaller indexed domain: source occurrences or member pairs."""
+    if front['mode']:
+        return front['mode']
+    count = database.execute('SELECT COUNT(*) FROM members').fetchone()[0]
+    fanout = 0
+    if context.valid:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) FROM (SELECT 1 FROM indexing_resolvedrelation '
+                           'INDEXED BY relation_source_page WHERE generation_id=%s AND epoch=%s '
+                           'AND source=%s LIMIT %s)',
+                           [context.generation.pk, context.relations.epoch, front['path'], count + 1])
+            fanout = cursor.fetchone()[0]
+    mode = 2 if fanout > count else 1
+    database.execute('UPDATE members SET mode=? WHERE id=?', (mode, front['id']))
+    return mode
+
+
+def _member_pairs(context, database, front, limit):
+    from .graph import _selected_pairs
+    targets = database.execute('SELECT id,path FROM members WHERE id>? ORDER BY id LIMIT ?',
+                               (front['after'], limit)).fetchall()
+    ids = [row['id'] for row in targets]
+    target_ids = {row['path']: row['id'] for row in targets}
+    pairs = _selected_pairs(context, {(front['path'], row['path']) for row in targets}) if context.valid else []
+    # The checkpoint is a target member ID, never an occurrence ID, in this mode.
+    rows = [dict(source=row['source'], destination=row['destination'],
+                 occurrence_id=target_ids[row['destination']]) for row in pairs]
+    return ids, sorted(rows, key=lambda row: row['occurrence_id'])
+
+
 def _witness(context, member):
     paths = [*json.loads(member['ancestors']), member['path']]
     if not context.can_check(paths):
@@ -176,7 +208,10 @@ def _discover(context, database, meta, depth, folder, tag, text):
         if _witness(context, front) is None:
             return
         window = WORK_ROWS - consumed
-        ids, rows = _adjacent(context, front['path'], front['after'], window)
+        if front['depth'] == depth and _terminal_mode(context, database, front) == 2:
+            ids, rows = _member_pairs(context, database, front, window)
+        else:
+            ids, rows = _adjacent(context, front['path'], front['after'], window)
         if front['depth'] == depth:
             # Membership is settled before final-layer scans. Unrelated targets
             # cannot join; do not spend filesystem eligibility on them.
@@ -205,12 +240,10 @@ def _discover(context, database, meta, depth, folder, tag, text):
                                  (target, front['depth'] + 1, json.dumps(ancestors), int(target in display)))
             if (folder or tag or text) and ((source in display) != (target in display)):
                 meta['boundary'] = 1
-            # Scan every member, including the last layer, to retain all
-            # induced edges. BFS settles membership before last-layer scans.
+            # BFS settles membership before the terminal-layer intersection.
+            # Each discovered pair is published once with its full aggregate.
             if _member(database, target) is not None:
-                database.execute('INSERT INTO pairs(source,destination,count,first,position) VALUES(?,?,1,?,?) '
-                                 'ON CONFLICT(source,destination) DO UPDATE SET count=count+1',
-                                 (source, target, row['occurrence_id'], json.dumps(row['occurrence__position'])))
+                database.execute('INSERT OR IGNORE INTO pairs(source,destination) VALUES(?,?)', (source, target))
         consumed += len(ids)
         progressed = True
         if len(ids) == window:
@@ -220,36 +253,44 @@ def _discover(context, database, meta, depth, folder, tag, text):
 
 
 def _emit(context, database, meta, node_limit, edge_limit):
+    from .graph import _selected_pairs
+    from .models import LinkEdge
     nodes, edges = {}, []
     deadline = time.monotonic() + WORK_SECONDS
     progressed = False
-    if meta['phase'] == 'edges' and node_limit >= 2:
-        candidates = database.execute('SELECT p.* FROM pairs p WHERE id>? ORDER BY id LIMIT ?',
-                                      (meta['after'], WORK_ROWS)).fetchall()
+    selected = set()
+    if meta['phase'] in {'discover', 'edges'} and node_limit >= 2:
+        candidates = database.execute('SELECT * FROM pairs WHERE emitted=0 ORDER BY id LIMIT ?',
+                                      (WORK_ROWS,)).fetchall()
         for row in candidates:
             if progressed and time.monotonic() >= deadline:
-                return nodes, edges
+                break
             members = [_member(database, row[column]) for column in ('source', 'destination')]
             if not all(member['display'] for member in members):
-                meta['after'] = row['id']
+                database.execute('UPDATE pairs SET emitted=1 WHERE id=?', (row['id'],))
                 progressed = True
                 continue
             extra = {member['path'] for member in members} - nodes.keys()
-            if len(nodes) + len(extra) > node_limit or len(edges) >= edge_limit:
+            if len(nodes) + len(extra) > node_limit or len(selected) >= edge_limit:
                 context.reasons.add('page_limit')
-                return nodes, edges
+                break
             for member in members:
                 node = _witness(context, member)
                 if node is None:
-                    return nodes, edges
+                    break
                 nodes[node.path] = node
-            edges.append(GraphEdge(row['source'], row['destination'], row['count'],
-                                   nodes[row['source']].revision, row['first'], tuple(json.loads(row['position']))))
-            meta['after'] = row['id']
-            progressed = True
-        if len(candidates) == WORK_ROWS:
-            return nodes, edges
-        meta['phase'], meta['after'] = 'nodes', 0
+            else:
+                selected.add((row['source'], row['destination']))
+                database.execute('UPDATE pairs SET emitted=1 WHERE id=?', (row['id'],))
+                progressed = True
+                continue
+            break
+        pairs = _selected_pairs(context, selected)
+        positions = dict(LinkEdge.objects.filter(pk__in=[row['first'] for row in pairs]).values_list('pk', 'position'))
+        edges = [GraphEdge(row['source'], row['destination'], row['count'], nodes[row['source']].revision,
+                           row['first'], tuple(positions[row['first']])) for row in pairs]
+        if meta['phase'] == 'edges' and not database.execute('SELECT 1 FROM pairs WHERE emitted=0 LIMIT 1').fetchone():
+            meta['phase'], meta['after'] = 'nodes', 0
     elif meta['phase'] == 'edges':
         context.reasons.add('node_limit')
         meta['boundary'] = 1
@@ -275,9 +316,9 @@ def _emit(context, database, meta, node_limit, edge_limit):
     return nodes, edges
 
 
-# This is an optimization threshold, never a membership limit. Larger/raw-heavy
-# neighborhoods fall through to the resumable query with the same eligibility
-# cache. Pair seeks avoid scanning a last-layer hub's unrelated destinations.
+# One-hop compatibility fast path. Deeper scopes always stream through the
+# resumable traversal; they have no small-neighborhood threshold. Raw-heavy
+# one-hop scopes retain the indexed one-hop pager in graph.py.
 SMALL_MEMBERS = 32
 
 
@@ -363,15 +404,15 @@ def _local_page(context, path, depth, folder, tag, text, node_limit, edge_limit)
         if meta['incomplete']:
             context.complete = False
             context.reasons.update(json.loads(meta['reasons']))
-        if meta['phase'] == 'discover':
+        if meta['phase'] == 'discover' and not (node_limit >= 2 and database.execute(
+                'SELECT 1 FROM pairs WHERE emitted=0 LIMIT 1').fetchone()):
             _discover(context, database, meta, depth, folder, tag, text)
         nodes, edges = _emit(context, database, meta, node_limit, edge_limit)
         if meta['phase'] == 'discover':
-            # A safe shortest-hop witness is useful before every frontier has
-            # finished. Emit bounded validated membership, without partial edge
-            # aggregates; edge counts are published only after discovery.
+            # Publish spare membership slots during discovery too. Confirmed
+            # connections above already carry their full indexed aggregates.
             for member in database.execute('SELECT * FROM members WHERE id>? ORDER BY id LIMIT ?',
-                                           (meta['emitted'], min(node_limit, WORK_ROWS))).fetchall():
+                                           (meta['emitted'], min(node_limit - len(nodes), WORK_ROWS))).fetchall():
                 node = _witness(context, member) if member['display'] else None
                 if member['display'] and node is None:
                     break

@@ -23,6 +23,14 @@ Surviving coordinates, orientation and zoom remain. Bounded work yields
 continuations until the entire selected-depth neighborhood is loaded. Incomplete
 index evidence or loading failures remain visible in the summary.
 
+Deeper local views publish confirmed connections during discovery, with full
+indexed occurrence counts. Final-layer work chooses between indexed source
+occurrences and member-pair seeks, so a hub's unrelated outgoing links do not
+force a long series of empty pages. SQL has an emergency per-statement watchdog
+(2,000,000 VM steps or one second); endpoint validation and setup between SQL
+statements do not spend that allowance. Cooperative traversal slices and
+continuations bound ordinary work independently of this watchdog.
+
 **All notes** starts automatic loading of every eligible wiki component, including
 disconnected notes. Bounded pages accumulate without repeated Load more clicks;
 empty continuing pages advance too. Canonical nodes and directed aggregate edges

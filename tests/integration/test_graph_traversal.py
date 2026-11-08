@@ -340,3 +340,74 @@ def test_resumable_discovery_emits_progress_and_skips_outside_last_layer_eligibi
     assert edges['leaf34.md', 'leaf0.md'] == 1
     assert not any(path.startswith('outside') for path in checked)
     assert pages[-1].projection_complete
+
+
+def test_two_hop_population_streams_connections_without_scanning_outside_hub(wiki, monkeypatch, record_property):
+    import time
+    from django.db import connection
+    from indexing import graph
+    from tests.fixtures.graph import populate_two_hop_hub
+    populate_two_hop_hub(wiki)
+    checked, operations, timings = [], [], []
+    original = graph.file_stat
+    def stat(path):
+        checked.append(path)
+        return original(path)
+    monkeypatch.setattr(graph, 'file_stat', stat)
+    def count(execute, sql, params, many, context):
+        operations.append(sql.split()[0])
+        return execute(sql, params, many, context)
+    original_query = graph.query_graph
+    def timed(*args, **kwargs):
+        start = time.perf_counter()
+        page = original_query(*args, **kwargs)
+        timings.append(time.perf_counter() - start)
+        return page
+    monkeypatch.setattr(graph, 'query_graph', timed)
+    with connection.execute_wrapper(count):
+        nodes, edges, pages = collect(graph, 'Population Root.md', depth=2)
+    metrics = dict(requests=len(pages), first_connected_request=next(
+        (i + 1 for i, p in enumerate(pages) if p.edges), None),
+        first_response_ms=round(timings[0] * 1000, 2), server_total_ms=round(sum(timings) * 1000, 2),
+        sql_operations=len(operations), eligibility_operations=len(checked))
+    record_property('population', json.dumps(metrics))
+    print('synthetic_population', metrics)
+    assert pages[0].edges
+    assert len(pages) < 25  # Scope must not require one request per outside occurrence window.
+    assert nodes == {'Population Root.md', *(f'branch{i}.md' for i in range(7)),
+                     *(f'leaf{i:02}.md' for i in range(85))}
+    expected = {('Population Root.md', f'branch{i}.md'): 1 for i in range(7)}
+    expected.update({(f'branch{i % 7}.md', f'leaf{i:02}.md'): 1 for i in range(85)})
+    expected.update({(f'leaf{i:02}.md', 'Population Root.md'): 1 for i in range(85)})
+    expected.update({(f'leaf{i:02}.md', 'branch0.md'): 1 for i in range(85)})
+    expected.update({(f'leaf{i:02}.md', 'branch1.md'): 1 for i in range(16)})
+    assert edges == expected and len(edges) == 278
+    assert 'outside.md' not in checked
+    assert pages[-1].projection_complete
+
+
+def test_filesystem_latency_does_not_spend_graph_sql_budget(wiki, monkeypatch):
+    from types import SimpleNamespace
+    from indexing import search
+    graph = build_graph(wiki, {'root.md': '[[bridge]]', 'bridge.md': '[[leaf]]', 'leaf.md': '# Leaf'})
+    # Advance only the watchdog clock during real eligibility. No slow sleeps,
+    # and no removal of endpoint checks or SQL protection.
+    import time
+    offset = [0]
+    clock = SimpleNamespace(monotonic=lambda: time.monotonic() + offset[0])
+    monkeypatch.setattr(search, 'time', clock)
+    try:
+        from indexing import graph_budget
+    except ImportError:
+        pass  # The old request-wide watchdog must fail this same reproduction.
+    else:
+        monkeypatch.setattr(graph_budget, 'time', clock)
+    original = graph.file_stat
+    def stat(path):
+        offset[0] += 2
+        return original(path)
+    monkeypatch.setattr(graph, 'file_stat', stat)
+    nodes, edges, pages = collect(graph, 'root.md', depth=2)
+    assert nodes == {'root.md', 'bridge.md', 'leaf.md'}
+    assert edges == {('root.md', 'bridge.md'): 1, ('bridge.md', 'leaf.md'): 1}
+    assert pages[-1].projection_complete
