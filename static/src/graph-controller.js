@@ -70,7 +70,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   let page = null, selected = currentPath || null, focused = currentPath || null;
   let listMode = preferredList, graphicsAvailable = true, trail = [], nextCursor = null, activeParams = null;
   let pendingPositions = null, pendingVersion = null;
-  let explorationToken = null, requestParams = null;
+  let explorationToken = null, requestParams = null, evidenceSuspended = false, completingExpansion = null;
   const expandedPaths = new Set(), expansionQueue = new Set();
   const evidenceStamp = data => data && JSON.stringify([data.generation, data.mutation, data.relation_epoch, data.eligibility_version]);
   let view = null, loadingPaused = false, loadingError = false, loadingReason = '', autoTimer;
@@ -207,7 +207,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     for (const edge of (page?.edges || []).slice(edgeOffset, edgeOffset + listWindow)) edges.append(element('li', `${edge.source} → ${edge.destination} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`));
   }
   function clearEvidence({ keepExploration = false } = {}) {
-    if (!keepExploration) { explorationToken = null; expandedPaths.clear(); expansionQueue.clear(); requestParams = null; }
+    if (!keepExploration) { explorationToken = null; expandedPaths.clear(); expansionQueue.clear(); requestParams = null; completingExpansion = null; }
     pages.clear(); page = null; nextCursor = null; selected = focused = null; nodeOffset = edgeOffset = 0;
     detailSequence++; detailRequest?.abort(); detailRequest = null;
     details.replaceChildren(element('h2', 'Selected note'), element('p', 'Select a note to see its connections.'));
@@ -225,7 +225,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
       pendingVersion = evidenceStamp(page);
     }
     const priorSelected = selected, priorFocused = focused;
-    clearEvidence({ keepExploration:true }); selected = priorSelected; focused = priorFocused;
+    clearEvidence({ keepExploration:true }); selected = priorSelected; focused = priorFocused; evidenceSuspended = true;
   }
   function showDetails(path) {
     const ticket = ++detailSequence;
@@ -298,7 +298,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     pages.accept(data, append);
     page = pages.data; nextCursor = page.next_cursor;
     if (typeof data.exploration === 'string' && data.exploration.length <= 4096) explorationToken = data.exploration;
-    if (!nextCursor && activeParams?.path) expandedPaths.add(requestParams?.expand || activeParams.path);
+    if (!nextCursor && activeParams?.path) { expandedPaths.add(requestParams?.expand || completingExpansion || activeParams.path); completingExpansion = null; }
     if (!nextCursor && !page.nodes.some(node => node.path === selected)) selected = page.nodes.some(node => node.path === activeParams?.path) ? activeParams.path : null;
     if (!nextCursor && !page.nodes.some(node => node.path === focused)) focused = page.nodes[0]?.path || null;
     let mapFailure = false;
@@ -318,6 +318,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     } else if (!view?.hints?.active) say(mapFailure ? 'Map resource limit reached. All loaded records remain available in the connection list.' : '');
   }
   async function load({ cursor, fit = false, append = false, params = null } = {}) {
+    evidenceSuspended = false;
     clearTimeout(debounce); debounce = null; cancelAutomatic(); const ticket = ++sequence;
     const retainedPositions = !append && page?.nodes.length && view ?
       new Map([...(pendingPositions || []), ...view.simulation.nodes]) : pendingPositions;
@@ -332,7 +333,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
       clearEvidence({ keepExploration:Boolean(reuse) }); selected = priorSelected; focused = priorFocused;
       activeParams = scope;
       requestParams = {...scope, ...(reuse ? {exploration:explorationToken} : {})};
-    } else if (params) requestParams = params;
+    } else if (params) { requestParams = params; completingExpansion = params.expand || null; }
     if (!activeParams) activeParams = parameters();
     if (!requestParams) requestParams = activeParams;
     say(page ? 'Updating connections…' : 'Loading connections…'); controls();
@@ -422,7 +423,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   });
   listen(find('[data-graph-refresh]'), 'click', () => { loadingPaused = false; void load(); });
   listen(find('[data-graph-cancel]'), 'click', () => { loadingPaused = true; sequence++; cancelAutomatic(); request?.abort(); request = null; controls(); say('Loading paused. Resume loading to continue. Motion is unchanged.'); });
-  listen(find('[data-graph-resume]'), 'click', () => { loadingPaused = false; if (nextCursor) void load({ cursor: nextCursor, append: true }); else if (requestParams?.expand) void load({append:true,params:requestParams}); else void load(); });
+  listen(find('[data-graph-resume]'), 'click', () => { loadingPaused = false; if (evidenceSuspended) void load(); else if (nextCursor) void load({ cursor: nextCursor, append: true }); else if (requestParams?.expand) void load({append:true,params:requestParams}); else void load(); });
   listen(find('[data-graph-restart]'), 'click', () => { loadingPaused = false; explorationToken = null; void load(); });
   listen(find('[data-graph-graphics-retry]'), 'click', () => {
     view?.destroy(); view = null; createView();

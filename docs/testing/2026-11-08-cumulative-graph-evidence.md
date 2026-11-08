@@ -68,3 +68,20 @@ validated before admission, and every bounded witness is rechecked per response.
 No live/private notes, settings or deployment were accessed. Synthetic browser
 coverage does not establish real-device or screen-reader acceptance. Saved-index
 results retain their documented reconciliation and non-atomic-filesystem limits.
+
+## Paused-tab recovery correction
+
+A final controller check found that hiding a tab while a multi-page expansion was
+paused discarded its cursor but retained the action's original token. A new
+narrow real-HTTP scenario held a committed continuation, paused, hid/showed the
+tab and resumed; it reproduced the empty/error graph. Resume now revalidates the
+complete accumulated exploration with the latest token after evidence suspension,
+and retains the pending expansion identity until completion. The changed 390px
+scenario passed in 7.2s, including the later no-refetch repeated selection. Log:
+`/tmp/backstory-141-paused-green-r2.log`. Scoped independent review approved the
+fix. Earlier unrelated focused evidence was retained.
+
+The first proposed candidate's in-progress gate was interrupted safely before
+merge/publication when this correction became necessary. It has failed status
+and no accepted receipt. A replacement exact merge candidate receives the
+required complete gate; receipts are not transferred between candidates.
