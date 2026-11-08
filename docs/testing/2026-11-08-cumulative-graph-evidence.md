@@ -99,3 +99,16 @@ was changed. Logs: `/tmp/backstory-141-table-{red-diagnostic,green}.log`.
 
 That candidate's failed receipt is not used for merge/publication. The final
 candidate, including this test correction, must pass the complete required gate.
+
+## Restored-coordinate adjacency ordering
+
+The next candidate passed Python, formatter and Firefox code checks, then its
+renderer stage found one rapid-scope recovery failure (86 other cases passed).
+Coordinates had been restored before `setGraph`, while `setRoot` attempted BFS
+against the previous empty adjacency. A deterministic renderer regression
+reproduced that missing-adjacency TypeError. Root recomputation now follows
+adjacency installation; metadata-only root changes still update BFS and preserve
+pause. All 7 renderer Node cases and the exact Firefox rapid-scope scenario passed
+(5.3s), and scoped independent review approved the correction. Logs:
+`/tmp/backstory-141-root-order-{red,green,browser}.log`. Earlier failed candidates
+remain unapproved; the final source requires its own full gate.

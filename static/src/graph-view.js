@@ -121,10 +121,13 @@ export class GraphView {
     const topology = JSON.stringify([data.nodes.map(node => node.path), data.edges.map(edge => [edge.source, edge.destination])]);
     const changed = topology !== this.topology;
     if (!data.nodes.length) this.cancelHints();
-    this.data = data; this.current = current; this.root = root; this.simulation.setRoot(root);
-    if (!changed) { this.themeDirty = true; this.draw(); return; }
+    this.data = data; this.current = current; this.root = root;
+    if (!changed) { this.simulation.setRoot(root); if (this.paused) this.simulation.settle(0); this.themeDirty = true; this.draw(); return; }
     this.topology = topology; this.release(null, true);
     this.simulation.setGraph(data.nodes, data.edges);
+    // Revalidated positions can be restored before their adjacency is rebuilt.
+    // Install that adjacency before a changed root computes its BFS.
+    this.simulation.setRoot(root);
     if (!this.loaded && data.nodes.length) {
       // Large layouts warm up through resumable animation work, never a
       // synchronous whole-graph step while a new page is being installed.
