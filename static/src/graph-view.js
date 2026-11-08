@@ -3,7 +3,7 @@ import { GraphPhysics } from './graph-physics.js';
 import { GraphCamera } from './graph-camera.js';
 import { layoutLabels } from './graph-labels.js';
 import { GraphHints, hintAssignments, outboundDestinations } from './graph-hints.js';
-import { nodeRadius, connectionGeometry } from './graph-geometry.js';
+import { nodeRadius, connectionGeometry, createConnectionGeometry } from './graph-geometry.js';
 import { hopTiers, emission, nearestNode, AdaptiveQuality, BLOOM_DEFAULT, BLOOM_HIGH } from './graph-layout.js';
 
 function geometry(count, color = false, alpha = false) {
@@ -84,7 +84,7 @@ export class GraphView {
     for (const name of ['pointercancel', 'lostpointercapture']) listen(container, name, event => this.release(event, true));
     listen(container, 'wheel', event => { if (event.ctrlKey || event.metaKey || event.altKey) return; event.preventDefault(); this.zoom(event.deltaY < 0 ? 1.12 : 1 / 1.12, this.point(event)); }, { passive: false });
     listen(document, 'visibilitychange', () => { if (document.hidden) { this.release(null, true); this.stop(); } else this.wake(); });
-    listen(this.reduced, 'change', () => { this.paused = this.reduced.matches; if (this.paused) { this.simulation.settle(0); this.camera.snap(); this.stop(); } else this.simulation.reheat(); this.actions.onPause?.(this.paused); this.draw(); this.wake(); });
+    listen(this.reduced, 'change', () => { this.paused = this.reduced.matches; if (this.paused) { this.simulation.pause(); this.camera.snap(); this.stop(); } else this.simulation.reheat(); this.actions.onPause?.(this.paused); this.draw(); this.wake(); });
     listen(this.forced, 'change', () => { this.updateTheme(); this.draw(); });
   }
   get available() { return !this.unavailable; }
@@ -122,20 +122,24 @@ export class GraphView {
     const changed = topology !== this.topology;
     if (!data.nodes.length) this.cancelHints();
     this.data = data; this.current = current; this.root = root;
-    if (!changed) { this.simulation.setRoot(root); if (this.paused) this.simulation.settle(0); this.themeDirty = true; this.draw(); return; }
+    if (!changed) { this.simulation.setRoot(root); if (this.paused) this.simulation.pause(); this.themeDirty = true; this.draw(); return; }
     this.topology = topology; this.release(null, true);
+    // Drop derived identities immediately, including when a hidden map cannot draw.
+    this.projected?.clear(); this.pickGrid?.clear();
+    for (const bucket of this.pickBuckets || []) bucket.length = 0;
+    if (!data.nodes.length) { this.pickBuckets = []; this.edgeGeometry = null; }
+    this.drawnBatch = null;
     this.simulation.setGraph(data.nodes, data.edges);
     // Revalidated positions can be restored before their adjacency is rebuilt.
     // Install that adjacency before a changed root computes its BFS.
     this.simulation.setRoot(root);
     if (!this.loaded && data.nodes.length) {
-      // Large layouts warm up through resumable animation work, never a
-      // synchronous whole-graph step while a new page is being installed.
-      if (data.nodes.length <= 256) for (let i = 0; i < 12; i++) this.simulation.step();
+      // Every layout starts from its stable seed and advances cooperatively.
+      // Installation never spends multiple synchronous warmup steps on input.
       if (!this.cameraControlled) this.camera.fit(this.simulation.nodes, true);
       this.loaded = true;
     }
-    if (this.paused) this.simulation.settle(0);
+    if (this.paused) this.simulation.pause();
     if (this.batch) { this.scene.remove(this.batch.group); this.batch.dispose(); }
     this.batch = createGraphBatches(data.nodes, data.edges); this.scene.add(this.batch.group);
     this.container.dataset.nodeCount = String(data.nodes.length); this.container.dataset.edgeCount = String(data.edges.length);
@@ -145,7 +149,7 @@ export class GraphView {
     this.selected = selected; this.focused = focused;
     this.simulation.setSelection(selected);
     if (this.root === null) this.simulation.setRoot(selected);
-    if (this.paused) this.simulation.settle(0);
+    if (this.paused) this.simulation.pause();
     this.tiers = hopTiers(this.data.nodes, this.data.edges, selected);
     this.destinations = outboundDestinations(this.data.edges,selected); this.refreshShortcuts(); this.themeDirty = true;
     this.container.dataset.root = this.root || '';
@@ -157,13 +161,13 @@ export class GraphView {
   setForces(value) {
     this.simulation.setForces(value);
     // Updating presentation never overrides deliberate pause or reduced motion.
-    if (this.paused) this.simulation.settle(0);
+    if (this.paused) this.simulation.pause();
     this.draw(); this.wake();
   }
   setBloom(value) { this.intensity = Math.min(BLOOM_HIGH, Math.max(0, Number(value) || 0)); this.container.dataset.bloom = String(this.intensity); this.themeDirty = true; this.draw(); }
   setPaused(value) {
     this.paused = !!value || this.reduced.matches; this.release(null, true);
-    if (this.paused) { this.simulation.settle(0); this.camera.snap(); this.stop(); } else { this.simulation.reheat(); this.wake(); }
+    if (this.paused) { this.simulation.pause(); this.camera.snap(); this.stop(); } else { this.simulation.reheat(); this.wake(); }
     this.actions.onPause?.(this.paused); this.draw();
   }
   fit() { if (!this.simulation.nodes.size) return; this.cameraControlled = true; this.camera.fit(this.simulation.nodes, this.paused); this.draw(); this.wake(); }
@@ -326,38 +330,68 @@ export class GraphView {
     for (const o of [batch.halos, batch.edges, batch.arrows, batch.edgeHalos]) o.geometry.attributes.color.needsUpdate = true;
     this.themeDirty = false;
   }
-  draw() {
+  draw({ positionsChanged = true } = {}) {
     if (this.destroyed || this.unavailable || !this.renderer || !this.batch || document.hidden || this.container.hidden) return;
-    const batch = this.batch, camera = this.camera, eye = camera.eye(), { right, back: view } = camera.basis();
+    const batch = this.batch, camera = this.camera, basis = camera.basis(), eye = camera.eye(basis);
+    const fields = ['x', 'y', 'z', 'yaw', 'pitch', 'distance', 'width', 'height'];
+    const previousCamera = this.drawnCamera;
+    const cameraChanged = !previousCamera || fields.some(key => previousCamera[key] !== camera[key]);
+    const worldChanged = positionsChanged || this.drawnBatch !== batch || this.drawnSelection !== this.selected;
+    const geometryChanged = worldChanged || cameraChanged;
     this.renderCamera.aspect = camera.width / camera.height; this.renderCamera.position.set(eye.x, eye.y, eye.z); this.renderCamera.lookAt(camera.x, camera.y, camera.z); this.renderCamera.updateProjectionMatrix(); this.renderCamera.updateMatrixWorld();
     const bloom = this.quality.bloom(this.intensity, this.forced.matches);
     batch.halos.visible = batch.edgeHalos.visible = bloom > 0; batch.halos.material.uniforms.viewportHeight.value = camera.height * this.pixelRatio;
     if (this.themeDirty) this.applyColors(bloom);
     this.renderer.setClearColor(this.theme.background);
-    this.projected.clear(); this.pickGrid = new Map();
-    this.data.nodes.forEach((node, index) => {
-      const n = this.simulation.nodes.get(node.path), p = camera.screen(n);
-      const radius = nodeRadius(node.path, this.selected); p.radius = radius * p.scale; this.projected.set(node.path, p);
-      this.matrix.makeScale(radius, radius, radius); this.matrix.setPosition(n.x, n.y, n.z); batch.nodes.setMatrixAt(index, this.matrix);
-      batch.halos.geometry.attributes.position.setXYZ(index, n.x, n.y, n.z);
-      batch.halos.geometry.attributes.diameter.setX(index, radius * 9.6);
-      if (p.visible && p.x > -36 && p.x < camera.width + 36 && p.y > -36 && p.y < camera.height + 36) {
-        const key = `${Math.floor(p.x / 36)},${Math.floor(p.y / 36)}`; let bucket = this.pickGrid.get(key);
-        if (!bucket) this.pickGrid.set(key, bucket = []);
-        // Nearer points remain pickable in very dense projected clusters.
-        bucket.push(node.path); bucket.sort((a, b) => this.projected.get(a).depth - this.projected.get(b).depth); if (bucket.length > 32) bucket.length = 32;
+    if (geometryChanged) {
+      // Reuse projected records and picking buckets instead of allocating one
+      // basis, point and bucket array for every node on every changed frame.
+      this.pickGrid ||= new Map(); this.pickGrid.clear(); this.pickBuckets ||= [];
+      let usedBuckets = 0;
+      if (this.drawnBatch !== batch) for (const path of this.projected.keys()) if (!this.simulation.nodes.has(path)) this.projected.delete(path);
+      this.compareDepth ||= (a, b) => this.projected.get(a).depth - this.projected.get(b).depth;
+      for (let index = 0; index < this.data.nodes.length; index++) {
+        const node = this.data.nodes[index], n = this.simulation.nodes.get(node.path);
+        const projected = camera.screen(n, this.projected.get(node.path), basis);
+        const radius = nodeRadius(node.path, this.selected); projected.radius = radius * projected.scale; this.projected.set(node.path, projected);
+        if (worldChanged) {
+          this.matrix.makeScale(radius, radius, radius); this.matrix.setPosition(n.x, n.y, n.z); batch.nodes.setMatrixAt(index, this.matrix);
+          batch.halos.geometry.attributes.position.setXYZ(index, n.x, n.y, n.z);
+          batch.halos.geometry.attributes.diameter.setX(index, radius * 9.6);
+        }
+        if (projected.visible && projected.x > -36 && projected.x < camera.width + 36 && projected.y > -36 && projected.y < camera.height + 36) {
+          const key = `${Math.floor(projected.x / 36)},${Math.floor(projected.y / 36)}`;
+          let bucket = this.pickGrid.get(key);
+          if (!bucket) {
+            bucket = this.pickBuckets[usedBuckets] ||= []; usedBuckets++; bucket.length = 0; this.pickGrid.set(key, bucket);
+          }
+          bucket.push(node.path); bucket.sort(this.compareDepth); if (bucket.length > 32) bucket.length = 32;
+        }
       }
-    });
-    this.data.edges.forEach((edge, index) => {
-      const a = this.simulation.nodes.get(edge.source), b = this.simulation.nodes.get(edge.destination); if (!a || !b) return;
-      const shape = connectionGeometry(a,b,nodeRadius(edge.source,this.selected),nodeRadius(edge.destination,this.selected),{right,back:view});
-      batch.edges.geometry.attributes.position.setXYZ(index * 2, ...shape.start);
-      batch.edges.geometry.attributes.position.setXYZ(index * 2 + 1, ...shape.tip);
-      shape.arrow.forEach((point,v) => batch.arrows.geometry.attributes.position.setXYZ(index*3+v,...point));
-      if (bloom > 0) shape.halo.forEach((point,v) => batch.edgeHalos.geometry.attributes.position.setXYZ(index*6+v,...point));
-    });
-    batch.nodes.instanceMatrix.needsUpdate = true; batch.halos.geometry.attributes.diameter.needsUpdate = true;
-    for (const object of [batch.halos, batch.edges, batch.edgeHalos, batch.arrows]) object.geometry.attributes.position.needsUpdate = true;
+      for (let index = usedBuckets; index < this.pickBuckets.length; index++) this.pickBuckets[index].length = 0;
+    }
+    if (geometryChanged || bloom > 0 && !this.drawnBloom) {
+      this.edgeGeometry ||= createConnectionGeometry();
+      const lines = batch.edges.geometry.attributes.position, arrows = batch.arrows.geometry.attributes.position, halos = batch.edgeHalos.geometry.attributes.position;
+      for (let index = 0; index < this.data.edges.length; index++) {
+        const edge = this.data.edges[index], a = this.simulation.nodes.get(edge.source), b = this.simulation.nodes.get(edge.destination);
+        if (!a || !b) continue;
+        const shape = connectionGeometry(a, b, nodeRadius(edge.source, this.selected), nodeRadius(edge.destination, this.selected), basis, this.edgeGeometry);
+        lines.setXYZ(index * 2, shape.start[0], shape.start[1], shape.start[2]);
+        lines.setXYZ(index * 2 + 1, shape.tip[0], shape.tip[1], shape.tip[2]);
+        for (let vertex = 0; vertex < 3; vertex++) { const point = shape.arrow[vertex]; arrows.setXYZ(index * 3 + vertex, point[0], point[1], point[2]); }
+        if (bloom > 0) for (let vertex = 0; vertex < 6; vertex++) { const point = shape.halo[vertex]; halos.setXYZ(index * 6 + vertex, point[0], point[1], point[2]); }
+      }
+      lines.needsUpdate = arrows.needsUpdate = true;
+      if (bloom > 0) halos.needsUpdate = true;
+    }
+    if (worldChanged) {
+      batch.nodes.instanceMatrix.needsUpdate = true;
+      batch.halos.geometry.attributes.diameter.needsUpdate = true;
+      batch.halos.geometry.attributes.position.needsUpdate = true;
+    }
+    this.drawnCamera ||= {}; for (const key of fields) this.drawnCamera[key] = camera[key];
+    this.drawnBatch = batch; this.drawnSelection = this.selected; this.drawnBloom = bloom;
     this.renderer.render(this.scene, this.renderCamera); this.drawLabels(); this.drawHints();
     Object.assign(this.container.dataset, { motion: this.paused ? 'paused' : this.simulation.active ? 'moving' : 'settled', lowWork: String(this.quality.level > 0), quality: String(this.quality.level), cameraYaw: String(camera.yaw), cameraPitch: String(camera.pitch), bloomEffective: String(bloom) });
   }
@@ -416,17 +450,20 @@ export class GraphView {
     this.frame = null; if (this.destroyed || this.unavailable || document.hidden || this.container.hidden || this.paused) return;
     const elapsed = Math.max(0, (time - this.lastTime) / 1000); this.lastTime = time;
     if (this.quality.sample(elapsed)) { this.themeDirty = true; this.syncSize(); }
-    // Large layouts resume a time-sliced spatial step; small ones retain fixed
-    // catch-up. No elapsed pause produces unbounded work.
-    this.simulation.advance(this.data.nodes.length > 256 ? Math.min(elapsed, 1 / 60) : elapsed);
-    const moving = this.camera.tick(elapsed); this.draw();
+    // A solver slice can make progress without publishing a complete step.
+    // Keep camera input independent, and redraw only a coherent changed scene.
+    const version = this.simulation.positionVersion;
+    this.simulation.advance(elapsed);
+    const positionsChanged = this.simulation.positionVersion !== version;
+    const moving = this.camera.tick(elapsed);
+    if (positionsChanged || moving || this.themeDirty) this.draw({ positionsChanged });
     if (this.simulation.active || moving) this.frame = requestAnimationFrame(next => this.tick(next));
     else if (this.simulation.limitReached) this.actions.onLimit?.();
   }
-  stop() { if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; }
+  stop() { if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.simulation.cancelPending?.(); }
   destroy() {
     this.cancelHints(); this.release(null, true); this.destroyed = true; this.stop(); this.life.abort(); this.resize.disconnect(); this.themeObserver.disconnect();
-    this.batch?.dispose(); this.renderer?.dispose(); this.simulation.destroy(); this.projected.clear(); this.pickGrid?.clear();
+    this.batch?.dispose(); this.renderer?.dispose(); this.simulation.destroy(); this.projected.clear(); this.pickGrid?.clear(); this.pickBuckets = []; this.edgeGeometry = null; this.drawnCamera = this.drawnBatch = null;
     if (this.container.graphView === this) delete this.container.graphView; this.container.replaceChildren();
   }
 }

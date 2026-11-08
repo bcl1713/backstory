@@ -1,0 +1,11 @@
+# Coherent graph motion — #144
+
+GitHub issue #144 supplies the requirements. Build on dev289d188 and the displayed subset from #142; no snapshot/controller or note/security-policy changes are needed.
+
+Use the existing cooperative solver first: each fixed-time step stages integration separately from published node positions and commits a complete result only. A monotonic positionVersion marks completed publications and immediate drag/topology changes. Cancelling/reheating invalidates any unfinished work. advance(elapsed) uses the existing wall-time slice and bounded four-step catch-up, with no fixed generator chunk ceiling and no one-completion-per-frame restriction. Pairwise small layouts must yield too. Manual step/settle remain synchronous test/offline APIs, never graph-install warmups.
+
+The view keeps camera/input independent of solver publication. It does not redraw an unchanged scene solely because a solver chunk ran. Position publication, camera, topology, selection, hints, theme and viewport changes still invalidate the necessary display work. Reuse per-edge geometry output storage and numeric scratch arrays; keep projection/picking/arrows/labels derived from one published state. No interpolation is initially needed: measure complete-step cadence rather than adding lag to hide poor throughput.
+
+Alternatives considered: a persistent same-origin physics worker can decouple CPU work, but adds topology generations, buffer transfer/backpressure, drag/control synchronization and error recovery. First evaluate the smaller existing-scheduler correction against a representative1050-node synthetic fixture. Keep this design if bounded slices plus reduced rendering remove the artificial bottleneck and preserve input; otherwise reassess worker isolation from measured evidence. Removing all work bounds would block input and is rejected. No security-policy expansion is authorized or required.
+
+Preserve outgoing fixed-root BFS/all shortest parents/equal springs, position/camera continuity, free3D motion, forces, immediate drag/pin, pause/reducedmotion/hidden/close cleanup, hints and accessible fallback. No hidden graph caps or rewrites. Atomicity applies to displayed positions; no partially integrated state may be rendered.
