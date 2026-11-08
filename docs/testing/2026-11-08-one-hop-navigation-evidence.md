@@ -36,3 +36,10 @@ Focused working-tree evidence on branch `improve/one-hop-navigation`, based on
   the required exact-merge candidate gate and independent approval are retained
   separately before merge/publication. Native-device and screen-reader acceptance
   remain outside synthetic browser coverage.
+
+The first candidate's full build exposed one omitted generated artifact:
+`static/shell.js` serializes the semantic role map and needed the new
+`destination: heading-4` entry. Its validation was interrupted before landing.
+A complete local asset build regenerated that map (24 added bytes, no other
+uncommitted generated output). The corrected candidate includes the generated
+bundle and receives its own full gate; earlier receipts are not transferred.
