@@ -209,6 +209,16 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   function revokeEvidence() {
     sequence++; cancelAutomatic(); request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence();
   }
+  function suspendEvidence() {
+    // Keep presentation identities and coordinates, never graph evidence. The
+    // next load validates the namespace and each returned path before reuse.
+    if (page && view) {
+      pendingPositions = new Map([...(pendingPositions || []), ...view.simulation.nodes]);
+      pendingVersion = evidenceStamp(page);
+    }
+    const priorSelected = selected, priorFocused = focused;
+    clearEvidence(); selected = priorSelected; focused = priorFocused;
+  }
   function showDetails(path) {
     const ticket = ++detailSequence;
     detailRequest?.abort(); detailRequest = new AbortController();
@@ -420,8 +430,8 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   displayForces();
   listen(find('[data-graph-help-toggle]'), 'click', toggleHelp);
   // Returning from a hidden tab must revalidate retained private evidence.
-  listen(document, 'visibilitychange', () => { if (document.hidden) { stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence(); } else if (!closed) { if (indexDisclosure?.open) void refreshIndexProgress(); if (!loadingPaused) void load(); } });
-  listen(window, 'pagehide', () => { stopIndexProgress(); sequence++; cancelAutomatic(); clearTimeout(debounce); debounce = null; request?.abort(); request = null; pendingPositions = pendingVersion = null; clearEvidence(); view?.stop(); });
+  listen(document, 'visibilitychange', () => { if (document.hidden) { stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); request = null; suspendEvidence(); } else if (!closed) { if (indexDisclosure?.open) void refreshIndexProgress(); if (!loadingPaused) void load(); } });
+  listen(window, 'pagehide', () => { stopIndexProgress(); sequence++; cancelAutomatic(); clearTimeout(debounce); debounce = null; request?.abort(); request = null; suspendEvidence(); view?.stop(); });
   listen(window, 'pageshow', event => { if (event.persisted && !closed && !loadingPaused) void load(); });
   find('[data-graph-controls]').hidden = false; find('[data-graph-clear]').hidden = false;
   find('[data-graph-list-toggle]').hidden = false;
