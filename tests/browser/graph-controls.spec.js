@@ -9,6 +9,90 @@ const edges = [0, 1, 2].map(i => ({ source: nodes[i].path, destination: nodes[i+
 const payload = (all, links = [], next_cursor = null, extra = {}) => ({ ...meta, nodes: all, edges: links, next_cursor, ...extra });
 const panel = page => page.locator('[data-graph-dialog]');
 const map = page => panel(page).locator('[data-graph-map]');
+async function visibility(page, hidden) {
+  await page.evaluate(value => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
+}
+
+test('returning to the graph restores selected springs and layout after private evidence is revalidated', async ({ page }, info) => {
+  let response = payload(nodes.slice(0,3), edges.slice(0,2)), held = false, release;
+  await setup(page, async route => {
+    if (held) await new Promise(resolve => { release = resolve; });
+    await route.fulfill({ json: response });
+  });
+  await open(page);
+  response = payload(nodes, edges);
+  await panel(page).getByRole('button', { name: 'All notes', exact: true }).click();
+  await expect(map(page)).toHaveAttribute('data-node-count', '5');
+  await map(page).evaluate(el => {
+    const v = el.graphView; v.setPaused(true); v.actions.onSelect('B.md', true); v.orbit(.3, .1);
+    v.simulation.nodes.get('B.md').x = 1234; v.draw();
+  });
+  const state = () => map(page).evaluate(el => {
+    const v = el.graphView;
+    return { selected: v.selected, focused: v.focused, paused: v.paused, camera: v.snapshot().camera,
+      positions: v.simulation.all.map(n => [n.path, n.x, n.y, n.z]),
+      springs: v.simulation.springs.map(([a,b]) => [a.path,b.path]) };
+  });
+  const before = await state();
+  expect(before.springs).toEqual([['B.md','C.md'], ['C.md','D.md']]);
+  held = true;
+  await visibility(page, true);
+  await expect(map(page)).toHaveAttribute('data-node-count', '0');
+  await expect(panel(page).locator('[data-graph-edges]')).toBeEmpty();
+  await visibility(page, false);
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await expect(map(page)).toHaveAttribute('data-node-count', '0');
+  held = false; release();
+  await expect(map(page)).toHaveAttribute('data-node-count', '5');
+  expect(await state()).toEqual(before);
+  if (await map(page).isVisible()) {
+    await map(page).evaluate(el => el.graphView.fit());
+    await map(page).scrollIntoViewIfNeeded();
+  }
+  await page.screenshot({ path: info.outputPath('graph-focus-restored.png'), fullPage: true });
+  // Removed roots cannot retain springs or selected-note evidence.
+  await visibility(page, true);
+  response = payload(nodes.filter(n => n.path !== 'B.md'), []);
+  await visibility(page, false);
+  await expect(map(page)).toHaveAttribute('data-node-count', '4');
+  expect((await state()).selected).toBe(null);
+  expect((await state()).springs).toEqual([]);
+});
+
+for (const outcome of ['namespace change', 'authentication failure']) test(`graph resume discards retained presentation on ${outcome}`, async ({ page }) => {
+  let resumed = false;
+  await setup(page, route => route.fulfill(resumed && outcome === 'authentication failure' ?
+    { status: 401, json: { untrusted_content: true, reason_code: 'authentication_required' } } :
+    { json: payload(nodes.slice(0,3), edges.slice(0,2), null, resumed ? { eligibility_version: 'changed' } : {}) }));
+  await page.route(/\/tools\/links\//, route => route.fulfill({ json: { ...meta,
+    eligibility_version: resumed ? 'changed' : meta.eligibility_version, items: [], next_cursor: null } }));
+  await open(page);
+  await map(page).evaluate(el => {
+    const v = el.graphView; v.setPaused(true); v.actions.onSelect('B.md', true);
+    v.simulation.nodes.get('B.md').x = 1234;
+  });
+  // A real navigation can deliver both lifecycle events; neither may erase the
+  // retained namespace and thereby allow stale coordinates into the new one.
+  await visibility(page, true);
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+  resumed = true;
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  });
+  if (outcome === 'authentication failure') {
+    await expect(panel(page).locator('[data-graph-status]')).toContainText('Session expired');
+    await expect(map(page)).toHaveAttribute('data-node-count', '0');
+    await expect(panel(page).locator('[data-graph-nodes] > li strong')).toHaveCount(0);
+  } else {
+    await expect(map(page)).toHaveAttribute('data-node-count', '3');
+    expect(await map(page).evaluate(el => el.graphView.simulation.nodes.get('B.md').x)).not.toBe(1234);
+    await expect(map(page)).toHaveAttribute('data-selected', 'Slice.md');
+  }
+});
 async function setup(page, handler) {
   await page.route(/\/tools\/graph\//, handler || (route => {
     const query = new URL(route.request().url()).searchParams;
