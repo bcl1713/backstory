@@ -12,7 +12,7 @@ test('inactive tables have block replacements; caret and crossing ranges reveal 
   assert.equal(tableDecorations(state({anchor:source.length,head:0})).size,0);
 });
 
-import { syntaxTree } from '@codemirror/language';
+import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
 import { tableModel, tablePreview } from '../../static/src/table-preview.js';
 test('models escaped pipes, safe inline formatting and alignment from the Markdown tree', () => {
   const s = parsedState({doc:'Before\n\n| Left | Right |\n| :--- | ---: |\n| **bold** and a \\| b | `code` [label](javascript:bad) <img src=x> |', extensions:[markdown({base:markdownLanguage})]});
@@ -24,12 +24,19 @@ test('models escaped pipes, safe inline formatting and alignment from the Markdo
   assert.equal(JSON.stringify(model).includes('<img src=x>'),true);
   assert.equal(model.rows[1].cells[1][0].tag,'code');
 });
-test('state-field tracks edits, selection changes and source without injecting presentation', () => {
+test('state-field tracks edits, selection changes and source without injecting presentation', t => {
   let s=parsedState({doc:source,extensions:[markdown({base:markdownLanguage}),tablePreview]});
   assert.equal(s.field(tablePreview).size,1);
   s=s.update({selection:{anchor:source.indexOf('hello')}}).state;
   assert.equal(s.field(tablePreview).size,0);
-  s=s.update({changes:{from:s.selection.main.head,insert:'new '}}).state;
+  // Model a scheduler pause that exhausts CodeMirror's transaction parse slice.
+  let ticks=0; const clock=t.mock.method(Date,'now',()=>ticks+=25);
+  try { s=s.update({changes:{from:s.selection.main.head,insert:'new '}}).state; }
+  finally { clock.mock.restore(); }
+  // There is no EditorView worker in a headless state-field test. Finish the
+  // real incremental parse before asserting its syntax-dependent decoration.
+  assert.ok(ensureSyntaxTree(s,s.doc.length,1000),'complete the edited fixture parse');
+  s=s.update({}).state;
   s=s.update({selection:{anchor:0}}).state;
   assert.equal(s.field(tablePreview).size,1);
   assert.equal(s.doc.toString(),source.replace('hello','new hello'));

@@ -85,3 +85,17 @@ The first proposed candidate's in-progress gate was interrupted safely before
 merge/publication when this correction became necessary. It has failed status
 and no accepted receipt. A replacement exact merge candidate receives the
 required complete gate; receipts are not transferred between candidates.
+
+## Headless formatter fixture correction
+
+The corrected candidate passed all 1,632 Python tests, then stopped with 416/417
+formatter assertions passing. The existing table-preview edit test assumed
+CodeMirror's 20ms transaction parse slice had completed; headless EditorState has
+no EditorView worker to complete a deferred parse. A deterministic scheduler-pause
+clock reproduced the identical missing-decoration assertion. The test now finishes
+the actual edited syntax tree and attaches it with a transaction before checking
+its decoration. All 10 checks in that file passed. No application parser behavior
+was changed. Logs: `/tmp/backstory-141-table-{red-diagnostic,green}.log`.
+
+That candidate's failed receipt is not used for merge/publication. The final
+candidate, including this test correction, must pass the complete required gate.
