@@ -26,6 +26,7 @@ def test_status_is_private_read_only_and_reports_unknown_build(reader, wiki):
     assert body['timezone']['timezone'] == 'UTC'
     assert body['recovery']['writes_paused'] is False
     assert body['capabilities']['contract_version'] == 1
+    assert body['capabilities']['note_creation'] is True
     assert not WikiSettings.objects.exists()
     assert not IndexJob.objects.exists()
     assert response['Cache-Control'] == 'no-store'
@@ -153,3 +154,81 @@ def test_status_reads_real_index_backoff_without_resetting_diagnostics(reader, w
     state = ScanState.objects.get(pk=1)
     assert state.errors == 2 and state.last_error == 'index_database_busy'
     assert state.backoff_until == until
+
+
+def test_graph_capabilities_use_runtime_limits(reader, wiki):
+    from indexing.graph import LIMITS
+    graph = reader.get('/tools/status/').json()['capabilities']['graph']
+    assert graph['max_depth'] == LIMITS['depth']
+    assert graph['max_nodes'] == LIMITS['nodes']
+    assert graph['max_edges'] == LIMITS['edges']
+    assert graph['max_items'] == LIMITS['items']
+    assert graph['max_payload_bytes'] == LIMITS['payload_bytes']
+    assert 'get_graph_snapshot' in graph['tools']
+
+
+def test_relationship_status_distinguishes_ready_index_from_pending_projection(reader, wiki):
+    from tests.integration.test_graph_index import build_graph
+    from indexing.models import IndexedNote, RelationState
+    from indexing.worker import run_batch
+    build_graph(wiki, {'source.md': '[[target]] ' * 45, 'target.md': '# Target'})
+    IndexedNote.objects.filter(path='source.md').update(relations_dirty=True, relation_after=0,
+                                                       relation_build_version=0)
+    RelationState.objects.update(complete=False)
+    run_batch()
+    result = reader.get('/tools/status/').json()
+    assert result['index']['state'] == 'ready'
+    relations = result['relationships']
+    assert relations['state'] == 'updating'
+    assert relations['reason_code'] == 'relation_projection_pending'
+    assert relations['total_sources'] == 2
+    assert relations['pending_sources'] == 1
+    assert relations['published_sources'] == 1
+    assert relations['projection_complete'] is False
+    assert relations['retry']['action'] == 'wait_for_worker'
+    assert relations['retry']['automatic'] is True
+
+
+def test_relationship_status_explains_persistent_parse_limitation(reader, wiki):
+    from tests.integration.test_graph_index import build_graph
+    build_graph(wiki, {'broken.md': '---\ninvalid: [\n---\n# Broken', 'safe.md': '# Safe'})
+    result = reader.get('/tools/status/').json()
+    assert result['index']['state'] == 'ready'
+    relations = result['relationships']
+    assert relations['state'] == 'incomplete'
+    assert relations['reason_code'] == 'relation_parse_incomplete'
+    assert relations['parsing_incomplete_sources'] == 1
+    assert relations['pending_sources'] == 0
+    assert relations['retry']['action'] == 'repair_source_and_reindex'
+    assert relations['retry']['automatic'] is False
+    assert 'broken.md' not in str(relations)
+
+
+def test_relationship_status_checks_namespace_and_does_not_enqueue_work(reader, wiki, settings):
+    from tests.integration.test_graph_index import build_graph
+    from indexing.models import IndexJob, RelationState
+    build_graph(wiki, {'source.md': '[[target]]', 'target.md': '# Target'})
+    before = list(RelationState.objects.values())
+    ready = reader.get('/tools/status/').json()['relationships']
+    assert ready['state'] == 'ready' and ready['projection_complete'] is True
+    settings.BACKSTORY_EXCLUSIONS = ['target.md']
+    changed = reader.get('/tools/status/').json()['relationships']
+    assert changed['state'] == 'updating' and changed['projection_complete'] is False
+    assert changed['reason_code'] == 'relation_namespace_changed'
+    assert changed['retry']['action'] == 'wait_for_worker'
+    assert list(RelationState.objects.values()) == before
+    assert not IndexJob.objects.exists()
+
+
+def test_relationship_status_explains_unresolved_evidence_instead_of_endless_retry(reader, wiki):
+    from tests.integration.test_graph_index import build_graph
+    build_graph(wiki, {'source.md': '[unsupported](file:///private/path)', 'target.md': '# Target'})
+    result = reader.get('/tools/status/').json()
+    assert result['index']['state'] == 'ready'
+    relations = result['relationships']
+    assert relations['state'] == 'incomplete'
+    assert relations['reason_code'] == 'relation_resolution_incomplete'
+    assert relations['resolution_incomplete_sources'] == 1
+    assert relations['pending_sources'] == 0
+    assert relations['retry'] == {'action': 'inspect_links_and_reindex', 'automatic': False}
+    assert '/private' not in str(relations)

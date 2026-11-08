@@ -388,3 +388,40 @@ def test_non_note_path_dependencies_refresh_asset_shadowing_and_missing_images(w
     items = graph.query_links('source.md', 'outgoing').items
     assert items[0].destination == 'deep/a.md' and items[1].state == 'missing'
     assert set(calls) == {'source.md'}
+
+
+def test_removing_only_incomplete_source_restores_projection_without_unrelated_rebuild(wiki):
+    """Deleted parse failures must not poison cached completeness forever."""
+    graph = build_graph(wiki, {'broken.md': '---\ninvalid: [\n---\n# Broken',
+                               'source.md': '[[target]]', 'target.md': '# Target'})
+    before_pages = [graph.query_graph(), graph.query_links('source.md', 'outgoing'),
+                    graph.query_link_issues(issue='missing')]
+    assert all(not page.projection_complete and 'projection_incomplete' in page.limiting_reasons
+               for page in before_pages)
+    from indexing import worker
+    from indexing.queue import request_scan
+    before = relation_identity()
+    (wiki / 'broken.md').unlink()
+    request_scan('verify')
+    drain(worker)
+    page = graph.query_graph()
+    assert worker.index_status().state == 'ready'
+    assert page.projection_complete
+    assert graph.query_links('source.md', 'outgoing').projection_complete
+    assert graph.query_link_issues(issue='missing').projection_complete
+    assert {(edge.source, edge.destination) for edge in page.edges} == {('source.md', 'target.md')}
+    assert relation_identity()[1:] == before[1:]
+
+
+def test_worker_repairs_legacy_stale_aggregate_without_rebuilding_relations(wiki, monkeypatch):
+    graph = build_graph(wiki, {'source.md': '[[target]]', 'target.md': '# Target'})
+    from indexing import worker
+    from indexing.models import RelationState
+    before = relation_identity()
+    RelationState.objects.update(evidence_complete=False)
+    assert not graph.query_graph().projection_complete
+    calls = count_resolutions(monkeypatch)
+    worker.run_batch()
+    assert graph.query_graph().projection_complete
+    assert relation_identity() == before
+    assert calls == []

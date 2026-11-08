@@ -2,6 +2,8 @@
 from dataclasses import asdict
 from django.utils import timezone
 from django.conf import settings
+from indexing.graph import LIMITS as GRAPH_LIMITS
+from indexing.graph_projection import relation_status
 from indexing.worker import index_status
 from indexing.models import ScanState
 from .build_identity import application_identity
@@ -30,10 +32,11 @@ def status_snapshot():
     result = {'state': 'ok', 'observed_at': observed_at,
               'application': application_identity(),
               'capabilities': {'contract_version': 1, 'note_max_bytes': settings.BACKSTORY_NOTE_MAX_BYTES,
-                               'list_max_items': 100, 'folder_creation': True,
-                               'graph': {'tools': ['get_note_links', 'get_note_graph', 'find_link_issues'],
-                                         'max_nodes': 200, 'max_edges': 500, 'max_items': 100,
-                                         'max_depth': 2, 'max_payload_bytes': 524288,
+                               'list_max_items': 100, 'folder_creation': True, 'note_creation': True,
+                               'graph': {'tools': ['get_note_links', 'get_note_graph', 'get_graph_snapshot', 'find_link_issues'],
+                                         'max_nodes': GRAPH_LIMITS['nodes'], 'max_edges': GRAPH_LIMITS['edges'],
+                                         'max_items': GRAPH_LIMITS['items'], 'max_depth': GRAPH_LIMITS['depth'],
+                                         'max_payload_bytes': GRAPH_LIMITS['payload_bytes'],
                                          'read_only': True, 'scope': 'indexed_saved_content'},
                                'read_many_max_paths': 8, 'read_many_max_source_bytes': 4194304,
                                'read_many_between_read_seconds': 2, 'save_serialization_scope': 'document'}}
@@ -41,6 +44,7 @@ def status_snapshot():
         'storage': lambda: asdict(check_readiness()),
         'recovery': lambda: {'writes_paused': MoveOperation.objects.filter(state__in=['applying', 'recovery_required']).exists()},
         'index': _index,
+        'relationships': relation_status,
         'timezone': timezone_state,
     }
     for name, read in components.items():

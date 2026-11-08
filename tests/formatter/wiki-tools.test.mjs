@@ -24,6 +24,9 @@ test('overlapping cross-path saves are explicitly not started, never queued', as
   const pending = registered.save_note.execute(args);
   await new Promise(resolve => setImmediate(resolve));
   const second = JSON.parse(await registered.save_note.execute({ ...args, path: 'b.md' }));
+  const createBusy = JSON.parse(await registered.create_note.execute({ path: 'new.md', source: '# New' }));
+  assert.equal(createBusy.reason_code, 'save_in_progress');
+  assert.equal(createBusy.request_started, false);
   assert.equal(posts, 1);
   assert.equal(second.reason_code, 'save_in_progress');
   assert.equal(second.request_started, false);
@@ -66,4 +69,19 @@ test('overlapping cross-path saves are explicitly not started, never queued', as
   assert.equal(globalThis.timezoneCalls, initializationCount);
   assert.equal(JSON.parse(await registered.read_notes.execute({ paths: ['a.md', 'a.md'] })).reason_code, 'invalid_arguments');
   assert.equal(calls.length, 3);
+  assert.equal(registered.create_note.annotations.consequentialHint, true);
+  globalThis.fetch = async (url, options) => {
+    const input = JSON.parse(options.body);
+    return { ok: true, status: 201, url: 'http://synthetic.test' + url, headers: { get: () => 'application/json' }, json: async () => ({ state: 'created', path: input.path, href: '/notes/' + input.path, source: input.source, revision: '\"' + 'd'.repeat(64) + '\"', authoritative: true, untrusted_content: true }) };
+  };
+  const creation = JSON.parse(await registered.create_note.execute({ path: 'new.md', source: '# New' }));
+  assert.equal(creation.state, 'created');
+  assert.equal(globalThis.timezoneCalls, initializationCount + 1);
+  assert.equal(JSON.parse(await registered.create_note.execute({ path: 'new.md', source: '# New', revision: null })).reason_code, 'invalid_arguments');
+  globalThis.fetch = async () => ({ ok: true, status: 201, url: 'http://synthetic.test/tools/create-note/', headers: { get: () => 'application/json' }, json: async () => ({ state: 'created', path: 'new.md', href: '/notes/new.md', authoritative: true, untrusted_content: true }) });
+  assert.equal(JSON.parse(await registered.create_note.execute({ path: 'new.md', source: '# New' })).state, 'uncertain');
+  globalThis.fetch = async () => { throw new Error('lost create acknowledgement'); };
+  assert.equal(JSON.parse(await registered.create_note.execute({ path: 'new.md', source: '# New' })).read_before_retry, true);
+  assert.equal(registered.get_graph_snapshot.annotations.readOnlyHint, true);
+  assert.equal(registered.get_note_graph.inputSchema.properties.depth.maximum, 8);
 });

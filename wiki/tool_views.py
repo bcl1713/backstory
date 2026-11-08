@@ -50,11 +50,21 @@ def csrf_failure(request, reason=''):
 
 @_tool(methods=('POST',))
 def save(request):
+    return _save(request, create=False)
+
+
+@_tool(methods=('POST',))
+def create_note(request):
+    return _save(request, create=True)
+
+
+def _save(request, *, create):
     if request.content_type != 'application/json':
         raise StorageError('invalid_save_request')
     try:
         body = json.loads(request.body)
-        if (not isinstance(body, dict) or set(body) - {'path', 'source', 'revision'}
+        allowed = {'path', 'source'} if create else {'path', 'source', 'revision'}
+        if (not isinstance(body, dict) or set(body) - allowed
                 or not isinstance(body.get('source'), str)):
             raise ValueError
     except RequestDataTooBig:
@@ -64,12 +74,15 @@ def save(request):
     path = authorize_content(request, body.get('path'))
     if not path.lower().endswith('.md'):
         raise PathDenied()
-    if 'revision' not in body:
-        raise StorageError('precondition_required', 428)
-    # A tool can only replace an existing read revision. No create or recovery.
-    if body['revision'] is None:
-        raise StorageError('invalid_precondition')
-    base = parse_precondition(body['revision'], None)
+    if create:
+        base = None  # Explicit create-if-absent; the shared writer publishes exclusively.
+    else:
+        if 'revision' not in body:
+            raise StorageError('precondition_required', 428)
+        # Replacement keeps the exact read revision contract. No recovery.
+        if body['revision'] is None:
+            raise StorageError('invalid_precondition')
+        base = parse_precondition(body['revision'], None)
     result = save_note(request.user, path, body['source'], base)
     data = asdict(result)
     data.pop('recovery_token', None)
@@ -87,6 +100,9 @@ def save(request):
         else:
             data.update(source=observed.source, revision=observed.revision,
                         bom=observed.bom, newline=observed.newline, authoritative=True)
+            if create:
+                data['state'] = 'created_index_delayed' if result.state == 'saved_index_delayed' else 'created'
+                status = 201
     elif result.state == 'uncertain':
         data['read_before_retry'] = True
     # Index failure must never turn a successful publication into a retry signal.

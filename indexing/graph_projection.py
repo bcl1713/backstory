@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F
+from django.db.models import Count, F, Q
 from wiki.contracts import StorageError
 from wiki.links import _decoded, _entry_kind, resolve_relation
 from wiki.policy import policy_version, validate_path
@@ -161,6 +161,60 @@ def dirty_dependents(generation, keys):
         relations_dirty=True, relation_after=0, relation_build_version=0, relation_version=F('relation_version') + 1)
 
 
+def _evidence_complete(generation):
+    return not IndexedNote.objects.filter(generation=generation).filter(
+        Q(relations_complete=False) | Q(relation_evidence_complete=False)).exists()
+
+
+def relation_status():
+    """Source-free observations; reading status never schedules or repairs work.
+
+    Source-index readiness is deliberately independent of relation publication.
+    Counts describe indexed sources, not authoritative filesystem membership.
+    """
+    from .worker import index_status
+    index = index_status()
+    generation = IndexGeneration.objects.filter(pk=index.generation).first()
+    relation = RelationState.objects.filter(generation=generation).first() if generation else None
+    counts = IndexedNote.objects.filter(generation=generation).aggregate(
+        total_sources=Count('pk'), pending_sources=Count('pk', filter=Q(relations_dirty=True)),
+        parsing_incomplete_sources=Count('pk', filter=Q(relations_complete=False)),
+        resolution_incomplete_sources=Count('pk', filter=Q(relations_dirty=False,
+                                                          relation_evidence_complete=False)))
+    counts['published_sources'] = counts['total_sources'] - counts['pending_sources']
+    current = bool(generation and relation and relation.mutation == generation.mutation)
+    namespace_current = bool(index.state != 'unavailable' and relation
+                             and relation.namespace == namespace_version())
+    complete = bool(index.state == 'ready' and current and namespace_current
+                    and relation.complete and relation.evidence_complete)
+    state, reason, action, automatic = 'ready', '', 'none', False
+    if index.state == 'unavailable':
+        state, reason, action = 'unavailable', 'relation_storage_unavailable', 'restore_storage'
+    elif index.state != 'ready':
+        state, reason, action, automatic = 'updating', 'relation_index_updating', 'wait_for_worker', True
+    elif not relation or not current:
+        state, reason, action, automatic = 'updating', 'relation_projection_pending', 'wait_for_worker', True
+    elif not namespace_current:
+        state, reason, action, automatic = 'updating', 'relation_namespace_changed', 'wait_for_worker', True
+    elif not relation.complete or counts['pending_sources']:
+        state, reason, action, automatic = 'updating', 'relation_projection_pending', 'wait_for_worker', True
+    elif not complete:
+        state = 'incomplete'
+        if counts['parsing_incomplete_sources']:
+            reason, action = 'relation_parse_incomplete', 'repair_source_and_reindex'
+        elif counts['resolution_incomplete_sources']:
+            reason, action = 'relation_resolution_incomplete', 'inspect_links_and_reindex'
+        else:
+            reason, action, automatic = 'relation_projection_pending', 'wait_for_worker', True
+            state = 'updating'
+    return dict(state=state, reason_code=reason, projection_complete=complete,
+                generation=index.generation, mutation=generation.mutation if generation else None,
+                relation_epoch=relation.epoch if relation else None,
+                publication=relation.publication if relation else 0,
+                scope='indexed_saved_content_not_disk_snapshot', **counts,
+                retry={'action': action, 'automatic': automatic})
+
+
 def record_mutation(generation):
     """Called under the source writer lock, after dependency invalidation.
 
@@ -172,7 +226,8 @@ def record_mutation(generation):
     IndexGeneration.objects.filter(pk=generation.pk).update(mutation=F('mutation') + 1)
     RelationState.objects.filter(generation=generation, mutation=before).update(
         mutation=before + 1,
-        complete=not IndexedNote.objects.filter(generation=generation, relations_dirty=True).exists())
+        complete=not IndexedNote.objects.filter(generation=generation, relations_dirty=True).exists(),
+        evidence_complete=_evidence_complete(generation))
 
 
 def run_relation_batch(limit=20):
@@ -209,6 +264,11 @@ def run_relation_batch(limit=20):
                 relations_dirty=True, relation_after=0, relation_build_version=0,
                 relation_version=F('relation_version') + 1, relation_dependencies_complete=False)
         elif state.complete:
+            # Older aggregate evidence can outlive a removed failing source.
+            # Repair only from current per-source evidence under the writer lock.
+            if not state.evidence_complete and _evidence_complete(generation):
+                state.evidence_complete = True
+                state.save(update_fields=['evidence_complete'])
             return None
     source_budget = budget  # Empty sources also consume bounded worker work.
     while budget and source_budget:
@@ -281,9 +341,7 @@ def run_relation_batch(limit=20):
             if source_complete:
                 state.publication += 1
             state.complete = not IndexedNote.objects.filter(generation=generation, relations_dirty=True).exists()
-            state.evidence_complete = not IndexedNote.objects.filter(generation=generation).filter(
-                relations_complete=False).exists() and not IndexedNote.objects.filter(
-                    generation=generation, relation_evidence_complete=False).exists()
+            state.evidence_complete = _evidence_complete(generation)
             state.save(update_fields=['after', 'complete', 'evidence_complete', 'publication'])
         budget -= max(1, len(edges))
         source_budget -= 1
