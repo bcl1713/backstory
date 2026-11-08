@@ -16,6 +16,7 @@ SCHEMAS = {
     'graph': {'path', 'depth', 'folder', 'tag', 'query', 'cursor', 'node_limit', 'edge_limit', 'expand', 'exploration'},
     'links': {'path', 'direction', 'cursor', 'limit'},
     'snapshot': {'folder', 'tag', 'query'},
+    'diagnostics': {'folder', 'limit', 'cursor'},
     'issues': {'folder', 'issue', 'cursor', 'limit'},
 }
 
@@ -53,6 +54,13 @@ def graph(request):
 @_tool
 def snapshot(request):
     data = query_snapshot(scope=authorization_scope(request), **arguments(request, 'snapshot'))
+    return _json(data, 503 if data['state'] == 'unavailable' else 200)
+
+
+@_tool
+def diagnostics(request):
+    from indexing.graph_diagnostics import query_diagnostics
+    data = query_diagnostics(scope=authorization_scope(request), **arguments(request, 'diagnostics'))
     return _json(data, 503 if data['state'] == 'unavailable' else 200)
 
 

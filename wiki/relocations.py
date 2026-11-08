@@ -43,6 +43,9 @@ def _actor(actor):
 
 
 def assert_writes_available():
+    from .models import RemovalOperation
+    if RemovalOperation.objects.filter(state__in=['applying', 'restoring', 'recovery_required']).exists():
+        raise StorageError('removal_recovery_required', 409)
     if MoveOperation.objects.filter(state__in=['applying', 'recovery_required']).exists():
         raise StorageError('move_recovery_required', 409)
 
@@ -318,12 +321,14 @@ def preview_move(actor, source, destination):
             if MoveOperation.objects.filter(state='preview').count() >= 32:
                 raise StorageError('move_preview_capacity', 503)
             plan = _plan(source, destination)
-            from django.db.models import BinaryField, Sum
-            from django.db.models.functions import Cast, Length
-            used = MoveOperation.objects.aggregate(total=Sum(Length(Cast('plan', BinaryField()))))['total'] or 0
-            if used + len(json.dumps(plan).encode()) > settings.BACKSTORY_REVISION_QUOTA_BYTES:
-                raise StorageError('move_journal_capacity', 503)
-            return MoveOperation.objects.create(actor=actor, source=source, destination=destination, plan=plan)
+            with application_lock('revision-quota'), transaction.atomic():
+                try:
+                    _check_quota(len(json.dumps(plan).encode()))
+                except StorageError as error:
+                    if error.reason_code == 'backup_quota_exceeded':
+                        raise StorageError('move_journal_capacity', 503) from None
+                    raise
+                return MoveOperation.objects.create(actor=actor, source=source, destination=destination, plan=plan)
     except OSError as error:
         raise _os_error(error) from None
 

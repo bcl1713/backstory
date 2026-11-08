@@ -56,6 +56,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   let csrf = find('[name=csrfmiddlewaretoken]').value;
   let busy = false;
   let toolBusy = false;
+  let activeToolGuard = null;
   let reviewBusy = false;
   let syncVersion = 0;
   let draftVersion = 0;
@@ -548,17 +549,20 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
     guard.editorReady = true;
     const name = newFilename();
     const editorPath = path || (name ? [folder, name].filter(Boolean).join('/') : '');
-    if (guard.path !== editorPath) return;
+    const affected = (guard.paths || [guard.path]).includes(editorPath) || (guard.prefixes || []).some(prefix => editorPath === prefix || editorPath.startsWith(prefix + '/'));
+    if (!affected) return;
     if (busy || toolBusy || reviewBusy || conflictReview || editor.isComposing()) { guard.reason_code = 'editor_busy'; return; }
     if (dirty()) { guard.reason_code = 'unsaved_editor_draft'; return; }
     toolBusy = true;
+    activeToolGuard = guard;
     syncVersion++;
     syncButtons();
     say('Browser tool save in progress. Editor source and original revision retained.');
   });
   document.addEventListener('backstory:tool-save-finish', event => {
-    if (event.detail.path !== path || !toolBusy) return;
+    if (!toolBusy || event.detail.guard !== activeToolGuard) return;
     toolBusy = false;
+    activeToolGuard = null;
     syncVersion++;
     syncButtons();
     say('Browser tool request finished. Checking external changes; draft retained.');

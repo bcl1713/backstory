@@ -7,7 +7,7 @@ from indexing.graph_projection import relation_status
 from indexing.worker import index_status
 from indexing.models import ScanState
 from .build_identity import application_identity
-from .models import MoveOperation
+from .models import MoveOperation, RemovalOperation
 from .readiness import check_readiness
 from .timezones import timezone_state
 
@@ -33,6 +33,8 @@ def status_snapshot():
               'application': application_identity(),
               'capabilities': {'contract_version': 1, 'note_max_bytes': settings.BACKSTORY_NOTE_MAX_BYTES,
                                'list_max_items': 100, 'folder_creation': True, 'note_creation': True,
+                               'index_diagnostics': True, 'relocation': True, 'note_history': True,
+                               'recoverable_removal': {'notes': True, 'empty_folders': True, 'recursive': False, 'purge': False},
                                'graph': {'tools': ['get_note_links', 'get_note_graph', 'get_graph_snapshot', 'find_link_issues'],
                                          'max_nodes': GRAPH_LIMITS['nodes'], 'max_edges': GRAPH_LIMITS['edges'],
                                          'max_items': GRAPH_LIMITS['items'], 'max_depth': GRAPH_LIMITS['depth'],
@@ -42,7 +44,8 @@ def status_snapshot():
                                'read_many_between_read_seconds': 2, 'save_serialization_scope': 'document'}}
     components = {
         'storage': lambda: asdict(check_readiness()),
-        'recovery': lambda: {'writes_paused': MoveOperation.objects.filter(state__in=['applying', 'recovery_required']).exists()},
+        'recovery': lambda: {'writes_paused': (MoveOperation.objects.filter(state__in=['applying', 'recovery_required']).exists()
+                                               or RemovalOperation.objects.filter(state__in=['applying', 'restoring', 'recovery_required']).exists())},
         'index': _index,
         'relationships': relation_status,
         'timezone': timezone_state,

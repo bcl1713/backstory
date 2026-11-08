@@ -53,3 +53,19 @@ class WikiSettings(models.Model):
     """One server-authoritative setting row for this installation's wiki."""
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     timezone = models.CharField(max_length=128)
+
+
+class RemovalOperation(models.Model):
+    """Actor-owned exact-target trash; recovery bytes are never auto-pruned."""
+    import uuid
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    path = models.CharField(max_length=4096)
+    kind = models.CharField(max_length=8)
+    base_revision = models.CharField(max_length=66, null=True)
+    original = models.BinaryField(default=b'')
+    state = models.CharField(max_length=32, default='preview', db_index=True)
+    plan = models.JSONField()
+    reason_code = models.CharField(max_length=64, default='')
+    index_state = models.CharField(max_length=16, default='not_started')
+    created_at = models.DateTimeField(auto_now_add=True)

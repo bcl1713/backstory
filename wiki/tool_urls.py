@@ -1,7 +1,19 @@
 from django.urls import path
-from . import tool_views, image_uploads, graph_views
+from . import tool_views, image_uploads, graph_views, removal_tools, management_tools
 
 urlpatterns = [
+    path('moves/preview/', management_tools.preview_move_tool, name='tool-move-preview'),
+    path('moves/get/', management_tools.get_move, name='tool-move-get'),
+    path('moves/commit/', management_tools.commit_move_tool, name='tool-move-commit'),
+    path('moves/rollback/', management_tools.rollback_move_tool, name='tool-move-rollback'),
+    path('history/list/', management_tools.list_note_history, name='tool-history-list'),
+    path('history/read/', management_tools.read_note_revision, name='tool-history-read'),
+    path('history/restore/', management_tools.restore_note_revision, name='tool-history-restore'),
+    path('removals/preview/', removal_tools.preview_removal, name='tool-removal-preview'),
+    path('removals/get/', removal_tools.get_removal, name='tool-removal-get'),
+    path('removals/commit/', removal_tools.commit_removal, name='tool-removal-commit'),
+    path('removals/restore/', removal_tools.restore_removal, name='tool-removal-restore'),
+    path('index-diagnostics/', graph_views.diagnostics, name='tool-index-diagnostics'),
     path('links/', graph_views.links, name='tool-links'),
     path('graph/', graph_views.graph, name='tool-graph'),
     path('graph/snapshot/', graph_views.snapshot, name='tool-graph-snapshot'),
