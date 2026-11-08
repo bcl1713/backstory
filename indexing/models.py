@@ -1,4 +1,5 @@
 """Rebuildable projections; authentication/session state never joins rebuilds."""
+import uuid
 from django.db import models
 
 
@@ -99,6 +100,11 @@ class IndexJob(models.Model):
     path = models.TextField(unique=True)
     revision = models.CharField(max_length=66)
     updated = models.DateTimeField(auto_now=True)
+    version = models.UUIDField(default=uuid.uuid4)
+    invalidated = models.BooleanField(default=False)
+    first_seen = models.FloatField(default=0)
+    not_before = models.FloatField(default=0)
+    missing_since = models.FloatField(null=True, default=None)
 
 
 class ScanState(models.Model):
@@ -112,6 +118,8 @@ class ScanState(models.Model):
     errors = models.PositiveIntegerField(default=0)
     last_error = models.CharField(max_length=64, default='')
     last_completed = models.FloatField(default=0)
+    last_verified = models.FloatField(default=0)
+    watcher = models.JSONField(default=dict)
     next_incremental = models.FloatField(default=0)
     next_verify = models.FloatField(default=0)
     backoff_until = models.FloatField(default=0)

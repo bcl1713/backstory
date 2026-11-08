@@ -102,9 +102,13 @@ which cannot establish write access, share health or filesystem authenticity. A 
 8. Refresh index queues incremental maintenance; Rebuild index deliberately
    creates a new projection generation. Both coalesce. Interrupted work resumes
    from its durable checkpoint and retains the active generation until a complete
-   valid replacement. Rebuild does not reset users or sessions. Defaults: 20 files
-   per maintenance batch, one-second yield, five-minute incremental scan, daily
-   content verification; no filesystem watcher or browser wiki index.
+   valid replacement. Rebuild does not reset users or sessions. Defaults: 20 content
+   jobs and 256 metadata entries per bounded batch, short adaptive yields,
+   five-minute metadata reconciliation and daily content verification. The indexer
+   owns native Linux notifications with durable recovery and automatic polling
+   fallback. Set `BACKSTORY_INDEX_WATCH_MODE=poll` for mounts with unreliable events;
+   keep the periodic schedules in either mode. Indexing details disclose the active
+   phase, counters and safe watcher health without treating discovery as completion.
 9. Sign in as the assistant in another context, then revoke it interactively:
 
    ```sh

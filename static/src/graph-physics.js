@@ -80,10 +80,16 @@ export class GraphPhysics {
     }
     this.springs = [];
     for (const source of queue) for (const destination of this.outgoing.get(source)) {
-      if (this.depths.get(destination) === this.depths.get(source) + 1) this.springs.push([this.nodes.get(source), this.nodes.get(destination)]);
+      if (this.isSpringEdge(source, destination)) this.springs.push([this.nodes.get(source), this.nodes.get(destination)]);
     }
     // Each adjacency is unique. Reciprocal records cannot both advance depth,
     // so every active unordered pair has exactly one equal-strength spring.
+  }
+  // Shared with rendering: rest, pause, occurrence counts and visual hop tiers
+  // do not affect the selected-root directed shortest-parent structure.
+  isSpringEdge(source, destination) {
+    const depth = this.depths.get(source);
+    return Number.isFinite(depth) && this.depths.get(destination) === depth + 1;
   }
   setForces(value) { this.forces = validateForces(value); this.reheat(); }
   reheat() { this.pendingStep = null; this.active = true; this.steps = 0; this.quiet = 0; this.accumulator = 0; this.limitReached = false; }

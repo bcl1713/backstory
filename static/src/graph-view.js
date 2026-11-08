@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { GraphPhysics } from './graph-physics.js';
 import { GraphCamera } from './graph-camera.js';
-import { hopTiers, emission, nearestNode, AdaptiveQuality } from './graph-layout.js';
+import { layoutLabels } from './graph-labels.js';
+import { hopTiers, emission, nearestNode, AdaptiveQuality, BLOOM_DEFAULT, BLOOM_HIGH } from './graph-layout.js';
 
-function geometry(count, color = false) {
+function geometry(count, color = false, alpha = false) {
   const result = new THREE.BufferGeometry();
   result.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3).setUsage(THREE.DynamicDrawUsage));
-  if (color) result.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3).setUsage(THREE.DynamicDrawUsage));
+  if (color) result.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * (alpha ? 4 : 3)), alpha ? 4 : 3).setUsage(THREE.DynamicDrawUsage));
   return result;
 }
 // Five draw batches regardless of graph size. No node owns a scene object or DOM
@@ -15,21 +16,21 @@ export function createGraphBatches(nodes, edges) {
   const group = new THREE.Group();
   const marks = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshBasicMaterial({ color: 0xffffff }), nodes.length);
   marks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  const lines = new THREE.LineSegments(geometry(edges.length * 2, true), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .62 }));
-  const arrows = new THREE.Mesh(geometry(edges.length * 3, true), new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: .85, side: THREE.DoubleSide, forceSinglePass: true }));
+  const lines = new THREE.LineSegments(geometry(edges.length * 2, true, true), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: .62, depthWrite: false }));
+  const arrows = new THREE.Mesh(geometry(edges.length * 3, true, true), new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: .85, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true }));
   const haloMaterial = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { dpr: { value: 1 } },
     vertexShader: 'attribute vec3 color; varying vec3 glow; uniform float dpr; void main(){ glow=color; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); gl_PointSize=48.*dpr; }',
     fragmentShader: `varying vec3 glow; void main(){ float r=length(gl_PointCoord-vec2(.5))*2.; if(r>1.) discard; float a=pow(1.-r,2.)*.6; gl_FragColor=vec4(glow,a*max(max(glow.r,glow.g),glow.b));
 #include <colorspace_fragment>
 }` });
   const halos = new THREE.Points(geometry(nodes.length, true), haloMaterial);
-  const strips = geometry(edges.length * 6, true);
+  const strips = geometry(edges.length * 6, true, true);
   const uv = new Float32Array(edges.length * 12);
   for (let i = 0; i < edges.length; i++) uv.set([0, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 1], i * 12);
   strips.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   const edgeHalos = new THREE.Mesh(strips, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true,
-    vertexShader: 'attribute vec3 color; varying vec3 glow; varying vec2 strip; void main(){ glow=color; strip=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }',
-    fragmentShader: `varying vec3 glow; varying vec2 strip; void main(){ float a=pow(1.-abs(strip.y*2.-1.),2.)*.28; gl_FragColor=vec4(glow,a*max(max(glow.r,glow.g),glow.b));
+    vertexShader: 'attribute vec4 color; varying vec4 glow; varying vec2 strip; void main(){ glow=color; strip=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.); }',
+    fragmentShader: `varying vec4 glow; varying vec2 strip; void main(){ float a=pow(1.-abs(strip.y*2.-1.),2.)*.28; gl_FragColor=vec4(glow.rgb,a*glow.a*max(max(glow.r,glow.g),glow.b));
 #include <colorspace_fragment>
 }` }));
   for (const object of [edgeHalos, halos, lines, arrows, marks]) { object.frustumCulled = false; group.add(object); }
@@ -42,7 +43,7 @@ export class GraphView {
     this.container = container; this.actions = actions; this.life = new AbortController();
     this.simulation = new GraphPhysics(); this.camera = new GraphCamera(); this.quality = new AdaptiveQuality();
     this.data = { nodes: [], edges: [] }; this.selected = this.focused = null;
-    this.frame = null; this.destroyed = false; this.intensity = 1; this.pointers = new Map(); this.projected = new Map();
+    this.frame = null; this.destroyed = false; this.intensity = BLOOM_DEFAULT; this.pointers = new Map(); this.projected = new Map();
     this.reduced = matchMedia('(prefers-reduced-motion: reduce)'); this.forced = matchMedia('(forced-colors: active)');
     this.paused = this.reduced.matches;
     this.canvas = document.createElement('canvas'); this.canvas.setAttribute('aria-hidden', 'true');
@@ -144,7 +145,7 @@ export class GraphView {
     if (this.paused) this.simulation.settle(0);
     this.draw(); this.wake();
   }
-  setBloom(value) { this.intensity = Math.min(2, Math.max(0, Number(value) || 0)); this.container.dataset.bloom = String(this.intensity); this.themeDirty = true; this.draw(); }
+  setBloom(value) { this.intensity = Math.min(BLOOM_HIGH, Math.max(0, Number(value) || 0)); this.container.dataset.bloom = String(this.intensity); this.themeDirty = true; this.draw(); }
   setPaused(value) {
     this.paused = !!value || this.reduced.matches; this.release(null, true);
     if (this.paused) { this.simulation.settle(0); this.camera.snap(); this.stop(); } else { this.simulation.reheat(); this.wake(); }
@@ -228,11 +229,15 @@ export class GraphView {
       this.color.toArray(batch.halos.geometry.attributes.color.array, i * 3);
     });
     this.data.edges.forEach((edge, i) => {
+      const spring = this.simulation.isSpringEdge(edge.source, edge.destination);
+      const alpha = this.forced.matches || spring ? 1 : .12;
       this.color.set(this.tiers.edges[i] <= 1 ? this.theme.highlight : this.theme.edge);
-      for (let v = 0; v < 2; v++) this.color.toArray(batch.edges.geometry.attributes.color.array, (i * 2 + v) * 3);
-      for (let v = 0; v < 3; v++) this.color.toArray(batch.arrows.geometry.attributes.color.array, (i * 3 + v) * 3);
-      this.color.set(this.theme.bloom).multiplyScalar(emission(this.tiers.edges[i], bloom));
-      for (let v = 0; v < 6; v++) this.color.toArray(batch.edgeHalos.geometry.attributes.color.array, (i * 6 + v) * 3);
+      for (const [object, vertices] of [[batch.edges, 2], [batch.arrows, 3]]) for (let v = 0; v < vertices; v++) {
+        object.geometry.attributes.color.setXYZW(i * vertices + v, this.color.r, this.color.g, this.color.b, alpha);
+      }
+      // Quiet context cannot become a competing glow at the higher setting.
+      this.color.set(this.theme.bloom).multiplyScalar(emission(this.tiers.edges[i], spring ? bloom : Math.min(1, bloom)));
+      for (let v = 0; v < 6; v++) batch.edgeHalos.geometry.attributes.color.setXYZW(i * 6 + v, this.color.r, this.color.g, this.color.b, alpha);
     });
     if (batch.nodes.instanceColor) batch.nodes.instanceColor.needsUpdate = true;
     for (const o of [batch.halos, batch.edges, batch.arrows, batch.edgeHalos]) o.geometry.attributes.color.needsUpdate = true;
@@ -293,24 +298,33 @@ export class GraphView {
     const ctx = this.labelContext; if (!ctx) return;
     const camera = this.camera; ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0); ctx.clearRect(0, 0, camera.width, camera.height);
     ctx.font = `12px ${this.fontFamily}`; ctx.lineJoin = 'round'; ctx.lineWidth = 4;
-    const priority = path => path === this.selected ? 3 : path === this.focused ? 2 : path === this.current ? 1 : 0;
-    // Sort only the bounded candidates; mandatory labels enter first. The rest
-    // use input order, stable across accumulated pages.
-    const mandatory = this.data.nodes.filter(n => priority(n.path)).sort((a, b) => priority(b.path) - priority(a.path));
-    const candidates = [...mandatory, ...this.data.nodes.filter(n => !priority(n.path))];
-    const occupied = []; let count = 0;
-    for (const node of candidates) {
-      if (count >= this.quality.labels) break;
-      const p = this.projected.get(node.path); if (!p?.visible || p.x < 0 || p.x > camera.width || p.y < 0 || p.y > camera.height) continue;
-      const maximum = Math.max(10, Math.min(38, Math.floor((camera.width - 48) / 7.4))), title = String(node.title || node.path);
-      const text = title.length > maximum ? title.slice(0, maximum - 1) + '…' : title, width = ctx.measureText(text).width;
-      const left = p.x + 14 + width > camera.width, x = Math.max(4, Math.min(camera.width - width - 4, p.x + (left ? -14 - width : 14))), y = Math.max(14, Math.min(camera.height - 4, p.y + 4));
-      const rect = { x, y: y - 13, w: width, h: 18 };
-      if (!priority(node.path) && occupied.some(r => rect.x < r.x + r.w && rect.x + rect.w > r.x && rect.y < r.y + r.h && rect.y + rect.h > r.y)) continue;
-      occupied.push(rect); count++; ctx.strokeStyle = this.theme.background; ctx.fillStyle = this.theme.label; ctx.strokeText(text, x, y); ctx.fillText(text, x, y);
-      if (node.path === this.current) { ctx.strokeStyle = this.theme.label; ctx.strokeRect(p.x - 9, p.y - 9, 18, 18); }
-      if (node.path === this.selected) { ctx.strokeStyle = this.theme.highlight; ctx.beginPath(); ctx.moveTo(p.x, p.y - 13); ctx.lineTo(p.x + 13, p.y); ctx.lineTo(p.x, p.y + 13); ctx.lineTo(p.x - 13, p.y); ctx.closePath(); ctx.stroke(); }
-      if (node.path === this.focused) { ctx.strokeStyle = this.theme.focus; ctx.setLineDash([5, 5]); ctx.strokeRect(p.x - 16, p.y - 16, 32, 32); ctx.setLineDash([]); }
+    const labels = layoutLabels({ nodes: this.data.nodes, projected: this.projected,
+      width: camera.width, height: camera.height, selected: this.selected, focused: this.focused, current: this.current,
+      measure: text => ctx.measureText(text).width, maximum: this.quality.labels, previous: this.labelSlots });
+    this.labelSlots = new Map(labels.map(label => [label.path, label.slot]));
+    this.labelPlacements = labels;
+    // Leaders and backed text keep an offset identity tied to its node, even
+    // when a dense priority cluster needs a viewport-margin placement.
+    for (const label of labels) {
+      const p = this.projected.get(label.path), { rect, anchor } = label;
+      ctx.strokeStyle = label.path === this.selected ? this.theme.highlight : label.path === this.focused ? this.theme.focus : this.theme.label;
+      ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(anchor.x, anchor.y); ctx.stroke();
+    }
+    // All backed labels cover crossing leaders, including a later node's line.
+    for (const label of labels) {
+      const { rect } = label;
+      ctx.fillStyle = this.theme.background; ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.strokeStyle = this.theme.background; ctx.fillStyle = this.theme.label; ctx.lineWidth = 3;
+      ctx.strokeText(label.text, rect.x + 4, rect.y + 14); ctx.fillText(label.text, rect.x + 4, rect.y + 14);
+    }
+    // State cues do not depend on label budget or placement success.
+    for (const path of new Set([this.current, this.selected, this.focused])) {
+      const p = this.projected.get(path);
+      if (!p?.visible || p.x < 0 || p.x > camera.width || p.y < 0 || p.y > camera.height) continue;
+      ctx.lineWidth = 2;
+      if (path === this.current) { ctx.strokeStyle = this.theme.label; ctx.strokeRect(p.x - 9, p.y - 9, 18, 18); }
+      if (path === this.selected) { ctx.strokeStyle = this.theme.highlight; ctx.beginPath(); ctx.moveTo(p.x, p.y - 13); ctx.lineTo(p.x + 13, p.y); ctx.lineTo(p.x, p.y + 13); ctx.lineTo(p.x - 13, p.y); ctx.closePath(); ctx.stroke(); }
+      if (path === this.focused) { ctx.strokeStyle = this.theme.focus; ctx.setLineDash([5, 5]); ctx.strokeRect(p.x - 16, p.y - 16, 32, 32); ctx.setLineDash([]); }
     }
   }
   snapshot() { return { renderer: this.container.dataset.renderer, nodes: this.data.nodes.length, edges: this.data.edges.length, selected: this.selected, focused: this.focused, camera: { x: this.camera.x, y: this.camera.y, z: this.camera.z, yaw: this.camera.yaw, pitch: this.camera.pitch, distance: this.camera.distance }, projected: [...this.projected].map(([path, p]) => ({ path, ...p })) }; }

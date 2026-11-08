@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import posixpath
+import time
 from urllib.parse import urlsplit
 
 from django.conf import settings
@@ -42,12 +43,21 @@ def path_fingerprint(path):
         raise
 
 
-def verify_path_batch(generation, after, limit=20):
+def verify_path_batch(generation, after, limit=20, *, checked_count=None):
     """Recheck recorded exact inputs only; never scan asset directories."""
-    limit = max(1, min(20, limit))
+    limit = max(1, min(1024, limit))
     namespace = namespace_version()
     paths = list(RelationPath.objects.filter(generation=generation, pk__gt=after).order_by('pk')[:limit])
-    observed = {item.path: path_fingerprint(item.path) for item in paths}
+    started = time.monotonic()
+    observed = {}
+    checked = []
+    for item in paths:
+        observed[item.path] = path_fingerprint(item.path)
+        checked.append(item)
+        if time.monotonic() - started >= .1:
+            break
+    complete = len(paths) < limit and len(checked) == len(paths)
+    paths = checked
     if namespace_version() != namespace:
         raise StorageError('index_namespace_changed', 503)
     with transaction.atomic():
@@ -56,19 +66,28 @@ def verify_path_batch(generation, after, limit=20):
         active = set(RelationDependency.objects.filter(note__generation=generation, key__in=keys)
                      .values_list('key', flat=True))
         changed = set()
+        refreshed = []
+        inactive = []
         for item in paths:
             key = 'path:' + item.path
             if key not in active:
-                RelationPath.objects.filter(pk=item.pk).delete()
+                inactive.append(item.pk)
                 continue
             if item.namespace == namespace and item.fingerprint != observed[item.path]:
                 changed.add(key)
-            item.fingerprint, item.namespace = observed[item.path], namespace
-            item.save(update_fields=['fingerprint', 'namespace'])
+            if item.fingerprint != observed[item.path] or item.namespace != namespace:
+                item.fingerprint, item.namespace = observed[item.path], namespace
+                refreshed.append(item)
+        if refreshed:
+            RelationPath.objects.bulk_update(refreshed, ["fingerprint", "namespace"])
+        if inactive:
+            RelationPath.objects.filter(pk__in=inactive).delete()
         if changed:
             dirty_dependents(generation, changed)
             record_mutation(generation)
-    return (paths[-1].pk if paths else after), len(paths) < limit
+    if checked_count is not None:
+        checked_count.append(len(paths))
+    return (paths[-1].pk if paths else after), complete
 
 
 def dependency_keys(source, edge):

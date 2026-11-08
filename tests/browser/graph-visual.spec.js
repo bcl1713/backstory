@@ -66,7 +66,7 @@ test('progressive 3D graph retains pages, selection and camera, with theme, phon
   await panel.getByRole('button', { name: 'Orbit right', exact: true }).click();
   await expect(map).not.toHaveAttribute('data-camera-yaw', camera);
   await panel.getByRole('button', { name: 'Reset orientation', exact: true }).click();
-  for (const intensity of ['0', '1', '2']) {
+  for (const intensity of ['0', '2', '4']) {
     await panel.getByRole('slider', { name: 'Bloom intensity' }).fill(intensity);
     await expect(map).toHaveAttribute('data-bloom', intensity);
   }

@@ -16,7 +16,9 @@ export function hopTiers(nodes, edges, selected) {
   }
   return { nodes: distances, edges: edges.map(edge => Math.max(distances.get(edge.source) ?? Infinity, distances.get(edge.destination) ?? Infinity)) };
 }
-export const emission = (tier, intensity = 1) => intensity === 0 ? 0 : Math.min(2, Math.max(0, intensity)) * (Number.isFinite(tier) ? .12 + .65 * .52 ** tier : .08);
+export const BLOOM_DEFAULT = 2;
+export const BLOOM_HIGH = 4;
+export const emission = (tier, intensity = BLOOM_DEFAULT) => intensity === 0 ? 0 : Math.min(BLOOM_HIGH, Math.max(0, intensity)) * (Number.isFinite(tier) ? .12 + .65 * .52 ** tier : .08);
 
 export function nearestNode(positions, current, direction) {
   const origin = positions.get(current);

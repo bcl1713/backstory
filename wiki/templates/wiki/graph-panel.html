@@ -23,7 +23,7 @@
 <button type="button" data-graph-fit>Fit</button><button type="button" data-graph-reset>Reset orientation</button>
 <button type="button" data-graph-orbit="-0.3">Orbit left</button><button type="button" data-graph-orbit="0.3">Orbit right</button><button type="button" data-graph-zoom="1.25" aria-label="Zoom in">+</button><button type="button" data-graph-zoom="0.8" aria-label="Zoom out">−</button>
 <button type="button" data-graph-pan="left" aria-label="Pan left">←</button><button type="button" data-graph-pan="right" aria-label="Pan right">→</button><button type="button" data-graph-pan="up" aria-label="Pan up">↑</button><button type="button" data-graph-pan="down" aria-label="Pan down">↓</button>
-<label>Bloom intensity <input data-graph-bloom type="range" min="0" max="2" step="1" value="1"></label><output data-graph-bloom-value>Default</output>
+<label>Bloom intensity <input data-graph-bloom type="range" min="0" max="4" step="2" value="2" aria-valuetext="Default"></label><output data-graph-bloom-value>Default</output>
 </div></details>
 
 </div></details>
@@ -49,6 +49,7 @@
 </aside>
 </div>
 <p data-graph-status role="status" aria-live="polite" aria-atomic="true"></p>
+<details class="graph-evidence" data-graph-index-status><summary>Index progress</summary><p data-graph-index-progress>Open for current indexing progress.</p></details>
 <details class="graph-evidence"><summary>About this graph and evidence</summary><p>Indexed saved content. Unsaved edits stay in your editor.</p><p data-graph-diagnostics></p>
 <p id="graph-map-description" class="graph-caption">□ current note · ◇ selected note · corner reticle focused note. Arrows show explicit link direction. Coordinates and node size do not measure meaning. Bloom fades with shortest link hops inside this displayed graph.</p></details>
 </div>

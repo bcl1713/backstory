@@ -28,6 +28,7 @@ class BatchResult:
     priority: int = 0
     pending: bool = False
     state: str = 'idle'
+    expensive: int = 0
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,14 @@ class IndexStatus:
     errors: int
     reason_code: str
     generation: int | None
+    phase: str = "idle"
+    metadata_checked: int = 0
+    parsed_notes: int = 0
+    dependencies_checked: int = 0
+    last_verified: float = 0
+    watcher_mode: str = "poll"
+    watcher_health: str = "starting"
+    fallback_reason: str = ""
 
 
 @contextmanager
@@ -143,6 +152,69 @@ def _commit_projection(snapshot, info, generations, token):
                 cursor.execute('DELETE FROM indexed_fts WHERE rowid = %s', [note.pk])
                 cursor.execute('INSERT INTO indexed_fts(rowid,path,title,body,generation) VALUES (%s,%s,%s,%s,%s)',
                                [note.pk, note.path, note.title, note.body, generation.pk])
+    return needs_projection
+
+
+def _process_invalidation(path, generations, token, *, allow_missing=False):
+    """Confirm final safe path state; attachment invalidation never reads bytes."""
+    from .graph_projection import (dirty_dependents, namespace_keys, namespace_version,
+                                   path_fingerprint, record_mutation)
+    from wiki.storage import open_directory
+    namespace = namespace_version()
+    kind = path_fingerprint(path)
+    parsed = False
+    if path.lower().endswith('.md') and kind == 'file':
+        snapshot = read_note(path)
+        parsed = _commit_projection(snapshot, file_stat(path), generations, token)
+    elif kind == 'missing':
+        if not allow_missing:
+            # It disappeared after the caller checked; retry with a fresh
+            # observed-absence grace period, preserving the event version.
+            raise StorageError('index_revision_changed', 503)
+        # Missing parents/permission errors need complete reconciliation. Never
+        # infer deletion from an inaccessible tree or a lost storage mount.
+        parent = path.rpartition('/')[0]
+        try:
+            with open_directory(parent):
+                pass
+        except StorageError:
+            from .queue import require_reconciliation
+            require_reconciliation()
+            return
+        require_ready()
+        if path_fingerprint(path) != 'missing' or namespace_version() != namespace:
+            raise StorageError('index_revision_changed', 503)
+        with transaction.atomic():
+            ScanState.objects.filter(pk=1).update(errors=F('errors'))
+            for generation in generations:
+                notes = list(IndexedNote.objects.filter(generation=generation, path=path)
+                             .defer('body', 'projection', 'tags', 'stat'))
+                for note in notes:
+                    dirty_dependents(generation, namespace_keys(note))
+                    with connection.cursor() as cursor:
+                        cursor.execute('DELETE FROM indexed_fts WHERE rowid=%s', [note.pk])
+                    note.delete()
+                if notes:
+                    record_mutation(generation)
+    elif kind == 'denied':
+        from .queue import require_reconciliation
+        require_reconciliation()
+        return
+    # Reuse recorded path evidence for positive and negative exact lookups.
+    # Update only dependents of this path, keeping unrelated sources published.
+    from .models import RelationPath
+    if namespace_version() != namespace:
+        raise StorageError('index_namespace_changed', 503)
+    with transaction.atomic():
+        ScanState.objects.filter(pk=1).update(errors=F('errors'))
+        for generation in generations:
+            records = RelationPath.objects.filter(generation=generation, path=path)
+            changed = records.exclude(fingerprint=kind, namespace=namespace).exists()
+            if changed:
+                records.update(fingerprint=kind, namespace=namespace)
+                dirty_dependents(generation, {'path:' + path})
+                record_mutation(generation)
+    return parsed
 
 
 def _claim_reconciliation():
@@ -160,7 +232,8 @@ def _start(state, kind):
             kind = 'verify'
         generation = IndexGeneration.objects.create() if kind == 'rebuild' or active is None else active
         state.checkpoint = {'kind': kind, 'generation': generation.pk, 'token': uuid.uuid4().hex,
-                            'stack': [{'path': '', 'offset': 0}], 'phase': 'discover'}
+                            'stack': [{'path': '', 'offset': 0}], 'phase': 'discover',
+                            'metadata_checked': 0, 'parsed_notes': 0, 'dependencies_checked': 0}
         state.processed = state.discovered = state.errors = 0
         state.requested = ''
         state.initialized = True
@@ -175,6 +248,9 @@ def _restart_for_reconciliation(state):
             return
         # An overflow during an existing pass must verify content again,
         # including paths already visited before the dropped revision arrived.
+        state.checkpoint.pop('scan_policy', None)
+        state.checkpoint.pop('cursor_token', None)
+        state.checkpoint.pop('paths', None)
         state.checkpoint.update(kind='verify', phase='discover', token=uuid.uuid4().hex,
                                 stack=[{'path': '', 'offset': 0}])
         state.processed = state.discovered = state.errors = 0
@@ -194,8 +270,6 @@ def _schedule(state, now):
         state.next_incremental = now + settings.BACKSTORY_INDEX_INCREMENTAL_SECONDS
         state.next_verify = now + settings.BACKSTORY_INDEX_VERIFY_SECONDS
         changes += ['next_incremental', 'next_verify']
-    if state.checkpoint and state.reconcile_needed:
-        _restart_for_reconciliation(state)
     if not state.checkpoint:
         kind = state.requested
         if not state.initialized:
@@ -216,7 +290,10 @@ def _finish(state, generation, now):
     with transaction.atomic():
         # Keep the pending-work check and publication in one serialized write.
         ScanState.objects.filter(pk=1).update(errors=F('errors'))
-        if IndexJob.objects.exists() or ScanState.objects.filter(pk=1, reconcile_needed=True).exists():
+        if IndexJob.objects.exists():
+            return False
+        if ScanState.objects.filter(pk=1, reconcile_needed=True).exists():
+            _restart_for_reconciliation(state)
             return False
         stale = IndexedNote.objects.filter(generation=generation).exclude(seen=state.checkpoint['token'])
         with connection.cursor() as cursor:
@@ -237,6 +314,8 @@ def _finish(state, generation, now):
             IndexGeneration.objects.filter(state='active').update(state='retired')
             generation.state = 'active'
             generation.save(update_fields=['state'])
+        if state.checkpoint.get("kind") in {"verify", "rebuild"}:
+            state.last_verified = now
         state.checkpoint = {}
         state.errors = 0
         state.last_error = ''
@@ -245,7 +324,7 @@ def _finish(state, generation, now):
         state.next_incremental = now + settings.BACKSTORY_INDEX_INCREMENTAL_SECONDS
         if state.next_verify <= now:
             state.next_verify = now + settings.BACKSTORY_INDEX_VERIFY_SECONDS
-        state.save(update_fields=['checkpoint', 'errors', 'last_error', 'backoff_until', 'last_completed', 'next_incremental', 'next_verify'])
+        state.save(update_fields=['checkpoint', 'errors', 'last_error', 'backoff_until', 'last_completed', 'last_verified', 'next_incremental', 'next_verify'])
     return True
 
 
@@ -259,7 +338,7 @@ def _remove_marker_entries():
     with transaction.atomic():
         with connection.cursor() as cursor:
             cursor.execute('DELETE FROM indexed_fts WHERE path=%s', [path])
-        IndexedNote.objects.filter(path=path).delete()
+        IndexedNote.objects.filter(path=path).only('id').delete()
         IndexJob.objects.filter(path=path).delete()
 
 
@@ -273,68 +352,128 @@ def _run(now, progress):
     cp = state.checkpoint
     generations = list(IndexGeneration.objects.filter(state__in=['active', 'building']))
     token = cp.get('token', '')
-    processed = priority = 0
-    limit = max(1, min(settings.BACKSTORY_INDEX_BATCH_SIZE, BATCH_SIZE))
-    # Priority work consumes the same I/O allowance as bulk work.
-    for job in list(IndexJob.objects.order_by('updated', 'pk')[:limit]):
-        try:
-            snapshot = read_note(job.path)
-        except StorageError as error:
-            if error.reason_code not in {'not_found', 'path_denied'}:
-                raise
-            IndexJob.objects.filter(pk=job.pk, revision=job.revision).delete()
-            ScanState.objects.filter(pk=1).update(reconcile_needed=True)
-            continue
-        _commit_projection(snapshot, file_stat(job.path), generations, token)
-        IndexJob.objects.filter(pk=job.pk, revision=job.revision).delete()
+    processed = priority = expensive = 0
+    started = time.monotonic()
+    limit = max(1, min(settings.BACKSTORY_INDEX_BATCH_SIZE, 128))
+    metadata_limit = max(1, min(getattr(settings, 'BACKSTORY_INDEX_METADATA_BATCH_SIZE', 256), 1024))
+    # Each path job carries an independent version. Repeated/same-revision events
+    # arriving during a read/commit survive acknowledgement of the older job.
+    for job in list(IndexJob.objects.filter(not_before__lte=now).order_by('updated', 'pk')[:limit]):
+        if priority and time.monotonic() - started >= .1:
+            break
+        observed_kind = None
+        if job.invalidated:
+            from .graph_projection import path_fingerprint
+            observed_kind = path_fingerprint(job.path)
+            if observed_kind != 'missing' and job.missing_since is not None:
+                # Reappearance ends the prior absence, even if another rename
+                # races the next check. A later absence needs fresh grace.
+                IndexJob.objects.filter(pk=job.pk, version=job.version).update(missing_since=None)
+                job.missing_since = None
+            if observed_kind == 'missing':
+                if job.missing_since is None:
+                    # Absence starts its own grace period even for a long-lived
+                    # coalesced edit. Newer versions reset this observation.
+                    IndexJob.objects.filter(pk=job.pk, version=job.version).update(
+                        missing_since=now, not_before=now + 2)
+                    continue
+                if now < job.missing_since + 2:
+                    continue
+        if job.invalidated:
+            parsed = _process_invalidation(job.path, generations, token,
+                                           allow_missing=observed_kind == 'missing' and job.missing_since is not None and now >= job.missing_since + 2)
+            if cp:
+                cp['parsed_notes'] = cp.get('parsed_notes', 0) + bool(parsed)
+        else:
+            try:
+                snapshot = read_note(job.path)
+            except StorageError as error:
+                if error.reason_code not in {'not_found', 'path_denied'}:
+                    raise
+                from .queue import require_reconciliation
+                require_reconciliation()
+            else:
+                parsed = _commit_projection(snapshot, file_stat(job.path), generations, token)
+                if cp:
+                    cp['parsed_notes'] = cp.get('parsed_notes', 0) + bool(parsed)
+        IndexJob.objects.filter(pk=job.pk, version=job.version).delete()
         priority += 1
+        expensive += 1
         progress[0] = priority
     if not cp:
-        return BatchResult(priority, priority, _pending(), 'ready')
+        return BatchResult(priority, priority, _pending(), 'ready', expensive)
     generation = IndexGeneration.objects.get(pk=cp['generation'])
     remaining = limit - priority
     if remaining == 0:
-        return BatchResult(priority, priority, True, 'partial')
+        state.checkpoint = cp
+        state.save(update_fields=['checkpoint'])
+        return BatchResult(priority, priority, True, 'partial', expensive)
     if cp['phase'] == 'discover':
-        paths, complete = next_paths(cp, remaining)
+        # Keep discovered-but-not-read paths in a bounded durable buffer. Cheap
+        # stat work has its own budget; expensive reads still honor note limits.
+        paths = cp.get('paths', [])
+        if not paths:
+            paths, cp['walk_complete'] = next_paths(cp, metadata_limit, entry_limit=metadata_limit * 2)
+        existing = dict(IndexedNote.objects.filter(generation=generation, path__in=paths)
+                        .values_list('path', 'stat'))
+        unchanged = []
+        consumed = 0
         for path in paths:
+            if expensive >= limit or time.monotonic() - started >= .1:
+                break
             info = file_stat(path)
-            existing = IndexedNote.objects.filter(generation=generation, path=path).first()
-            if cp['kind'] == 'incremental' and existing and existing.stat == info:
-                IndexedNote.objects.filter(pk=existing.pk).update(seen=token)
+            cp['metadata_checked'] = cp.get('metadata_checked', 0) + 1
+            if cp['kind'] == 'incremental' and existing.get(path) == info:
+                unchanged.append(path)
             else:
                 snapshot = read_note(path)
-                _commit_projection(snapshot, info, [generation], token)
+                parsed = _commit_projection(snapshot, info, [generation], token)
+                expensive += 1
+                cp['parsed_notes'] = cp.get('parsed_notes', 0) + bool(parsed)
+            consumed += 1
             processed += 1
+        if unchanged:
+            IndexedNote.objects.filter(generation=generation, path__in=unchanged).update(seen=token)
+        cp['paths'] = paths[consumed:]
         state.processed += processed
-        state.discovered += len(paths)
-        if complete:
-            cp['phase'] = 'validate'
-            cp['after'] = 0
+        state.discovered += consumed
+        if not cp['paths'] and cp.get('walk_complete'):
+            cp.update(phase='validate', after=0)
     elif cp['phase'] == 'validate':
-        # Candidate promotion also revalidates revisions in bounded batches.
-        notes = list(IndexedNote.objects.filter(generation=generation, seen=token, pk__gt=cp.get('after', 0)).order_by('pk')[:remaining])
+        # Full candidate body validation remains mandatory. Ordinary active
+        # reconciliation only reads metadata columns in bounded sets.
+        budget = remaining if generation.state == 'building' else metadata_limit
+        notes = list(IndexedNote.objects.filter(generation=generation, seen=token, pk__gt=cp.get('after', 0))
+                     .only('id', 'path', 'revision', 'stat').order_by('pk')[:budget])
         for note in notes:
+            if expensive >= limit or time.monotonic() - started >= .1:
+                break
             info = file_stat(note.path)
+            cp['metadata_checked'] = cp.get('metadata_checked', 0) + 1
             if generation.state == 'building' or info != note.stat:
                 snapshot = read_note(note.path)
+                expensive += 1
                 if snapshot.revision != note.revision or info != note.stat:
-                    _commit_projection(snapshot, info, [generation], token)
+                    parsed = _commit_projection(snapshot, info, [generation], token)
+                    cp['parsed_notes'] = cp.get('parsed_notes', 0) + bool(parsed)
             cp['after'] = note.pk
             processed += 1
-        if len(notes) < remaining:
+        if len(notes) < budget and processed == len(notes):
             cp.update(phase='dependencies', after=0)
     else:
         from .graph_projection import verify_path_batch
-        cp['after'], complete = verify_path_batch(generation, cp.get('after', 0), remaining)
+        previous = cp.get('after', 0)
+        counts = []
+        cp['after'], complete = verify_path_batch(generation, previous, metadata_limit, checked_count=counts)
+        cp['dependencies_checked'] = cp.get('dependencies_checked', 0) + counts[0]
         if complete:
             complete = _finish(state, generation, now)
-            return BatchResult(processed + priority, priority, not complete or _pending(), 'ready' if complete else 'partial')
+            return BatchResult(processed + priority, priority, not complete or _pending(), 'ready' if complete else 'partial', expensive)
     state.checkpoint = cp
     state.errors = 0
     state.last_error = ''
     state.save(update_fields=['checkpoint', 'processed', 'discovered', 'errors', 'last_error'])
-    return BatchResult(processed + priority, priority, True, 'partial')
+    return BatchResult(processed + priority, priority, True, 'partial', expensive)
 
 
 def run_batch(now=None):
@@ -365,6 +504,9 @@ def run_batch(now=None):
                     # Retry the complete scan, retaining useful old rows and the
                     # candidate. A failed pass never performs reconciliation.
                     cp = state.checkpoint
+                    cp.pop('scan_policy', None)
+                    cp.pop('cursor_token', None)
+                    cp.pop('paths', None)
                     cp.update(stack=[{'path': '', 'offset': 0}], phase='discover', token=uuid.uuid4().hex)
                     state.checkpoint = cp
                     state.processed = state.discovered = 0
@@ -382,4 +524,12 @@ def index_status():
     return IndexStatus(status, state.processed if state else 0, state.discovered if state else 0,
                        IndexJob.objects.count(), state.last_completed if state else 0,
                        min(state.next_incremental, state.next_verify) if state else 0,
-                       state.errors if state else 0, state.last_error if state else '', generation.pk if generation else None)
+                       state.errors if state else 0, state.last_error if state else '', generation.pk if generation else None,
+                       state.checkpoint.get('phase', 'relations' if generation and IndexedNote.objects.filter(generation=generation, relations_dirty=True).exists() else 'idle') if state else 'idle',
+                       state.checkpoint.get('metadata_checked', 0) if state else 0,
+                       state.checkpoint.get('parsed_notes', 0) if state else 0,
+                       state.checkpoint.get('dependencies_checked', 0) if state else 0,
+                       state.last_verified if state else 0,
+                       state.watcher.get('mode', 'poll') if state else 'poll',
+                       state.watcher.get('health', 'starting') if state else 'starting',
+                       state.watcher.get('reason', '') if state else '')
