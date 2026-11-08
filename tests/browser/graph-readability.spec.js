@@ -38,13 +38,16 @@ test('dense phone labels, directed spring contrast, bloom and disclosed index ph
     return {width:v.camera.width,height:v.camera.height,labels:v.labelPlacements,marks:[...v.projected].map(([path,p])=>({path,...p})),camera:v.snapshot().camera};
   });
   const overlap=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
-  for(const path of ['Slice.md','Synthetic 1.md','Synthetic 2.md'])expect(geometry.labels.some(l=>l.path===path)).toBe(true);
+  for(const path of ['Synthetic 1.md','Synthetic 2.md','Synthetic 3.md'])expect(geometry.labels.some(l=>l.path===path)).toBe(true);
+  expect(geometry.labels.map(l=>l.path).sort()).toEqual(['Synthetic 1.md','Synthetic 2.md','Synthetic 3.md']);
+  expect(geometry.labels.find(l=>l.path==='Synthetic 2.md').text).toMatch(/^f [a-z]+ · /);
+  await expect(panel.getByRole('button',{name:'Node hints (f)',exact:true})).toBeVisible();
   for(const [i,l]of geometry.labels.entries())for(const other of geometry.labels.slice(i+1))expect(overlap(l.rect,other.rect)).toBe(false);
   for(const l of geometry.labels)for(const m of geometry.marks)if(m.visible){const r=['Slice.md','Synthetic 1.md','Synthetic 2.md'].includes(m.path)?19:8;expect(overlap(l.rect,{x:m.x-r,y:m.y-r,w:2*r,h:2*r})).toBe(false);}
   await writeFile(info.outputPath('label-geometry.json'),JSON.stringify(geometry,null,2));
-  const contrast=await map.evaluate(el=>{const v=el.graphView;return v.data.edges.map((e,i)=>({spring:v.simulation.isSpringEdge(e.source,e.destination),line:v.batch.edges.geometry.attributes.color.getW(i*2),arrow:v.batch.arrows.geometry.attributes.color.getW(i*3)}));});
+  const contrast=await map.evaluate(el=>{const v=el.graphView;return v.data.edges.map((e,i)=>({spring:v.simulation.isSpringEdge(e.source,e.destination),direct:e.source===v.selected&&e.destination!==v.selected,line:v.batch.edges.geometry.attributes.color.getW(i*2),arrow:v.batch.arrows.geometry.attributes.color.getW(i*3)}));});
   expect(contrast.some(e=>e.spring)).toBe(true);expect(contrast.some(e=>!e.spring)).toBe(true);
-  for(const e of contrast){expect(e.line).toBeCloseTo(e.spring?1:.12);expect(e.arrow).toBeCloseTo(e.spring?1:.12);}
+  for(const e of contrast){expect(e.line).toBeCloseTo(e.spring||e.direct?1:.12);expect(e.arrow).toBeCloseTo(e.spring||e.direct?1:.12);}
   await panel.locator('[data-graph-control-options]').evaluate(el=>{el.open=false;});await map.scrollIntoViewIfNeeded();
   await panel.evaluate(el=>{const map=el.querySelector('[data-graph-map]'),header=el.querySelector('.graph-header');el.scrollTop+=map.getBoundingClientRect().top-header.getBoundingClientRect().bottom-8;});
   expect((await map.boundingBox()).y).toBeGreaterThan((await panel.locator('.graph-header').boundingBox()).y+(await panel.locator('.graph-header').boundingBox()).height);

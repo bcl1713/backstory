@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GraphPhysics } from './graph-physics.js';
 import { GraphCamera } from './graph-camera.js';
 import { layoutLabels } from './graph-labels.js';
-import { GraphHints } from './graph-hints.js';
+import { GraphHints, hintAssignments, outboundDestinations } from './graph-hints.js';
 import { nodeRadius, connectionGeometry } from './graph-geometry.js';
 import { hopTiers, emission, nearestNode, AdaptiveQuality, BLOOM_DEFAULT, BLOOM_HIGH } from './graph-layout.js';
 
@@ -99,13 +99,13 @@ export class GraphView {
       return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
     };
     this.theme = { background: read('--surface', '#141820'), node: read('--graph-node', '#8ab4f8'), edge: read('--graph-edge', '#8a919d'),
-      highlight: read('--graph-highlight', '#c5a5ff'), bloom: read('--graph-bloom', '#8ab4f8'), label: read('--foreground', '#e8e8e8'), focus: read('--focus', '#f4c95d') };
+      destination: read('--graph-destination', '#81c995'), highlight: read('--graph-highlight', '#c5a5ff'), bloom: read('--graph-bloom', '#8ab4f8'), label: read('--foreground', '#e8e8e8'), focus: read('--focus', '#f4c95d') };
     // System colors resolve through CSS; Canvas ensures WebGL itself does not
     // suppress the user's forced palette or leave faint halos behind.
     if (this.forced.matches && ctx) {
       const probe = document.createElement('span'); probe.style.color = 'CanvasText'; this.container.append(probe);
       this.theme.node = this.theme.edge = this.theme.label = getComputedStyle(probe).color;
-      probe.style.color = 'Highlight'; this.theme.highlight = this.theme.focus = getComputedStyle(probe).color;
+      probe.style.color = 'Highlight'; this.theme.destination = this.theme.highlight = this.theme.focus = getComputedStyle(probe).color;
       probe.style.color = 'Canvas'; this.theme.background = getComputedStyle(probe).color; probe.remove();
     }
     this.themeDirty = true;
@@ -146,7 +146,8 @@ export class GraphView {
     this.simulation.setSelection(selected);
     if (this.root === null) this.simulation.setRoot(selected);
     if (this.paused) this.simulation.settle(0);
-    this.tiers = hopTiers(this.data.nodes, this.data.edges, selected); this.themeDirty = true;
+    this.tiers = hopTiers(this.data.nodes, this.data.edges, selected);
+    this.destinations = outboundDestinations(this.data.edges,selected); this.refreshShortcuts(); this.themeDirty = true;
     this.container.dataset.root = this.root || '';
     this.container.dataset.selected = selected || ''; this.container.dataset.focused = focused || '';
     const node = this.data.nodes.find(n => n.path === focused);
@@ -170,9 +171,17 @@ export class GraphView {
   orbit(dx, dy) { this.cameraControlled = true; this.camera.orbit(dx, dy, this.paused); this.draw(); this.wake(); }
   zoom(factor, point) { this.cameraControlled = true; this.camera.zoom(factor, point, this.paused); this.draw(); this.wake(); }
   pan(dx, dy) { this.cameraControlled = true; this.camera.pan(dx, dy, this.paused); this.draw(); this.wake(); }
+  refreshShortcuts() {
+    const key = JSON.stringify([this.selected,this.data.nodes.map(n=>[n.path,n.title]),this.data.edges.map(e=>[e.source,e.destination])]);
+    if (key === this.shortcutKey) return;
+    this.shortcutKey=key;
+    this.shortcutAssignments=hintAssignments({...this.data,selected:this.selected,visibleOnly:false});
+    this.shortcutCodes=new Map(this.shortcutAssignments.map(h=>[h.path,h.code]));
+  }
   beginHints() {
     if (this.unavailable || this.container.hidden) return;
-    this.hints.begin({ ...this.data, selected: this.selected, projected: this.projected, width: this.camera.width, height: this.camera.height });
+    this.refreshShortcuts();
+    this.hints.begin({ ...this.data, assignments:this.shortcutAssignments, selected: this.selected, projected: this.projected, width: this.camera.width, height: this.camera.height });
     this.hintButtons.clear(); this.hintLayer.replaceChildren();
     for (const hint of this.hints.assignments) {
       const button = document.createElement('button'); button.type = 'button'; button.tabIndex = -1;
@@ -295,15 +304,17 @@ export class GraphView {
   applyColors(bloom) {
     const batch = this.batch;
     this.data.nodes.forEach((node, i) => {
-      const highlighted = node.path === this.selected, focused = node.path === this.focused;
-      batch.nodes.setColorAt(i, this.color.set(highlighted ? this.theme.highlight : focused ? this.theme.focus : this.theme.node));
-      this.color.set(highlighted ? this.theme.highlight : this.theme.bloom).multiplyScalar(emission(this.tiers.nodes.get(node.path), bloom));
+      const highlighted = node.path === this.selected, focused = node.path === this.focused, destination = this.destinations?.has(node.path);
+      const accent = this.theme.destination || this.theme.focus;
+      batch.nodes.setColorAt(i, this.color.set(highlighted ? this.theme.highlight : destination ? accent : focused ? this.theme.focus : this.theme.node));
+      this.color.set(highlighted ? this.theme.highlight : destination ? accent : this.theme.bloom).multiplyScalar(emission(this.tiers.nodes.get(node.path), bloom));
       this.color.toArray(batch.halos.geometry.attributes.color.array, i * 3);
     });
     this.data.edges.forEach((edge, i) => {
       const spring = this.simulation.isSpringEdge(edge.source, edge.destination);
-      const alpha = this.forced.matches || spring ? 1 : .12;
-      this.color.set(this.tiers.edges[i] <= 1 ? this.theme.highlight : this.theme.edge);
+      const direct = edge.source === this.selected && edge.destination !== this.selected;
+      const alpha = this.forced.matches || spring || direct ? 1 : .12;
+      this.color.set(direct ? this.theme.destination || this.theme.focus : this.tiers.edges[i] <= 1 ? this.theme.highlight : this.theme.edge);
       for (const [object, vertices] of [[batch.edges, 2], [batch.arrows, 3]]) for (let v = 0; v < vertices; v++) {
         object.geometry.attributes.color.setXYZW(i * vertices + v, this.color.r, this.color.g, this.color.b, alpha);
       }
@@ -354,7 +365,10 @@ export class GraphView {
     const ctx = this.labelContext; if (!ctx) return;
     const camera = this.camera; ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0); ctx.clearRect(0, 0, camera.width, camera.height);
     ctx.font = `12px ${this.fontFamily}`; ctx.lineJoin = 'round'; ctx.lineWidth = 4;
-    const labels = layoutLabels({ nodes: this.data.nodes, projected: this.projected,
+    const destinations = this.destinations || outboundDestinations(this.data.edges || [],this.selected);
+    const titled = this.data.nodes.map(node => destinations.has(node.path) && this.shortcutCodes?.has(node.path) ?
+      {...node,title:`f ${this.shortcutCodes.get(node.path)} · ${node.title}`} : node);
+    const labels = layoutLabels({ nodes: titled, projected: this.projected,
       width: camera.width, height: camera.height, selected: this.selected, focused: this.focused, current: this.current, edges: this.data.edges,
       measure: (text,secondary) => { ctx.font = `${secondary ? 11 : 12}px ${this.fontFamily}`; return ctx.measureText(text).width; }, maximum: this.hints?.active ? 0 : this.quality.labels, previous: this.labelSlots });
     this.labelSlots = new Map(labels.map(label => [label.path, label.slot]));
@@ -364,7 +378,7 @@ export class GraphView {
     for (const label of labels) {
       const p = this.projected.get(label.path), { rect, anchor } = label;
       ctx.globalAlpha = label.secondary ? .78 : 1;
-      ctx.strokeStyle = label.path === this.selected ? this.theme.highlight : label.path === this.focused ? this.theme.focus : this.theme.label;
+      ctx.strokeStyle = label.path === this.selected ? this.theme.highlight : destinations.has(label.path) ? this.theme.destination || this.theme.focus : this.theme.label;
       ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(anchor.x, anchor.y); ctx.stroke();
     }
     // All backed labels cover crossing leaders, including a later node's line.
@@ -372,10 +386,17 @@ export class GraphView {
       const { rect } = label;
       ctx.font = `${label.secondary ? 11 : 12}px ${this.fontFamily}`; ctx.globalAlpha = label.secondary ? .78 : 1;
       ctx.fillStyle = this.theme.background; ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-      ctx.strokeStyle = this.theme.background; ctx.fillStyle = this.theme.label; ctx.lineWidth = 3;
+      ctx.strokeStyle = this.theme.background; ctx.fillStyle = destinations.has(label.path) ? this.theme.destination || this.theme.focus : this.theme.label; ctx.lineWidth = 3;
       ctx.strokeText(label.text, rect.x + 4, rect.y + 14); ctx.fillText(label.text, rect.x + 4, rect.y + 14);
     }
     ctx.globalAlpha = 1;
+    // A ring identifies outbound destinations even in monochrome themes.
+    for (const path of destinations) {
+      const p=this.projected.get(path);
+      if (!p?.visible || p.x<0 || p.x>camera.width || p.y<0 || p.y>camera.height) continue;
+      ctx.strokeStyle=this.theme.destination || this.theme.focus; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.arc(p.x,p.y,Math.max(5,p.radius || 5)+3,0,Math.PI*2); ctx.stroke();
+    }
     // State cues do not depend on label budget or placement success.
     for (const path of new Set([this.current, this.selected, this.focused])) {
       const p = this.projected.get(path);

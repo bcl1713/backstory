@@ -40,11 +40,11 @@ test('hint mode freezes assignments until cancel or complete and excludes offscr
  hints.begin({nodes:all,edges:[],projected,width:390,height:500});assert.equal(hints.active,false);
  projected.set('n0',{x:50,y:50,visible:true});hints.begin({nodes:all,edges:[],projected,width:390,height:500});hints.key('Escape');assert.equal(hints.active,false);
 });
-test('selected neighbors precede unrelated labels with quieter secondary treatment',()=>{
+test('selected and outbound neighbors are the only title labels',()=>{
  const all=nodes('secondary','neighbor','selected');
  const projected=new Map(all.map((n,i)=>[n.path,{x:50+i*100,y:100,visible:true}]));
  const labels=layoutLabels({nodes:all,edges:[edge('selected','neighbor')],projected,width:600,height:400,selected:'selected',maximum:3,measure:t=>t.length*6});
- assert.deepEqual(labels.map(l=>l.path),['selected','neighbor','secondary']);assert.ok(labels[1].priority>labels[2].priority);
+ assert.deepEqual(labels.map(l=>l.path),['selected','neighbor']);
 });
 test('mesh and glow follow perspective geometry while both edge ends stop at world boundaries',()=>{
  const camera=new GraphCamera(960,600),a={x:-100,y:0,z:0},b={x:100,y:0,z:0};

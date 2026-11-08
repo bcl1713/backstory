@@ -28,6 +28,11 @@ for(const width of [1180,390]) test(`cumulative exploration, hints and perspecti
  await expect(summary).toContainText('4 notes · 4 directed links · Complete');
  // Fix only synthetic positions so pointer/hint targets remain in view on phone.
  const original=await map.evaluate(el=>{const v=el.graphView;v.setPaused(true);v.cameraControlled=true;v.simulation.all.forEach((n,i)=>Object.assign(n,v.camera.world({x:55+i*(v.camera.width-110)/3,y:80+i*40})));v.draw();return {camera:v.snapshot().camera,positions:v.simulation.all.map(n=>[n.path,n.x,n.y,n.z])};});
+ const passive=await map.evaluate(el=>{const v=el.graphView;return {labels:v.labelPlacements.map(l=>({path:l.path,text:l.text})),codes:Object.fromEntries(v.shortcutCodes)};});
+ expect(passive.labels.map(l=>l.path).sort()).toEqual(['Explore A.md','Explore B.md','Explore X.md']);
+ for(const path of ['Explore B.md','Explore X.md'])expect(passive.labels.find(l=>l.path===path).text).toContain(`f ${passive.codes[path]} ·`);
+ await expect(panel.getByRole('button',{name:'Node hints (f)',exact:true})).toBeVisible();
+ await map.screenshot({path:info.outputPath(`one-hop-default-${width}.png`)});
  const target=await map.evaluate(el=>el.graphView.projected.get('Explore C.md'));
  await map.scrollIntoViewIfNeeded();const bounds=await map.boundingBox();
  if(width===390)await page.touchscreen.tap(bounds.x+target.x,bounds.y+target.y);else await page.mouse.click(bounds.x+target.x,bounds.y+target.y);
@@ -47,6 +52,7 @@ for(const width of [1180,390]) test(`cumulative exploration, hints and perspecti
  await expect(summary).toContainText('6 notes · 7 directed links · Complete');
  await map.evaluate(el=>{const v=el.graphView;v.simulation.all.forEach((n,i)=>Object.assign(n,v.camera.world({x:45+i*(v.camera.width-90)/5,y:90+i*35})));v.draw();});
  await map.focus();await page.keyboard.press('f');await expect(map).toHaveAttribute('data-hint-mode','true');
+ expect(await map.evaluate(el=>{const v=el.graphView;return v.hints.assignments.find(h=>h.path==='Explore C.md').code===v.shortcutCodes.get('Explore C.md');})).toBe(true);
  const hint=await map.evaluate(el=>el.graphView.hints.assignments.find(h=>h.path==='Explore E.md'));
  await map.screenshot({path:info.outputPath(`hints-${width}.png`)});
  await page.keyboard.type(hint.code);await expect(map).toHaveAttribute('data-selected','Explore E.md');await expect(summary).toContainText('7 notes · 9 directed links · Complete');

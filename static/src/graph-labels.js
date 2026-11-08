@@ -1,3 +1,4 @@
+import {outboundDestinations} from './graph-hints.js';
 // Screen-space presentation only. Nodes, directed links and physics never change.
 export const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const PAD = 4, HEIGHT = 20, CELL = 48;
@@ -5,7 +6,7 @@ const PAD = 4, HEIGHT = 20, CELL = 48;
 export function layoutLabels({ nodes, projected, width, height, selected, focused, current,
   measure, maximum = 48, previous = new Map(), edges = [], hintMode = false }) {
   if (width < 40 || height < 28 || maximum <= 0) return [];
-  const neighbors = new Set(edges.flatMap(e => e.source === selected ? [e.destination] : e.destination === selected ? [e.source] : []));
+  const neighbors = outboundDestinations(edges,selected);
   const priority = path => path === selected ? 5 : path === focused ? 4 : neighbors.has(path) ? 3 : path === current ? 2 : hintMode ? 1 : 0;
   const onScreen = p => p?.visible && p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height;
   // Spatial lookup includes *all* displayed marks, even nodes without a label.
@@ -23,9 +24,10 @@ export function layoutLabels({ nodes, projected, width, height, selected, focuse
   }
   const visibleCount = [...projected.values()].filter(onScreen).length;
   if (!hintMode) maximum = Math.min(maximum, Math.max(3, Math.floor(width * height / (3500 + visibleCount * 50))));
-  const important = nodes.filter(n => priority(n.path)).sort((a,b) => priority(b.path)-priority(a.path));
-  // Ordinary candidates have a fixed ceiling, independent of total graph size.
-  const candidates = [...important, ...nodes.filter(n => !priority(n.path) && onScreen(projected.get(n.path))).slice(0, Math.max(128, maximum * 8))];
+  // Titles belong only to selection and outbound destinations. Hint mode may
+  // still label every visible target by code, without revealing distant titles.
+  const candidates = nodes.filter(n => hintMode || n.path === selected || neighbors.has(n.path))
+    .sort((a,b) => priority(b.path)-priority(a.path));
   const placed = [], occupied = [];
   const clear = rect => rect.x >= PAD && rect.y >= PAD && rect.x + rect.w <= width-PAD && rect.y + rect.h <= height-PAD
     && !occupied.some(other => overlaps(rect, other))

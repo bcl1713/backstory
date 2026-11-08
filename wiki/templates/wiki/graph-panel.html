@@ -19,7 +19,6 @@
 <button type="button" data-graph-graphics-retry hidden>Retry map</button>
 
 <button type="button" data-graph-refresh>Refresh</button>
-<button type="button" data-graph-hints aria-keyshortcuts="f">Node hints (f)</button>
 <details data-graph-map-options><summary>Map controls</summary><div class="graph-map-options"><button type="button" data-graph-back disabled hidden>Previous center</button><button type="button" data-graph-help-toggle>Help</button>
 <button type="button" data-graph-fit>Fit</button><button type="button" data-graph-reset>Reset orientation</button>
 <button type="button" data-graph-orbit="-0.3">Orbit left</button><button type="button" data-graph-orbit="0.3">Orbit right</button><button type="button" data-graph-zoom="1.25" aria-label="Zoom in">+</button><button type="button" data-graph-zoom="0.8" aria-label="Zoom out">−</button>
@@ -30,7 +29,7 @@
 </div></details>
 <div class="graph-scope-bar"><p data-graph-scope></p><button type="button" data-graph-list-toggle aria-pressed="false" hidden>Connection list</button></div>
 <p class="graph-caption" data-graph-summary role="status" aria-live="polite"></p>
-<p data-graph-help hidden>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space expands selection; f shows node hints (type a code, Backspace edits, Escape cancels); / focuses search; +/− zoom; ? toggles help. Escape leaves search first, then closes the graph. Tab leaves the map. Drag a node to tug its links; drag the background to orbit. Shift-drag or two fingers pans; pinch or the wheel zooms. Scroll outside the map to scroll the page. Fit and Reset orientation recover your view. [ and ] decrease/increase local depth from the same opening root (1–8 hops, with resource limits reported). Selecting any node adds its outgoing neighborhood without moving the view or changing the opening root. Every selected hop scope and All notes load automatically; Pause loading and Resume are separate from Pause motion. Active filters narrow either scope. Bloom describes this displayed graph only.</p>
+<p data-graph-help hidden>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space expands selection; one-hop labels show f + code shortcuts; f shows all visible node hints (type a code, Backspace edits, Escape cancels); / focuses search; +/− zoom; ? toggles help. Escape leaves search first, then closes the graph. Tab leaves the map. Drag a node to tug its links; drag the background to orbit. Shift-drag or two fingers pans; pinch or the wheel zooms. Scroll outside the map to scroll the page. Fit and Reset orientation recover your view. [ and ] decrease/increase local depth from the same opening root (1–8 hops, with resource limits reported). Selecting any node adds its outgoing neighborhood without moving the view or changing the opening root. Every selected hop scope and All notes load automatically; Pause loading and Resume are separate from Pause motion. Active filters narrow either scope. Bloom describes this displayed graph only.</p>
 <div class="graph-workspace">
 <div class="graph-map" data-graph-map tabindex="0" role="group" aria-label="Note relationship map" aria-describedby="graph-map-description" hidden></div>
 <div data-graph-list hidden><h2>Connections</h2><nav data-graph-notes-navigation aria-label="Loaded notes" hidden></nav><ul data-graph-nodes></ul><h2>Directed links</h2><nav data-graph-links-navigation aria-label="Loaded links" hidden></nav><ul data-graph-edges></ul></div>
@@ -52,5 +51,5 @@
 <p data-graph-status role="status" aria-live="polite" aria-atomic="true"></p>
 <details class="graph-evidence" data-graph-index-status><summary>Index progress</summary><p data-graph-index-progress>Open for current indexing progress.</p></details>
 <details class="graph-evidence"><summary>About this graph and evidence</summary><p>Indexed saved content. Unsaved edits stay in your editor.</p><p data-graph-diagnostics></p>
-<p id="graph-map-description" class="graph-caption">□ current note · ◇ selected note · corner reticle focused note. Arrows show explicit link direction. Coordinates and node size do not measure meaning. Bloom fades with shortest link hops inside this displayed graph.</p></details>
+<p id="graph-map-description" class="graph-caption">□ current note · ◇ selected note · circle one-hop outbound destination · corner reticle focused note. Two-hop and more distant titles are hidden. Arrows show explicit link direction. Coordinates and node size do not measure meaning. Bloom fades with shortest link hops inside this displayed graph.</p></details>
 </div>

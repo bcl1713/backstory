@@ -16,10 +16,10 @@ function clean(labels, marks) {
   }
 }
 
-test('distinct selected focused current labels avoid one another and all nearby marks',()=>{
+test('selected and outbound destination labels avoid one another and all nearby marks',()=>{
   const nodes=['selected','focused','current'].map(node);
   const projected=new Map(nodes.map((n,i)=>[n.path,point(110+i*5,180+i*3)]));
-  const labels=layoutLabels({...base,nodes,projected,selected:'selected',focused:'focused',current:'current'});
+  const labels=layoutLabels({...base,nodes,projected,selected:'selected',focused:'focused',current:'current',edges:[{source:'selected',destination:'focused'},{source:'selected',destination:'current'}]});
   assert.deepEqual(labels.map(l=>l.path),nodes.map(n=>n.path));
   clean(labels,[...projected.values()].map(p=>({x:p.x-19,y:p.y-19,w:38,h:38})));
   assert.ok(labels.every(l=>l.anchor && l.text.endsWith('…')));
@@ -27,14 +27,14 @@ test('distinct selected focused current labels avoid one another and all nearby 
 
 test('ordinary title avoids a second node beneath the old right-side placement',()=>{
   const nodes=['one','two'].map(node), projected=new Map([['one',point(100,160)],['two',point(180,160)]]);
-  const labels=layoutLabels({...base,nodes,projected});
+  const labels=layoutLabels({...base,nodes,projected,selected:'one',edges:[{source:'one',destination:'two'}]});
   assert.ok(labels.some(l=>l.path==='one'));
   clean(labels,[...projected.values()].map(p=>({x:p.x-8,y:p.y-8,w:16,h:16})));
 });
 
 test('placement remains stable with unchanged projection, append, and small camera motion',()=>{
   const nodes=['a','b','c'].map(node), projected=new Map(nodes.map((n,i)=>[n.path,point(80+i*45,140+i*45)]));
-  const options={...base,nodes,projected,selected:'a',focused:'b',current:'c'};
+  const options={...base,nodes,projected,selected:'a',focused:'b',current:'c',edges:[{source:'a',destination:'b'},{source:'a',destination:'c'}]};
   const first=layoutLabels(options), previous=new Map(first.map(l=>[l.path,l.slot]));
   assert.deepEqual(layoutLabels({...options,previous}),first);
   projected.set('offscreen',{x:-20,y:-20,visible:true});
@@ -47,7 +47,7 @@ test('dense phone labels stay bounded and contain all priority identities after 
   const nodes=Array.from({length:93},(_,i)=>node(`n${i}`));
   const projected=new Map(nodes.map((n,i)=>[n.path,point(25+(i%10)*34,100+Math.floor(i/10)*20)]));
   for(const selected of ['n20','n60']) {
-    const labels=layoutLabels({...base,nodes,projected,selected,focused:'n21',current:'n22',maximum:12});
+    const labels=layoutLabels({...base,nodes,projected,selected,focused:'n21',current:'n22',edges:[{source:selected,destination:'n21'},{source:selected,destination:'n22'}],maximum:12});
     assert.ok(labels.length<=12);
     for(const path of [selected,'n21','n22']) assert.ok(labels.some(l=>l.path===path),path);
     clean(labels,[...projected.values()].map(p=>({x:p.x-8,y:p.y-8,w:16,h:16})));

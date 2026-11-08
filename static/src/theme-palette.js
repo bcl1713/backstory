@@ -3,7 +3,7 @@ import { parse } from 'smol-toml';
 export const MAX_THEME_BYTES = 256 * 1024;
 // Graph roles alias the active semantic tokens; SVG/CSS updates need no layout
 // restart. Decorative emission never substitutes for crisp strokes or labels.
-export const GRAPH_THEME_ROLES = Object.freeze({ background: 'surface', node: 'link', edge: 'muted',
+export const GRAPH_THEME_ROLES = Object.freeze({ background: 'surface', node: 'link', destination: 'heading-4', edge: 'muted',
   highlight: 'heading-3', label: 'foreground', focus: 'focus', bloom: 'link' });
 const accents = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
 const textTokens = ['foreground', 'muted', 'link', 'error', ...Array.from({ length: 6 }, (_, i) => `heading-${i + 1}`)];

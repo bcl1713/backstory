@@ -139,6 +139,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     map.hidden = listMode;
     if (listMode) view?.stop(); else view?.wake();
     find('[data-graph-list-toggle]').setAttribute('aria-pressed', String(listMode));
+    find('[data-graph-hints]').disabled = listMode || !graphicsAvailable;
   }
   function controls() {
     const global = wholeWiki(), depth = Number(input('depth').value), filters = ['query', 'folder', 'tag'].filter(name => (activeParams?.[name] || '').trim());
@@ -449,6 +450,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
   listen(document, 'visibilitychange', () => { if (document.hidden) { stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); request = null; suspendEvidence(); } else if (!closed) { if (indexDisclosure?.open) void refreshIndexProgress(); if (!loadingPaused) void load(); } });
   listen(window, 'pagehide', () => { stopIndexProgress(); sequence++; cancelAutomatic(); clearTimeout(debounce); debounce = null; request?.abort(); request = null; suspendEvidence(); view?.stop(); });
   listen(window, 'pageshow', event => { if (event.persisted && !closed && !loadingPaused) void load(); });
+  find('[data-graph-hints]').hidden = false;
   find('[data-graph-controls]').hidden = false; find('[data-graph-clear]').hidden = false;
   find('[data-graph-list-toggle]').hidden = false;
   createView();
