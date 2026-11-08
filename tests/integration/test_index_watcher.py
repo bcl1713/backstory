@@ -117,3 +117,52 @@ def test_directory_move_and_watcher_loss_repair_through_verification(wiki):
         assert ScanState.objects.get(pk=1).reconcile_needed
         drain(worker)
         assert IndexedNote.objects.get(generation__state='active').title == 'Recovered'
+
+
+def test_excluded_file_burst_does_not_request_verification(wiki):
+    from indexing.watcher import WatchService
+    from indexing.models import IndexJob, ScanState
+    backend = FakeWatch()
+    with WatchService(factory=lambda: backend) as watcher:
+        watcher.poll()
+        ScanState.objects.filter(pk=1).update(reconcile_needed=False)
+        backend.events = [(f'.syncthing-{n}.md', 'path') for n in range(300)]
+        backend.events += [('Syncthing notes.md', 'path')]
+        watcher.poll()
+        assert not ScanState.objects.get(pk=1).reconcile_needed
+        assert set(IndexJob.objects.values_list('path', flat=True)) == {'Syncthing notes.md'}
+        backend.events = [(f'allowed-{n}.md', 'path') for n in range(257)]
+        watcher.poll()
+        assert ScanState.objects.get(pk=1).reconcile_needed
+
+
+@pytest.mark.skipif(not os.path.exists('/proc/self/fd'), reason='Linux native smoke')
+def test_native_excluded_directories_and_moves_across_policy(wiki, settings):
+    from indexing.watcher import NativeWatcher
+    settings.BACKSTORY_EXCLUSIONS = ['admin']
+    backend = NativeWatcher()
+    try:
+        for _ in range(20):
+            backend.poll()
+            if backend.complete:
+                break
+        assert backend.complete
+        assert backend.poll() == []
+        for name in ('.ignored-temp', 'admin', 'syncthing-temp', 'Syncthing folder.md'):
+            (wiki / name).mkdir()
+            assert backend.poll() == [], name
+            (wiki / name).rmdir()
+            assert backend.poll() == [], name
+        (wiki / 'allowed').mkdir()
+        (wiki / 'allowed' / 'inside.md').write_text('# Synthetic')
+        assert (None, 'directory_changed') in backend.poll()
+        assert backend.complete
+        (wiki / 'allowed').rename(wiki / '.excluded')
+        assert (None, 'directory_changed') in backend.poll()
+        (wiki / '.excluded').rename(wiki / 'returned')
+        assert (None, 'directory_changed') in backend.poll()
+        assert backend.complete
+        (wiki / 'returned' / 'inside.md').write_text('# Changed')
+        assert ('returned/inside.md', 'path') in backend.poll()
+    finally:
+        backend.close()
