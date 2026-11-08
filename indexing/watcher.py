@@ -123,6 +123,16 @@ class NativeWatcher:
             parent = self.paths.get(wd)
             if parent is None:
                 continue
+            if name and mask & _ISDIR and not mask & _SELF:
+                # Keep the named side of directory moves long enough to apply
+                # policy. The allowed side still repairs moves across policy
+                # boundaries; pathless self/mount events remain conservative.
+                try:
+                    validate_path('/'.join(filter(None, (parent, name))), 'folder')
+                except StorageError as error:
+                    if error.reason_code != 'path_denied':
+                        raise
+                    continue
             if mask & (_SELF | _ISDIR):
                 events.append((None, 'directory_changed'))
                 self.refresh = True
@@ -210,6 +220,12 @@ class WatchService:
             for path, kind in events:
                 if kind == 'path':
                     if path in unique:
+                        continue
+                    try:
+                        validate_path(path, 'content')
+                    except StorageError as error:
+                        if error.reason_code != 'path_denied':
+                            raise
                         continue
                     if len(unique) >= 256:
                         repair = True
