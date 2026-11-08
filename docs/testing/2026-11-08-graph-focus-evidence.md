@@ -30,6 +30,13 @@ Focused checks on forge with pinned Node 22.23.4 and Playwright 1.64.1:
   (5.8 s), covering actual WebGL as well as the Firefox accessible fallback.
 - The recovery screenshot was subsequently fitted/scrolled into view, with the
   single Chromium recovery scenario rerun for that artifact.
+- Candidate `0549d88e570d6cbcd7b664a3f031e09f293ab965` passed 1,620 Python
+  tests, formatter tests and the Firefox code lane. The renderer lane passed
+  86 scenarios but failed the new recovery screenshot's unconditional scroll:
+  Firefox's accessible fallback hides the map. The screenshot scroll now runs
+  only when the map is visible; recovery assertions still run in both modes.
+  That failed candidate is retained without a success receipt. Its successor
+  must run the complete gate on its own exact SHA.
 - `git diff --check`: passed.
 
 Logs: `/tmp/backstory-graph-focus-{build,browser,namespace,chromium,visual}.log`.

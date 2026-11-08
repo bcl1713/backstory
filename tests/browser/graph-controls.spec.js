@@ -48,8 +48,10 @@ test('returning to the graph restores selected springs and layout after private 
   held = false; release();
   await expect(map(page)).toHaveAttribute('data-node-count', '5');
   expect(await state()).toEqual(before);
-  await map(page).evaluate(el => el.graphView.fit());
-  await map(page).scrollIntoViewIfNeeded();
+  if (await map(page).isVisible()) {
+    await map(page).evaluate(el => el.graphView.fit());
+    await map(page).scrollIntoViewIfNeeded();
+  }
   await page.screenshot({ path: info.outputPath('graph-focus-restored.png'), fullPage: true });
   // Removed roots cannot retain springs or selected-note evidence.
   await visibility(page, true);
