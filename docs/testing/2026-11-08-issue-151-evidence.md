@@ -114,3 +114,13 @@ and marked failed before landing; no successful receipt was created or reused.
 The changed source requires a new proposed merge and its own complete gate and
 independent review. Release receipts and final review records are retained in
 the trusted executor's candidate store, outside application source.
+
+The next candidate, `aec74c4ca3259397ab06695b60727127f781f764`, passed 1,749
+Python tests, 455 formatter tests, nine Firefox code scenarios and 87/88 Firefox
+renderer/profile scenarios. Its narrow bulk-list test left the initial Find
+sheet open when Firefox automatically used its no-WebGL list fallback. Chromium
+had dismissed that sheet by toggling from map to list. The test now explicitly
+closes the transient layer before exercising pagination in either renderer.
+Both affected Firefox viewport cases passed (7.1s). This is a test-setup change;
+application sources and visual evidence remain unchanged. The failed candidate
+has no successful receipt; the updated test commit requires a new exact gate.

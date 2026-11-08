@@ -256,6 +256,7 @@ for(const width of [1180,390])test(`bulk local evidence retains every record and
  await page.evaluate(()=>document.dispatchEvent(new Event('backstory:open-graph')));
  const dialog=panel(page);
  await expect(dialog.locator('[data-graph-summary]')).toContainText('321 notes · 320 directed links · Loaded available results · Index updating');
+ await closeGraphLayer(dialog);
  if(!await dialog.locator('[data-graph-list]').isVisible())await dialog.getByRole('button',{name:'Connection list',exact:true}).click();
  await expect(dialog.locator('[data-graph-nodes] > li')).toHaveCount(250);
  await dialog.getByRole('button',{name:'Next notes',exact:true}).click();

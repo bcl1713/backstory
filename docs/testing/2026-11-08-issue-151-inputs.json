@@ -16,7 +16,7 @@
     "static/src/graph-overlays.js": "7d4f9312f9ddf8b2b9c80310b53e4077e938af0de4ea5ca4451d6e921a8fb07b",
     "static/src/graph-view.js": "e7eed15e2855a13da96aac9d7c8e1e1e6796a734702166e0b5d603639fa7ee09",
     "static/src/graph.css": "922311ed69f22272938af3d498d1b2e8132e81f0775dc48c34c3a1dccffce03d",
-    "tests/browser/graph-controls.spec.js": "404c1e828fa47dd27b315ee7c4ce071d309339cdab186fc75dfa604279dbfb4e",
+    "tests/browser/graph-controls.spec.js": "6c0c0f03a286c78f349e19898765680b20c29a4b711f3ac6a42896bd2c95b7df",
     "tests/browser/graph-exploration.spec.js": "2210ad0a1e40758ab69d6a95ee1941d4f893a1106e4522483704b669d1bf9efa",
     "tests/browser/graph-immersive.spec.js": "c3d98d6f7830313decb791c25d3f7616c2dd9545cc8e911765759a971c8c1a4a",
     "tests/browser/graph-mobile.spec.js": "18885d7cd9484ad44ec38db603bb26eac662eb0e71324cfb9ba39157d21a36df",
