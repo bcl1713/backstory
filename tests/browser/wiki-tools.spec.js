@@ -33,7 +33,7 @@ test('signed-in tools read current source through fixed endpoints and never exec
   await page.goto('/accounts/login/');
   expect(await page.evaluate(() => Object.keys(window.registeredWikiTools))).toEqual([]);
   await login(page);
-  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'find_link_issues', 'get_note_graph', 'get_note_links', 'list_notes', 'read_note', 'read_notes', 'save_note', 'search_notes', 'wiki_status']);
+  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'create_note', 'find_link_issues', 'get_graph_snapshot', 'get_note_graph', 'get_note_links', 'list_notes', 'read_note', 'read_notes', 'save_note', 'search_notes', 'wiki_status']);
   const requests = [];
   page.on('request', request => { if (request.url().includes('/tools/')) requests.push(request); });
   const result = await page.evaluate(async () => {
@@ -242,7 +242,7 @@ test('a host synchronously rejecting the save tool still discovers usable read t
   await login(page);
   const result = await callTool(page, 'read_note', { path: 'Slice.md' });
   expect(result.authoritative).toBe(true);
-  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'find_link_issues', 'get_note_graph', 'get_note_links', 'list_notes', 'read_note', 'read_notes', 'search_notes', 'wiki_status']);
+  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'create_note', 'find_link_issues', 'get_graph_snapshot', 'get_note_graph', 'get_note_links', 'list_notes', 'read_note', 'read_notes', 'search_notes', 'wiki_status']);
 });
 
 test('create_folder is consequential, exclusive and does not initialize timezone or edit notes', async ({ page }) => {
@@ -293,4 +293,85 @@ test('status and multiple reads are read-only tools with explicit partial result
   expect(result.batch.state).toBe('partial');
   expect(result.batch.results[0]).toMatchObject({ state: 'ok', source: '# Batch\n', authoritative: true });
   expect(result.batch.results[1].state).toBe('missing');
+});
+
+test('create_note publishes formatted source once, preserves an unrelated draft and supports guarded edits', async ({ page }) => {
+  await stubHost(page);
+  await login(page);
+  await page.goto('/notes/Other.md');
+  await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
+  await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.setSource('# Human draft stays here\n'));
+  const before = page.url();
+  const created = await callTool(page, 'create_note', { path: 'Drafts/Synthetic tool creation.md', source: '# Synthetic\n\n**bold**   words\n' });
+  expect(created).toMatchObject({ state: 'created', authoritative: true, path: 'Drafts/Synthetic tool creation.md' });
+  expect(created.source).toContain('**bold** words');
+  expect(created.source).toContain('created:');
+  const observed = await callTool(page, 'read_note', { path: created.path });
+  expect([observed.source, observed.revision]).toEqual([created.source, created.revision]);
+  expect((await callTool(page, 'create_note', { path: created.path, source: '# No overwrite\n' })).state).toBe('conflict');
+  expect((await callTool(page, 'save_note', { path: created.path, source: created.source + '\nLater\n', revision: created.revision })).state).toBe('saved');
+  expect(page.url()).toBe(before);
+  expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Human draft stays here\n');
+  await page.screenshot({ path: `${runtime}/create-preserved-draft.png` });
+});
+
+test('create_note refuses the open target draft, shares busy guard and leaves failed formatting absent', async ({ page }) => {
+  await stubHost(page);
+  await login(page);
+  await page.goto('/new/');
+  await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
+  await page.locator('#note-filename').fill('Synthetic open creation.md');
+  await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.setSource('# Pending new draft\n'));
+  const rejected = await callTool(page, 'create_note', { path: 'Synthetic open creation.md', source: '# Assistant\n' });
+  expect(rejected.reason_code).toBe('unsaved_editor_draft');
+  expect(await page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource())).toBe('# Pending new draft\n');
+  let held;
+  await page.route('**/tools/create-note/', route => { held = route; });
+  await page.evaluate(() => { window.creating = window.registeredWikiTools.create_note.execute({ path: 'Synthetic held creation.md', source: '# Held\n' }); });
+  await expect.poll(() => Boolean(held)).toBe(true);
+  const busy = await callTool(page, 'create_folder', { path: 'Synthetic never queued' });
+  expect(busy).toMatchObject({ reason_code: 'save_in_progress', request_started: false, queued: false });
+  const saveBusy = await callTool(page, 'save_note', { path: 'Other.md', source: '# No\n', revision: '"' + 'a'.repeat(64) + '"' });
+  expect(saveBusy.reason_code).toBe('save_in_progress');
+  await held.continue();
+  expect(JSON.parse(await page.evaluate(() => window.creating)).state).toBe('created');
+  await page.unroute('**/tools/create-note/');
+  const failed = await callTool(page, 'create_note', { path: 'Synthetic invalid creation.md', source: '---\nx: [\n---\n' });
+  expect(failed.state).toBe('format_failed');
+  expect((await callTool(page, 'read_note', { path: 'Synthetic invalid creation.md' })).reason_code).toBe('not_found');
+});
+
+test('create_note lost and malformed acknowledgements are uncertain without replay', async ({ page }) => {
+  await stubHost(page);
+  await login(page);
+  let posts = 0;
+  await page.route('**/tools/create-note/', async route => {
+    posts++;
+    await route.fetch();
+    await route.abort('failed');
+  });
+  const result = await callTool(page, 'create_note', { path: 'Synthetic lost creation.md', source: '# Published\n' });
+  expect(result).toMatchObject({ state: 'uncertain', read_before_retry: true });
+  expect(posts).toBe(1);
+  expect((await callTool(page, 'read_note', { path: 'Synthetic lost creation.md' })).source).toContain('# Published');
+  await page.unroute('**/tools/create-note/');
+  await page.route('**/tools/create-note/', route => { posts++; return route.fulfill({ status: 201, contentType: 'application/json', body: '{"state":"created","untrusted_content":true}' }); });
+  expect((await callTool(page, 'create_note', { path: 'Synthetic malformed creation.md', source: '# Draft\n' })).state).toBe('uncertain');
+  expect(posts).toBe(2);
+});
+
+test('graph snapshot is discoverable read-only evidence and depth matches status and runtime', async ({ page }) => {
+  await stubHost(page);
+  await login(page);
+  const maximum = await page.evaluate(() => window.registeredWikiTools.get_note_graph.inputSchema.properties.depth.maximum);
+  const status = await callTool(page, 'wiki_status', {});
+  const graph = await callTool(page, 'get_note_graph', { path: 'Other.md', depth: maximum });
+  expect(maximum).toBe(status.capabilities.graph.max_depth);
+  expect(graph.limits.depth).toBe(maximum);
+  const snapshot = await callTool(page, 'get_graph_snapshot', {});
+  expect(snapshot).toHaveProperty('snapshot_id');
+  expect(snapshot).toHaveProperty('projection_complete');
+  expect(snapshot.authoritative).toBe(false);
+  expect(status.relationships).toHaveProperty('pending_sources');
+  expect(await page.evaluate(() => window.registeredWikiTools.get_graph_snapshot.annotations.readOnlyHint)).toBe(true);
 });

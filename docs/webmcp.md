@@ -1,8 +1,8 @@
 # Browser tools
 
 Backstory exposes `search_notes`, `read_note`, `read_notes`, `list_notes`,
-`wiki_status`, `create_folder`, guarded `save_note`, and read-only
-`get_note_links`, `get_note_graph`, `find_link_issues` on signed-in wiki pages. Registration is optional and feature-detects
+`wiki_status`, `create_folder`, explicit `create_note`, guarded `save_note`, and read-only
+`get_note_links`, `get_note_graph`, `get_graph_snapshot`, `find_link_issues` on signed-in wiki pages. Registration is optional and feature-detects
 `document.modelContext.registerTool`. Unsupported browsers and registration
 failures leave normal browsing, editing, search and saves available. A host
 rejecting one tool does not prevent registration of the others.
@@ -24,7 +24,7 @@ returned note source as HTML.
 All endpoints use existing server-side session and device authorization. No
 additional token, cookie extraction, external server, CORS permission or browser
 extension is required. Single-read/list/search/status endpoints accept GET only. Multi-read, save and
-folder-creation endpoints accept POST only. Responses
+note/folder-creation endpoints accept POST only. Responses
 are private `no-store` JSON. All POST requests also require the existing masked CSRF token
 from the signed-in page. An expired, disabled or revoked session
 receives HTTP 401 with `authentication_required`. Sign in again through the UI.
@@ -32,11 +32,13 @@ receives HTTP 401 with `authentication_required`. Sign in again through the UI.
 | Tool | Endpoint | Arguments |
 | --- | --- | --- |
 | `get_note_links` | `/tools/links/` | required `path`, `direction` (incoming/outgoing/both); `limit` 1–100, `cursor` |
-| `get_note_graph` | `/tools/graph/` | optional `path`; `depth` 1–2; `folder`, `tag`, `query`, `cursor`; `node_limit` ≤200, `edge_limit` ≤500 |
+| `get_note_graph` | `/tools/graph/` | optional `path`; `depth` 1–8; `folder`, `tag`, `query`, `cursor`; `node_limit` ≤200, `edge_limit` ≤500 |
+| `get_graph_snapshot` | `/tools/graph/snapshot/` | optional `folder`, `tag`, `query`; no page limits/cursors |
 | `find_link_issues` | `/tools/link-issues/` | `folder`, `issue` (missing/ambiguous/isolated), `limit` 1–100, `cursor` |
 | `search_notes` | `/tools/search/` | `query` (required), `limit` (default 30, 1–100), `cursor` |
 | `read_note` | `/tools/read/` | `path` (required root-relative Markdown path) |
 | `save_note` | `/tools/save/` | `path`, replacement `source`, strong `revision` from `read_note` (all required) |
+| `create_note` | `/tools/create-note/` | exact absent Markdown `path`, complete `source` (required); no revision |
 | `read_notes` | `/tools/read-many/` | `paths` (1–8 unique Markdown paths) |
 | `wiki_status` | `/tools/status/` | none |
 | `create_folder` | `/tools/create-folder/` | `path` (required root-relative folder path) |
@@ -200,7 +202,7 @@ supports this capability.
 ## Status observations
 
 `wiki_status` takes no arguments and reads `/tools/status/`. Storage, write
-recovery, search index and wiki timezone are observed independently. A failed
+recovery, search index, relationship projection and wiki timezone are observed independently. A failed
 component reports `component_unavailable`, while other observations remain
 available and the overall response is `partial`. Observation timestamps describe
 when each component was read, not a transactionally consistent global snapshot.
@@ -239,7 +241,7 @@ tool neither retries nor queues reads, and it never depends on index freshness.
 ## Await every save
 
 Await each `save_note` result before invoking the next, even for a different
-path. The document-scoped guard also serializes folder creation. An overlapping
+path. The document-scoped guard also serializes note and folder creation. An overlapping
 call returns `save_in_progress`, `request_started: false`, and `queued: false`:
 it made no save request, backup or mutation and will not run later automatically.
 Wait for the active operation, read the intended note again to obtain its current
@@ -281,3 +283,81 @@ editor text into saved evidence. See [Graph](graph.md) for limits and provenance
 Actual-host discovery/invocation of these three tools remains pending an
 authorized deployment and assistant-host access. Synthetic registration, parity
 and cancellation tests do not establish that acceptance.
+
+
+## Explicit note creation
+
+`create_note` posts one exact Markdown `path` and complete `source` to
+`/tools/create-note/`. The parent must already exist. This is an explicit
+consequential operation, serialized with other writes in the browser document;
+there is no implicit creation through `save_note`, folder creation or search.
+It calls the editor's existing formatted save service with create-if-absent,
+including authorization, CSRF, safe paths/no-follow storage, storage readiness,
+recovery pauses, metadata/wiki timezone, source preservation and formatter rules.
+The browser initializes timezone through the existing owner-aware flow.
+
+The writer publishes exclusively: an existing or concurrently created target
+returns `conflict` (HTTP 412) and is never converted into an update. Even an
+identical competing publication remains a conflict. A missing preflight read is
+not a reservation. Formatter failure leaves the destination uncreated and does
+not grant a tool recovery bypass. No parent folders are created implicitly.
+
+Successful `created` or `created_index_delayed` (HTTP 201) includes canonical
+path/href, formatted source, strong new revision, BOM/newline information and
+separate index status after authoritative readback. Subsequent edits use
+`save_note` with that exact revision. Delayed indexing does not undo creation.
+Uncertain/lost/malformed acknowledgements require authoritative `read_note`
+inspection before any deliberate retry; the adapter never replays a write.
+
+Creation preserves the current page, unrelated notes, open drafts and pending
+conflicts. A matching open editor's draft or active operation blocks the tool.
+Drafts typed during a request retain the same protection as replacement saves.
+The cooperative lock and exclusive final name publication do not prevent an
+external filesystem writer from later deleting/replacing the note or swapping
+an ancestor directory; readback describes only the observed moment.
+
+## Relationship readiness and complete analysis
+
+`wiki_status.relationships` is independent of `index`. It reports source-free
+counts of pending/published sources and incomplete extraction/resolution,
+projection generation/mutation/epoch, and `retry.action`. Pending work indicates
+waiting for the worker; persistent parse/resolution limitations require inspection
+and reindexing after a separately authorized correction. Status never schedules
+work or repairs content. A ready source index alone cannot establish graph
+completeness. An empty incomplete diagnostic never proves no broken links.
+
+`get_graph_snapshot` exposes the existing authorized whole-index snapshot service
+used by the graph UI. It returns every eligible matching indexed note (including
+isolates) and aggregated directed explicit edges, bound to `scope`,
+`snapshot_id`, generation/mutation and relation epoch. There is no page prefix
+reported as complete: query-budget failures are explicit errors, and concurrent
+publication/namespace changes require a fresh request. It reads indexed metadata
+and canonical relations with descriptor-safe eligibility checks, without reading
+note bodies or introducing another graph store. It remains non-authoritative
+saved-index evidence, never an atomic filesystem snapshot.
+
+Only a ready, projection-complete result supports absence claims in its stated
+scope. Directed reachability from an explicitly chosen root follows
+`source → destination`; weak connected components ignore direction. A multi-note
+island is not the same as an isolated note or a root-unreachable note. Analyze
+returned nodes/edges locally. Folder/tag/query filters restrict the induced
+subgraph; `boundary_connections: true` warns that links cross the selection, so
+filtered components/reachability do not establish whole-wiki conclusions. The
+snapshot is one whole-index response rather than paginated local traversal;
+`get_note_graph` retains bounded depth 1–8 with explicit continuation evidence.
+
+## Audit follow-up and acceptance limits
+
+See [the #148 diagnosis and management triage](testing/2026-11-08-webmcp-graph-audit.md)
+for projection consistency, relocation, recoverable cleanup and history service
+reuse. Those proposed mutation tools remain follow-up work. No recursive delete,
+permanent purge, arbitrary timestamp restoration or new remote MCP transport is
+introduced by this change.
+
+The #148 live audit established existing-tool behavior on build `5a99ee74bd5d`;
+it does not verify the new tools. New creation and snapshot tests use synthetic
+roots and a controlled `document.modelContext` registration stub with real local
+HTTP services. Actual assistant-host discovery/invocation after deployment remains
+pending. Real creation acceptance must use a disposable wiki or a verified
+recoverable fixture lifecycle; no live test note/folder should be created merely
+to obtain acceptance evidence without a supported cleanup route.
