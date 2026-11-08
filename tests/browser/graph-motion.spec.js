@@ -1,3 +1,4 @@
+import { showGraphLayer, closeGraphLayer, graphControl } from './support/graph.js';
 import {test,expect} from '@playwright/test';
 
 const fixture=()=>{
@@ -14,7 +15,7 @@ for(const width of [1180,390])test(`1050-node coherent motion, responsive input 
  await page.evaluate(()=>document.dispatchEvent(new Event('backstory:open-graph')));
  const panel=page.locator('[data-graph-dialog]'),map=panel.locator('[data-graph-map]');
  await expect(map).toHaveAttribute('data-renderer','webgl');await expect(map).toHaveAttribute('data-node-count','1050');
- await panel.locator('[data-graph-filter-options]').evaluate(el=>el.open=false);await map.scrollIntoViewIfNeeded();
+ await closeGraphLayer(panel); await panel.locator('[data-graph-filter-options]').evaluate(el=>el.open=false);await map.scrollIntoViewIfNeeded();
  const metrics=await map.evaluate(async el=>{
   const v=el.graphView;v.setPaused(true);v.camera.snap();
   const metrics={animationFrames:0,completedSteps:0,draws:0,partialSlices:0,partialPositionChanges:0,solverMs:0,maxSolverMs:0};
@@ -56,7 +57,7 @@ for(const width of [1180,390])test(`1050-node coherent motion, responsive input 
  const state=()=>map.evaluate(el=>{const v=el.graphView;return {camera:v.snapshot().camera,positions:v.simulation.all.slice(0,3).map(n=>[n.path,n.x,n.y,n.z]),root:v.root,paused:v.paused};});
  const before=await state();
  response={...response,generation:2,snapshot_id:'second',nodes:[...response.nodes,{path:'Added.md',title:'Added',revision:'r',href:'/notes/Added.md'}],edges:[...response.edges,{source:'Slice.md',destination:'Added.md',occurrence_count:1,source_revision:'r'}]};
- await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);await panel.getByRole('button',{name:'Refresh',exact:true}).click();await expect(map).toHaveAttribute('data-node-count','1051');expect(await state()).toEqual(before);
+ await showGraphLayer(panel, 'controls'); await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);await graphControl(panel, 'Refresh');await expect(map).toHaveAttribute('data-node-count','1051');expect(await state()).toEqual(before);
  await page.screenshot({path:info.outputPath(`motion-${width}.png`),fullPage:true});
  await page.evaluate(()=>{Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));});await expect(map).toHaveAttribute('data-node-count','0');
  await page.evaluate(()=>{Object.defineProperty(document,'hidden',{value:false,configurable:true});document.dispatchEvent(new Event('visibilitychange'));});await expect(map).toHaveAttribute('data-node-count','1051');expect(await state()).toEqual(before);

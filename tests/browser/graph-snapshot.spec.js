@@ -1,3 +1,4 @@
+import { showGraphLayer, graphControl } from './support/graph.js';
 import {test,expect} from '@playwright/test';
 
 const node=path=>({path,title:path,revision:'r',href:'/notes/'+path});
@@ -31,15 +32,15 @@ test('snapshot selection is local; refreshed generations retain presentation and
  await map.evaluate(el=>el.graphView.actions.onSelect('C.md',true));
  await expect(summary).toContainText('4 directed links');expect(requests).toHaveLength(1);expect(extraRequests).toEqual([]);
  response={...data,generation:2,snapshot_id:'second'};
- await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);
- await panel.getByRole('button',{name:'Refresh',exact:true}).click();
+ await showGraphLayer(panel, 'controls'); await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);
+ await graphControl(panel, 'Refresh');
  await expect.poll(()=>requests.length).toBe(2);await expect(summary).toContainText('Complete');expect(await state()).toEqual(before);
  // The visible periodic refresh revalidates even when the graph never receives input.
  failure=true;await page.clock.fastForward(15001);
  await expect(panel.locator('[data-graph-status]')).toContainText('Session expired');
  await expect(map).toHaveAttribute('data-node-count','0');await expect(panel.locator('[data-graph-details]')).not.toContainText('C.md');
  await page.clock.resume();failure=false;held=true;
- await panel.getByRole('button',{name:'Restart loading',exact:true}).click();await expect.poll(()=>Boolean(release)).toBe(true);
+ await graphControl(panel, 'Restart loading');await expect.poll(()=>Boolean(release)).toBe(true);
  await page.evaluate(()=>{Object.defineProperty(document,'hidden',{value:true,configurable:true});document.dispatchEvent(new Event('visibilitychange'));});
  held=false;release();await page.evaluate(()=>new Promise(r=>requestAnimationFrame(r)));
  await expect(map).toHaveAttribute('data-node-count','0');

@@ -2,9 +2,14 @@
 {% block title %}Graph · Backstory{% endblock %}
 {% block content %}
 <section data-graph-page data-graph-path="{{ graph_params.path|default:'' }}">
-<header class="graph-header"><h1>Graph</h1><button type="button" data-graph-hints aria-label="Node hints (f)" aria-keyshortcuts="f" title="Node hints (f) · Circles mark one-hop destinations" hidden>f</button></header>
-<p>Explore connections between saved notes.</p>
+<header class="graph-header"><h1>Graph</h1><a class="graph-return" href="{% if graph_params.path %}{% url 'wiki:note' path=graph_params.path %}{% else %}{% url 'wiki:shell' %}{% endif %}">Return to note</a><button type="button" data-graph-hints aria-label="Node hints (f)" aria-keyshortcuts="f" title="Node hints (f) · Circles mark one-hop destinations" hidden>f</button></header>
+
 {% include 'wiki/graph-panel.html' %}
+<noscript><style>
+[data-graph-page] .graph-panel { overflow: visible; }
+[data-graph-page] .graph-actions, [data-graph-page] .graph-workspace, [data-graph-page] .graph-status-layer, [data-graph-page] [data-graph-dismiss] { display: none; }
+[data-graph-page] [data-graph-overlay='controls'][hidden] { display: block !important; position: static; width: 100%; max-height: none; overflow: visible; }
+</style></noscript>
 <div data-graph-server-list>
 <p>At most 200 notes and 500 directed edges per response. {% if graph.limiting_reasons %}Limits: {{ graph.limiting_reasons|join:', ' }}.{% endif %} For a one-note cap, use connection details or a larger limit to inspect edges.</p>
 <p>Index {{ graph.freshness.state }} · {% if graph.projection_complete %}Relation projection complete{% else %}Incomplete relationship evidence{% endif %}. This index is not an atomic disk snapshot.</p>

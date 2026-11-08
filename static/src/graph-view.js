@@ -154,8 +154,8 @@ export class GraphView {
     this.destinations = outboundDestinations(this.data.edges,selected); this.refreshShortcuts(); this.themeDirty = true;
     this.container.dataset.root = this.root || '';
     this.container.dataset.selected = selected || ''; this.container.dataset.focused = focused || '';
-    const node = this.data.nodes.find(n => n.path === focused);
-    this.container.setAttribute('aria-label', `3D note relationship map${node ? ` · Focused ${node.title}, ${node.path}` : ''}`);
+    const roles = [['Current note',this.current],['Selected note',selected],['Keyboard focus',focused],['Opening root',this.root]].filter(([,path])=>path).map(([role,path])=>`${role}: ${path}`).join(' · ');
+    this.container.setAttribute('aria-label', `3D note relationship map · ${roles}`);
     this.draw(); this.wake();
   }
   setForces(value) {
@@ -407,8 +407,7 @@ export class GraphView {
       measure: (text,secondary) => { ctx.font = `${secondary ? 11 : 12}px ${this.fontFamily}`; return ctx.measureText(text).width; }, maximum: this.hints?.active ? 0 : this.quality.labels, previous: this.labelSlots });
     this.labelSlots = new Map(labels.map(label => [label.path, label.slot]));
     this.labelPlacements = labels;
-    // Leaders and backed text keep an offset identity tied to its node, even
-    // when a dense priority cluster needs a viewport-margin placement.
+    // Short local leaders keep each backed identity tied to its node.
     for (const label of labels) {
       const p = this.projected.get(label.path), { rect, anchor } = label;
       ctx.globalAlpha = label.secondary ? .78 : 1;
@@ -427,20 +426,27 @@ export class GraphView {
     // A ring identifies outbound destinations even in monochrome themes.
     for (const path of destinations) {
       const p=this.projected.get(path);
-      if (!p?.visible || p.x<0 || p.x>camera.width || p.y<0 || p.y>camera.height) continue;
+      if (!p?.visible || p.x<0 || p.x>camera.width || p.y<0 || p.y>camera.height || [this.current,this.selected,this.focused,this.root].includes(path)) continue;
       ctx.strokeStyle=this.theme.destination || this.theme.focus; ctx.lineWidth=1.5;
       ctx.beginPath(); ctx.arc(p.x,p.y,Math.max(5,p.radius || 5)+3,0,Math.PI*2); ctx.stroke();
     }
-    // State cues do not depend on label budget or placement success.
-    for (const path of new Set([this.current, this.selected, this.focused])) {
+    // One primary outline per identity; dashed focus, a current-note corner,
+    // and an opening-root dot combine without stacking redundant rings.
+    for (const path of new Set([this.current, this.selected, this.focused, this.root])) {
       const p = this.projected.get(path);
       if (!p?.visible || p.x < 0 || p.x > camera.width || p.y < 0 || p.y > camera.height) continue;
-      ctx.lineWidth = 2;
-      if (path === this.current) { ctx.strokeStyle = this.theme.label; ctx.strokeRect(p.x - 9, p.y - 9, 18, 18); }
-      if (path === this.selected) { ctx.strokeStyle = this.theme.highlight; ctx.beginPath(); ctx.moveTo(p.x, p.y - 13); ctx.lineTo(p.x + 13, p.y); ctx.lineTo(p.x, p.y + 13); ctx.lineTo(p.x - 13, p.y); ctx.closePath(); ctx.stroke(); }
-      if (path === this.focused) { ctx.strokeStyle = this.theme.focus; ctx.setLineDash([5, 5]); ctx.strokeRect(p.x - 16, p.y - 16, 32, 32); ctx.setLineDash([]); }
+      const selected = path === this.selected, current = path === this.current, focused = path === this.focused;
+      ctx.lineWidth = 2; ctx.strokeStyle = selected ? this.theme.highlight : current ? this.theme.label : this.theme.focus;
+      if (focused) ctx.setLineDash([4,3]);
+      if (selected) { ctx.beginPath(); ctx.moveTo(p.x,p.y-13); ctx.lineTo(p.x+13,p.y); ctx.lineTo(p.x,p.y+13); ctx.lineTo(p.x-13,p.y); ctx.closePath(); ctx.stroke(); }
+      else if (current || focused) ctx.strokeRect(p.x-10,p.y-10,20,20);
+      else { ctx.beginPath(); ctx.arc(p.x,p.y,10,0,Math.PI*2); ctx.stroke(); }
+      ctx.setLineDash([]);
+      if (current && selected) { ctx.strokeStyle=this.theme.label; ctx.beginPath(); ctx.moveTo(p.x-4,p.y+7); ctx.lineTo(p.x-4,p.y+3); ctx.lineTo(p.x,p.y+3); ctx.stroke(); }
+      if (path === this.root) { ctx.fillStyle=this.theme.label; ctx.fillRect(p.x-2,p.y-15,4,4); }
     }
   }
+
   snapshot() { return { renderer: this.container.dataset.renderer, nodes: this.data.nodes.length, edges: this.data.edges.length, selected: this.selected, focused: this.focused, camera: { x: this.camera.x, y: this.camera.y, z: this.camera.z, yaw: this.camera.yaw, pitch: this.camera.pitch, distance: this.camera.distance }, projected: [...this.projected].map(([path, p]) => ({ path, ...p })) }; }
   wake() {
     if (this.destroyed || this.unavailable || document.hidden || this.container.hidden || this.frame !== null || this.paused) return;

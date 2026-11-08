@@ -1,3 +1,4 @@
+import { graphOverlays } from './graph-overlays.js';
 import { GraphView } from './graph-view.js';
 import { GraphSnapshot } from './graph-snapshot.js';
 import { indexProgress } from './graph-index-status.js';
@@ -35,7 +36,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   const stopIndexProgress = () => { clearTimeout(indexTimer); indexRequest?.abort(); indexRequest = null; };
   async function refreshIndexProgress() {
     stopIndexProgress();
-    if (!indexDisclosure?.open || closed) return;
+    if (!indexDisclosure?.open || closed || layers.active !== 'evidence') return;
     const controller = new AbortController(); indexRequest = controller;
     try {
       const response = await fetch('/index/status/', { credentials:'same-origin',cache:'no-store',redirect:'error',signal:controller.signal,headers:{Accept:'application/json'} });
@@ -45,7 +46,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     } catch (error) {
       if (!controller.signal.aborted) indexText.textContent = 'Index progress is unavailable. Refresh or sign in again to try.';
     } finally {
-      if (indexRequest === controller) { indexRequest = null; if (indexDisclosure.open && !closed) indexTimer = setTimeout(refreshIndexProgress, 2000); }
+      if (indexRequest === controller) { indexRequest = null; if (indexDisclosure.open && !closed && layers.active === 'evidence') indexTimer = setTimeout(refreshIndexProgress, 2000); }
     }
   }
   const map = find('[data-graph-map]');
@@ -53,7 +54,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   const listen = (el, name, fn, options = {}) => el.addEventListener(name, fn, { ...options, signal: life.signal });
   const say = text => { if (status.textContent !== text) status.textContent = text; };
   const snapshot = new GraphSnapshot(location.origin);
-  let closed = false, sequence = 0, request = null, debounce = null, refreshTimer = null;
+  let closed = false, sequence = 0, request = null, refreshTimer = null;
   let page = null, selected = currentPath || null, focused = currentPath || null;
   let listMode = preferredList, graphicsAvailable = true, trail = [], activeParams = null;
   let pendingPositions = null, suspendedSelection = null;
@@ -73,23 +74,50 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   find('[data-graph-map-options]').open = false;
   find('[data-graph-settings]').open = false;
   find('[data-graph-forces]').open = false;
-  find('[data-graph-control-options]').open = !matchMedia('(max-width: 650px), (max-height: 500px)').matches;
-  const focusSearch = () => { find('[data-graph-filter-options]').open = true; input('query').focus({ preventScroll: true }); };
-  const parameters = () => {
+  find('[data-graph-control-options]').open = true;
+  const navigation = () => listMode ? find('[data-graph-list-toggle]') : map;
+  const layers = graphOverlays(root, { navigation, onShow: name => {
+    view?.cancelHints();
+    if (name === 'find') renderFind();
+    if (name === 'evidence' && indexDisclosure?.open) void refreshIndexProgress();
+  }, onHide: name => { if (name === 'evidence') stopIndexProgress(); } });
+  const focusSearch = () => { if (layers.active !== 'find') layers.show('find', navigation()); else find('[data-graph-find]').focus({preventScroll:true}); };
+  const draftParameters = () => {
     const values = { ...Object.fromEntries(new FormData(form)), depth: input('depth').value };
     if (!values.path) delete values.path;
     return values;
   };
+  // Form edits remain drafts even during periodic revalidation or local hops.
+  const parameters = () => ({ ...(activeParams || draftParameters()) });
+  function renderFind() {
+    const activeResult = document.activeElement?.dataset.graphFindPath;
+    const query = find('[data-graph-find]').value.trim().toLocaleLowerCase();
+    const results = find('[data-graph-find-results]'); results.replaceChildren();
+    const matches = [...snapshot.nodes.values()].filter(node => !query || `${node.title} ${node.path}`.toLocaleLowerCase().includes(query));
+    find('[data-graph-find-scope]').textContent = `Find in the loaded${['query','folder','tag'].some(key => activeParams?.[key]?.trim()) ? ' filtered' : ''} snapshot${snapshot.complete ? '' : ' · Incomplete evidence'}. Selecting expands the exploration; the opening root stays fixed.`;
+    find('[data-graph-find-count]').textContent = `${matches.length} matching notes${matches.length > 50 ? ' · First 50 shown; refine your search' : ''}`;
+    for (const node of matches.slice(0,50)) {
+      const button = element('button', node.title, {type:'button', 'aria-label':`Select ${node.title}`, 'data-graph-find-path':node.path});
+      button.append(element('small',node.path));
+      button.addEventListener('click', () => {
+        if (!snapshot.nodes.has(node.path)) return;
+        if (activeParams.path) snapshot.expand(node.path);
+        renderExploration(); select(node.path,true);
+        layers.close({restore:false}); navigation().focus({preventScroll:true});
+      });
+      const row = element('li'); row.append(button); results.append(row);
+    }
+    if (!matches.length) results.append(element('li', request ? 'Loading notes…' : 'No matching notes in this snapshot. Change explicit filters to search another scope.'));
+    if (activeResult && layers.active === 'find') ([...results.querySelectorAll('button')].find(el=>el.dataset.graphFindPath === activeResult) || find('[data-graph-find]')).focus({preventScroll:true});
+  }
+  listen(find('[data-graph-find]'),'input',renderFind);
   const open = path => {
     if (!path || !page?.nodes.some(node => node.path === path)) return;
     const anchor = element('a', '', { href: linkTo(path), hidden: '' });
     panel.append(anchor); try { anchor.click(); } finally { anchor.remove(); }
   };
-  const toggleHelp = () => { find('[data-graph-help]').hidden = !find('[data-graph-help]').hidden; };
-  const escape = () => {
-    if (!find('[data-graph-help]').hidden) { find('[data-graph-help]').hidden = true; return; }
-    onClose();
-  };
+  const toggleHelp = () => layers.show('help');
+  const escape = () => { if (!layers.close()) onClose(); };
   const unavailable = () => {
     graphicsAvailable = false; listMode = true; presentation();
     if (!loadingError) say('Map unavailable. Use the connection list, or retry the map.');
@@ -119,7 +147,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     find('[data-graph-hints]').disabled = listMode || !graphicsAvailable;
   }
   function controls() {
-    const global = wholeWiki(), depth = Number(input('depth').value), filters = ['query', 'folder', 'tag'].filter(name => (activeParams?.[name] || '').trim());
+    const global = wholeWiki(), depth = Number(activeParams?.depth || input('depth').value), filters = ['query', 'folder', 'tag'].filter(name => (activeParams?.[name] || '').trim());
     find('[data-graph-cancel]').hidden = loadingPaused || loadingError || !(request);
     find('[data-graph-resume]').hidden = !loadingPaused || loadingError;
     find('[data-graph-restart]').hidden = !loadingError;
@@ -130,6 +158,8 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     find('[data-graph-depth-value]').textContent = `${depth} hop${depth === 1 ? '' : 's'}`;
     find('[data-graph-local]').setAttribute('aria-pressed', String(!global));
     find('[data-graph-global]').setAttribute('aria-pressed', String(global));
+    const identity = snapshot.nodes.get(selected);
+    find('[data-graph-selection]').textContent = identity ? `Selected · ${identity.title}` : '';
     find('[data-graph-scope]').textContent = `${global ? 'Whole wiki' : `Local · ${depth} hop${depth === 1 ? '' : 's'} · ${activeParams?.path || input('path').value}`}${filters.length ? ` · Filtered by ${filters.map(name => `${name}: ${activeParams[name]}`).join(', ')}` : ''}`;
     const state = loadingError ? 'Partial — loading stopped' : loadingPaused ? 'Loading paused · Partial' :
       request ? 'Loading…' : snapshot.complete ? 'Complete' :
@@ -172,7 +202,11 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
       const inspect = element('button', `Inspect ${node.title}`, { type: 'button', 'data-graph-inspect': node.path, 'aria-pressed': String(node.path === selected) });
       // These listeners disappear with the row, rather than accumulating abort
       // callbacks on the long-lived graph for every continuation.
-      inspect.addEventListener('click', () => select(node.path, false));
+      inspect.addEventListener('click', () => {
+        select(node.path, false);
+        // Revalidation can replace this row while its evidence sheet is open.
+        layers.show('evidence', () => [...list.querySelectorAll('[data-graph-inspect]')].find(el => el.dataset.graphInspect === node.path));
+      });
       const openLink = element('a', `Open ${node.path}`, { href: node.href });
       if (node.path === currentPath) openLink.setAttribute('aria-current', 'page');
       li.append(element('strong', node.title), element('div', node.path), inspect, openLink); list.append(li);
@@ -190,10 +224,11 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     // Hidden-tab draw is intentionally skipped by the renderer. Keep its old
     // pixels concealed until accepted evidence has been drawn again.
     if (suspend) map.hidden = true;
+    delete details.dataset.path;
     details.replaceChildren(element('h2', 'Selected note'), element('p', 'Select a note to see its connections.'));
     find('[data-graph-diagnostics]').textContent = '';
     view?.setGraph({ nodes: [], edges: [] }, currentPath, activeParams?.path || null); view?.setSelection(null, null);
-    renderList(); controls();
+    renderList(); controls(); renderFind();
   }
   function suspendEvidence() {
     // Coordinates and expansion identities can survive only a successful check
@@ -206,10 +241,14 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   }
   function showDetails(path) {
     const node = snapshot.nodes.get(path);
+    const sameNote = details.dataset.path === path;
+    const expanded = new Set(sameNote ? [...details.querySelectorAll('details[open]')].map(el=>el.dataset.graphDisclosure) : []);
+    const focusedKey = sameNote && details.contains(document.activeElement) ? document.activeElement.dataset.graphDetailFocus : null;
     details.replaceChildren(element('h2', 'Selected note'));
+    details.dataset.path = path || '';
     if (!node) { details.append(element('p', 'Select a note to see its connections.')); return; }
-    details.append(element('h3', node.title), element('p', path), element('a', 'Open selected note', { href: node.href }));
-    const centerButton = element('button', 'Expand selected note', { type: 'button' });
+    details.append(element('h3', node.title), element('p', path), element('a', 'Open selected note', { href: node.href, 'data-graph-detail-focus':'open' }));
+    const centerButton = element('button', 'Expand selected note', { type: 'button', 'data-graph-detail-focus':'expand' });
     centerButton.addEventListener('click', () => center(path)); details.append(centerButton);
     details.append(element('p', snapshot.complete ? 'Saved connections' : 'Updating saved connections'));
     const connections = snapshot.connections(path);
@@ -217,18 +256,22 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
       const list = element('ul'); details.append(element('h3', title), list);
       for (const edge of connections[direction]) {
         const other = direction === 'incoming' ? edge.source : edge.destination;
-        const row = element('li', `${other} · ${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`);
-        row.append(element('a', direction === 'incoming' ? 'Open source' : 'Open destination', {href:snapshot.nodes.get(other).href}));
-        const evidence = element('details'); evidence.append(element('summary', 'Source evidence'),
+        const key = JSON.stringify([direction,other]);
+        const row = element('li', undefined, {class:'graph-connection'});
+        row.append(element('span',other,{class:'graph-connection-path'}),element('span',`${edge.occurrence_count} occurrence${edge.occurrence_count === 1 ? '' : 's'}`,{class:'graph-connection-count'}));
+        row.append(element('a', direction === 'incoming' ? 'Open source' : 'Open destination', {href:snapshot.nodes.get(other).href, 'data-graph-detail-focus':key+':open'}));
+        const evidence = element('details',undefined,{'data-graph-disclosure':key}); evidence.append(element('summary', 'Source evidence', {'data-graph-detail-focus':key+':source'}),
           element('p', `${edge.source} · ${edge.position_precision || 'advisory'} line ${edge.position?.[0] || '?'}, column ${edge.position?.[1] || '?'}`),
           element('code', edge.source_revision || ''));
         row.append(evidence); list.append(row);
       }
       if (!connections[direction].length) list.append(element('li', snapshot.complete ? 'No saved connections.' : 'Connections are still updating.'));
     }
-    const evidence = element('details'); evidence.append(element('summary', 'Technical evidence'),
+    const evidence = element('details',undefined,{'data-graph-disclosure':'technical'}); evidence.append(element('summary', 'Technical evidence',{'data-graph-detail-focus':'technical'}),
       element('p', `Indexed revision ${node.revision} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. Source locations are advisory; fragments are unchecked. Snapshot contains resolved note connections.`));
     details.append(evidence);
+    for (const disclosure of details.querySelectorAll('details')) disclosure.open = expanded.has(disclosure.dataset.graphDisclosure);
+    if (focusedKey) [...details.querySelectorAll('[data-graph-detail-focus]')].find(el=>el.dataset.graphDetailFocus === focusedKey)?.focus({preventScroll:true});
   }
   function renderExploration({ fit = false } = {}) {
     page = snapshot.explore(activeParams.path || null, activeParams.depth);
@@ -242,6 +285,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     } catch { mapFailure = true; unavailable(); }
     if (fit && page.nodes.length && !mapFailure && !view?.cameraControlled) view?.fit();
     renderList(); showDetails(selected); presentation(); controls();
+    if (layers.active === 'find') renderFind();
     find('[data-graph-diagnostics]').textContent = `Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. ${page.limiting_reasons.join(', ')} Indexed saved content, not a disk snapshot. Hops refer to loaded edges; unsaved edits are excluded.`;
     if (!view?.hints?.active) say(mapFailure ? 'Map resource limit reached. All loaded records remain available in the connection list.' : '');
   }
@@ -251,17 +295,15 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     if (activeParams.path) snapshot.expand(path);
     renderExploration(); say(`Selected ${path}. Enter on the map opens it.`);
   }
-  function updateExploration({ fit = false } = {}) {
-    const params = parameters();
-    if (!snapshot.data || filterKey(params) !== filterKey(activeParams)) { void load({fit}); return; }
+  function updateExploration({ fit = false, params = parameters() } = {}) {
+    if (!snapshot.data || filterKey(params) !== filterKey(activeParams)) { void load({fit,params}); return; }
     activeParams = params; renderExploration({fit});
   }
-  async function load({ fit = false } = {}) {
+  async function load({ fit = false, params = parameters() } = {}) {
     if (closed || document.hidden) return;
-    clearTimeout(debounce); debounce = null; cancelAutomatic(); const ticket = ++sequence;
+    cancelAutomatic(); const ticket = ++sequence;
     request?.abort(); const controller = new AbortController(); request = controller;
     loadingPaused = false; loadingError = false; loadingReason = '';
-    const params = parameters();
     if (activeParams && filterKey(params) !== filterKey(activeParams)) clearEvidence();
     activeParams = params;
     say(page ? 'Updating connections…' : 'Loading connections…'); controls();
@@ -302,17 +344,14 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     if (!path) return;
     if (activeParams?.path) { select(path, true); return; }
     input('path').value = currentPath || path;
-    loadingPaused = false; updateExploration({ fit:true });
+    loadingPaused = false; updateExploration({ fit:true, params:{...parameters(),path:input('path').value} });
   }
-  listen(form, 'submit', event => { event.preventDefault(); loadingPaused = false; void load({ fit: true }); });
-  for (const name of ['query', 'folder', 'tag']) listen(input(name), 'input', () => { clearTimeout(debounce); cancelAutomatic(); sequence++; request?.abort(); request = null; loadingPaused = false; clearEvidence(); debounce = setTimeout(() => { debounce = null; void load(); }, 180); });
-  listen(input('path'), 'input', () => updateExploration());
-  listen(input('depth'), 'change', () => updateExploration());
+  listen(form, 'submit', event => { event.preventDefault(); loadingPaused = false; void load({ fit:true,params:draftParameters() }); });
   function changeDepth(delta) {
-    if (!input('path').value) { say('Hop depth applies to a local neighborhood. Choose Local first.'); return; }
-    const next = Number(input('depth').value) + delta;
+    if (!activeParams?.path) { say('Hop depth applies to a local neighborhood. Choose Local first.'); return; }
+    const next = Number(activeParams.depth) + delta;
     if (next < 1 || next > 8) { say(next < 1 ? 'Minimum local depth is one hop.' : 'Maximum local depth is eight hops; query resource limits may make the view partial.'); return; }
-    input('depth').value = String(next); updateExploration();
+    input('depth').value = String(next); updateExploration({params:{...parameters(),depth:String(next)}});
   }
   listen(find('[data-graph-depth-down]'), 'click', () => changeDepth(-1));
   listen(find('[data-graph-depth-up]'), 'click', () => changeDepth(1));
@@ -322,21 +361,25 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
         event.target !== map && event.target !== find('[data-graph-list-toggle]')) return;
     event.preventDefault(); event.stopPropagation(); changeDepth(event.key === '[' ? -1 : 1);
   });
+  // Capture active-layer Escape before map commands or dialog cancellation.
   listen(root, 'keydown', event => {
-    if (event.key !== 'Escape' || event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
-    if (!find('[data-graph-help]').hidden) { event.preventDefault(); event.stopImmediatePropagation(); toggleHelp(); return; }
-    if (form.contains(event.target)) {
-      event.preventDefault(); event.stopImmediatePropagation(); if (debounce !== null) { clearTimeout(debounce); debounce = null; void load(); } controls();
-      find('[data-graph-filter-options]').open = false;
-      if (listMode) find('[data-graph-list-toggle]').focus(); else map.focus({ preventScroll: true });
-      say('Search closed. Escape returns to your note.');
-    } else if (event.target !== map) { event.preventDefault(); event.stopImmediatePropagation(); escape(); }
+    if (event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
+    if (event.key === 'Escape' && layers.active) {
+      event.preventDefault(); event.stopImmediatePropagation(); layers.close(); return;
+    }
+    if (event.target === map && !view?.hints?.active && ['o','e'].includes(event.key)) {
+      event.preventDefault(); event.stopImmediatePropagation(); layers.show(event.key === 'o' ? 'controls' : 'evidence'); return;
+    }
+    if (event.key === 'Escape' && event.target !== map) { event.preventDefault(); event.stopImmediatePropagation(); escape(); }
+  }, {capture:true});
+  listen(find('[data-graph-clear]'), 'click', () => {
+    for (const name of ['query','folder','tag']) input(name).value = '';
+    void load({params:{...parameters(),query:'',folder:'',tag:''}});
   });
-  listen(find('[data-graph-clear]'), 'click', () => { input('query').value = ''; void load(); });
   listen(find('[data-graph-local]'), 'click', () => { if (!activeParams?.path) center(currentPath || selected); });
-  listen(find('[data-graph-global]'), 'click', () => { input('path').value = ''; input('depth').disabled = false; updateExploration({ fit: true }); });
-  listen(find('[data-graph-back]'), 'click', () => { loadingPaused = false; input('path').value = trail.pop() || currentPath; find('[data-graph-back]').disabled = !trail.length; updateExploration({ fit: true }); });
-  listen(find('[data-graph-list-toggle]'), 'click', () => { view?.cancelHints(); listMode = !listMode || !graphicsAvailable; if (graphicsAvailable) preferredList = listMode; presentation(); });
+  listen(find('[data-graph-global]'), 'click', () => { input('path').value = ''; input('depth').disabled = false; const params=parameters(); delete params.path; updateExploration({ fit:true,params }); });
+  listen(find('[data-graph-back]'), 'click', () => { loadingPaused = false; input('path').value = trail.pop() || currentPath; find('[data-graph-back]').disabled = !trail.length; updateExploration({ fit:true,params:{...parameters(),path:input('path').value} }); });
+  listen(find('[data-graph-list-toggle]'), 'click', () => { layers.close({restore:false}); view?.cancelHints(); listMode = !listMode || !graphicsAvailable; if (graphicsAvailable) preferredList = listMode; presentation(); });
   listen(find('[data-graph-hints]'), 'click', () => view?.hints?.active ? view.cancelHints(true) : view?.beginHints());
   listen(find('[data-graph-fit]'), 'click', () => view?.fit());
   listen(find('[data-graph-reset]'), 'click', () => view?.resetOrientation());
@@ -379,11 +422,12 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   listen(find('[data-graph-help-toggle]'), 'click', toggleHelp);
   // Returning from a hidden tab must revalidate retained private evidence.
   listen(document, 'visibilitychange', () => { if (document.hidden) { stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); request = null; suspendEvidence(); } else if (!closed) { if (indexDisclosure?.open) void refreshIndexProgress(); void load(); } });
-  listen(window, 'pagehide', () => { stopIndexProgress(); sequence++; cancelAutomatic(); clearTimeout(debounce); debounce = null; request?.abort(); request = null; suspendEvidence(); view?.stop(); });
+  listen(window, 'pagehide', () => { stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); request = null; suspendEvidence(); view?.stop(); });
   listen(window, 'pageshow', event => { if (event.persisted && !closed) void load(); });
   find('[data-graph-hints]').hidden = false;
   find('[data-graph-controls]').hidden = false; find('[data-graph-clear]').hidden = false;
   find('[data-graph-list-toggle]').hidden = false;
+  if (root.matches('[data-graph-page]')) root.classList.add('graph-enhanced');
   createView();
   find('[data-graph-pause]').setAttribute('aria-pressed', String(view?.paused || false));
   view?.setBloom(find('[data-graph-bloom]').value); presentation();
@@ -393,8 +437,9 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   void load({ fit: true });
   return {
     focusSearch,
+    dismissLayer: () => layers.close(),
     focusNavigation() { if (listMode) find('[data-graph-list-toggle]').focus({ preventScroll: true }); else map.focus({ preventScroll: true }); },
-    destroy() { closed = true; stopIndexProgress(); sequence++; clearTimeout(debounce); cancelAutomatic(); request?.abort(); life.abort(); view?.destroy(); pendingPositions = suspendedSelection = null; snapshot.clear(); page = null; selected = focused = null;
+    destroy() { closed = true; stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); layers.destroy(); life.abort(); view?.destroy(); pendingPositions = suspendedSelection = null; snapshot.clear(); page = null; selected = focused = null;
       find('[data-graph-nodes]').replaceChildren(); find('[data-graph-edges]').replaceChildren();
       for (const kind of ['notes', 'links']) {
         const navigation = find(`[data-graph-${kind}-navigation]`); navigation.replaceChildren(); navigation.hidden = true;
@@ -402,6 +447,8 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
       for (const name of ['nodeCount', 'edgeCount']) map.dataset[name] = '0';
       for (const name of ['root', 'selected', 'focused']) delete map.dataset[name];
       map.setAttribute('aria-label', '3D note relationship map');
+      find('[data-graph-find-results]').replaceChildren(); find('[data-graph-find]').value = ''; find('[data-graph-find-count]').textContent = '';
+      delete details.dataset.path; find('[data-graph-selection]').textContent = '';
       details.replaceChildren(); find('[data-graph-summary]').textContent = ''; find('[data-graph-diagnostics]').textContent = ''; say('');
     },
   };

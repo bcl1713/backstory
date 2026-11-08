@@ -18,7 +18,7 @@ for(const width of [1180,390]) test(`cumulative exploration, hints and perspecti
  const panel=page.locator('[data-graph-dialog]'),map=panel.locator('[data-graph-map]'),summary=panel.locator('[data-graph-summary]');
  await expect(map).toHaveAttribute('data-renderer','webgl');await expect(summary).toContainText('4 notes · 4 directed links · Complete');
  await panel.locator('[data-graph-filter-options]').evaluate(el=>el.open=true);
- const search=panel.getByLabel('Graph search',{exact:true});await search.focus();await page.keyboard.press('f');expect(await search.inputValue()).toBe('f');await search.fill('');await page.keyboard.press('Escape');
+ const search=panel.getByRole('searchbox',{name:'Find a note',exact:true});await search.focus();await page.keyboard.press('f');expect(await search.inputValue()).toBe('f');await search.fill('');await page.keyboard.press('Escape');
  await expect(summary).toContainText('4 notes · 4 directed links · Complete');
  // Fix only synthetic positions so pointer/hint targets remain in view on phone.
  const original=await map.evaluate(el=>{const v=el.graphView;v.setPaused(true);v.cameraControlled=true;v.simulation.all.forEach((n,i)=>Object.assign(n,v.camera.world({x:55+i*(v.camera.width-110)/3,y:80+i*40})));v.draw();return {camera:v.snapshot().camera,positions:v.simulation.all.map(n=>[n.path,n.x,n.y,n.z])};});

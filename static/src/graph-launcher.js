@@ -27,10 +27,6 @@ export function mountGraphLauncher() {
     dialog.showModal();
     history.pushState({ ...history.state, backstoryGraph: true }, '');
     document.dispatchEvent(new Event('backstory:graph-opened'));
-    if (search) {
-      dialog.querySelector('[data-graph-filter-options]').open = true;
-      dialog.querySelector('[name=query]').focus({ preventScroll: true });
-    }
     if (!document.querySelector('[data-graph-styles]')) {
       const style = document.createElement('link'); style.rel = 'stylesheet'; style.href = '/static/graph.css'; style.dataset.graphStyles = '';
       document.head.append(style);
@@ -56,7 +52,7 @@ export function mountGraphLauncher() {
   });
   document.addEventListener('backstory:open-graph', () => { void open(); });
   dialog.querySelector('[data-graph-close]').addEventListener('click', close);
-  dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
+  dialog.addEventListener('cancel', event => { event.preventDefault(); if (!controller?.dismissLayer()) close(); });
   window.addEventListener('popstate', () => { if (dialog.open) finish(); });
   window.addEventListener('pagehide', () => { sequence++; controller?.destroy(); controller = null; });
   window.addEventListener('pageshow', async event => {
