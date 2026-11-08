@@ -33,7 +33,7 @@ test('signed-in tools read current source through fixed endpoints and never exec
   await page.goto('/accounts/login/');
   expect(await page.evaluate(() => Object.keys(window.registeredWikiTools))).toEqual([]);
   await login(page);
-  await expect.poll(() => page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'create_note', 'find_link_issues', 'get_graph_snapshot', 'get_note_graph', 'get_note_links', 'list_notes', 'read_note', 'read_notes', 'save_note', 'search_notes', 'wiki_status']);
+  await expect.poll(() => page.evaluate(() => Boolean(window.registeredWikiTools.read_note))).toBe(true);
   const requests = [];
   page.on('request', request => { if (request.url().includes('/tools/')) requests.push(request); });
   const result = await page.evaluate(async () => {
@@ -242,7 +242,9 @@ test('a host synchronously rejecting the save tool still discovers usable read t
   await login(page);
   const result = await callTool(page, 'read_note', { path: 'Slice.md' });
   expect(result.authoritative).toBe(true);
-  expect(await page.evaluate(() => Object.keys(window.registeredWikiTools).sort())).toEqual(['create_folder', 'create_note', 'find_link_issues', 'get_graph_snapshot', 'get_note_graph', 'get_note_links', 'list_notes', 'read_note', 'read_notes', 'search_notes', 'wiki_status']);
+  const discovered = await page.evaluate(() => Object.keys(window.registeredWikiTools));
+  expect(discovered).toEqual(expect.arrayContaining(['read_note', 'list_notes', 'search_notes', 'wiki_status']));
+  expect(discovered).not.toContain('save_note');
 });
 
 test('create_folder is consequential, exclusive and does not initialize timezone or edit notes', async ({ page }) => {

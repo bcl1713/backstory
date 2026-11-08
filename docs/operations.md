@@ -339,3 +339,10 @@ Warm calls are a measurement only; production still uses an isolated process per
 request. This probe does not establish deployment health or reproduce an unknown
 private draft. Save-path tests separately cover New Note/existing-note readback,
 failure recovery and no publication.
+
+
+Recoverable WebMCP removal retains exact note bytes and actor-bound journals;
+they are not pruned by `prune_recovery`. Move journals and removal material share
+the configured logical recovery quota. See [management lifecycle and exceptional
+operator recovery](webmcp-management.md) before resolving an interrupted removal.
+No recursive deletion or permanent purge tool is exposed.

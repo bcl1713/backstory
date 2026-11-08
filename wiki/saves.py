@@ -113,7 +113,7 @@ def _saved(source, revision, diagnostics, diff, mode, *, uncertain=False, path):
     return SaveResult(state, source, revision, diagnostics, diff)
 
 
-def save_note(actor, path, submitted_source, base_revision, mode="formatted", recovery_token=None, *, restore_bom=None):
+def save_note(actor, path, submitted_source, base_revision, mode="formatted", recovery_token=None, *, restore_bom=None, restore_revision_id=None):
     submitted = validate_save(actor, path, submitted_source)
     if base_revision is not None and not re.fullmatch(r'"[0-9a-f]{64}"', base_revision):
         raise StorageError("invalid_precondition")
@@ -121,6 +121,10 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
         raise StorageError("invalid_save_mode")
     try:
         with wiki_write_lock(), application_lock("note:" + path):
+            if restore_revision_id is not None:
+                from .models import SavedRevision
+                if not SavedRevision.objects.filter(pk=restore_revision_id, path=path).exists():
+                    raise StorageError('history_revision_changed', 412)
             recovery = get_recovery(actor, path, base_revision, submitted_source, recovery_token) if mode == "source_recovery" else None
             current = _current(path)
             conflict = _check_base(current, base_revision, submitted_source)

@@ -2,7 +2,9 @@
 
 Backstory exposes `search_notes`, `read_note`, `read_notes`, `list_notes`,
 `wiki_status`, `create_folder`, explicit `create_note`, guarded `save_note`, and read-only
-`get_note_links`, `get_note_graph`, `get_graph_snapshot`, `find_link_issues` on signed-in wiki pages. Registration is optional and feature-detects
+`get_note_links`, `get_note_graph`, `get_graph_snapshot`, `find_link_issues`, targeted
+`get_index_diagnostics`, and the [guarded management tools](webmcp-management.md)
+on signed-in wiki pages. Registration is optional and feature-detects
 `document.modelContext.registerTool`. Unsupported browsers and registration
 failures leave normal browsing, editing, search and saves available. A host
 rejecting one tool does not prevent registration of the others.
@@ -42,6 +44,13 @@ receives HTTP 401 with `authentication_required`. Sign in again through the UI.
 | `read_notes` | `/tools/read-many/` | `paths` (1–8 unique Markdown paths) |
 | `wiki_status` | `/tools/status/` | none |
 | `create_folder` | `/tools/create-folder/` | `path` (required root-relative folder path) |
+| `get_index_diagnostics` | `/tools/index-diagnostics/` | optional `folder`, `limit` 1–100, generation-bound `cursor` |
+| `preview_move`, `get_move` | `/tools/moves/preview/`, `/tools/moves/get/` | POST `source`, `destination`; GET `operation_id` |
+| `commit_move`, `rollback_move` | `/tools/moves/commit/`, `/tools/moves/rollback/` | POST `operation_id`, plus complete-plan `review_token` for commit |
+| `list_note_history`, `read_note_revision` | `/tools/history/list/`, `/tools/history/read/` | GET `path`, `limit`, `cursor`; GET `revision_id` |
+| `restore_note_revision` | `/tools/history/restore/` | POST `path`, `revision_id`, exact current `revision` |
+| `preview_removal` | `/tools/removals/preview/` | POST `path`, `kind`; exact current `revision` required for notes |
+| `get_removal`, `commit_removal`, `restore_removal` | `/tools/removals/get/`, `/commit/`, `/restore/` | GET/POST/POST `operation_id`; one note or empty folder only |
 | `list_notes` | `/tools/list/` | `folder` (default root), `limit` (default 100, 1–100), `cursor` |
 
 `wiki_status` reports the packaged running identity in `application.build` (the
@@ -241,7 +250,8 @@ tool neither retries nor queues reads, and it never depends on index freshness.
 ## Await every save
 
 Await each `save_note` result before invoking the next, even for a different
-path. The document-scoped guard also serializes note and folder creation. An overlapping
+path. The document-scoped guard also serializes note/folder creation, relocation,
+removal and history restoration, including their affected-path inspections. An overlapping
 call returns `save_in_progress`, `request_started: false`, and `queued: false`:
 it made no save request, backup or mutation and will not run later automatically.
 Wait for the active operation, read the intended note again to obtain its current
@@ -349,8 +359,9 @@ snapshot is one whole-index response rather than paginated local traversal;
 ## Audit follow-up and acceptance limits
 
 See [the #148 diagnosis and management triage](testing/2026-11-08-webmcp-graph-audit.md)
-for projection consistency, relocation, recoverable cleanup and history service
-reuse. Those proposed mutation tools remain follow-up work. No recursive delete,
+for the original projection diagnosis. The subsequent
+[guarded management implementation](webmcp-management.md) exposes targeted index
+diagnostics, relocation plans, history and a recoverable single-entry lifecycle. No recursive delete,
 permanent purge, arbitrary timestamp restoration or new remote MCP transport is
 introduced by this change.
 

@@ -86,7 +86,7 @@ def _record_charge(path, base_revision, *payloads):
 
 
 def _check_quota(extra):
-    from .models import RecoveryDraft
+    from .models import RecoveryDraft, RemovalOperation, MoveOperation
     from django.db.models import BigIntegerField, BinaryField, Sum, Value
     from django.db.models.functions import Cast, Coalesce, Length
     # SQLite length(TEXT) counts code points, so cast text/JSON to BLOB first.
@@ -97,6 +97,10 @@ def _check_quota(extra):
         + Length(Cast('diagnostics', BinaryField())) + Length(Cast('newline', BinaryField())) + Value(1))
     total = SavedRevision.objects.aggregate(total=Sum(revision_charge, output_field=BigIntegerField()))['total'] or 0
     total += RecoveryDraft.objects.aggregate(total=Sum(draft_charge, output_field=BigIntegerField()))['total'] or 0
+    removal_charge = (metadata + Length('original') + Length(Cast('plan', BinaryField()))
+        + Length(Cast('kind', BinaryField())) + Value(1024))
+    total += RemovalOperation.objects.aggregate(total=Sum(removal_charge, output_field=BigIntegerField()))['total'] or 0
+    total += MoveOperation.objects.aggregate(total=Sum(Length(Cast('plan', BinaryField())), output_field=BigIntegerField()))['total'] or 0
     if total + extra > settings.BACKSTORY_REVISION_QUOTA_BYTES:
         raise StorageError('backup_quota_exceeded', 503)
 
@@ -165,7 +169,7 @@ def store_draft(actor, path, base_revision, source, diagnostics, *, base_source=
         raise StorageError('recovery_unavailable', 503) from None
 
 
-def restore_revision(actor, revision_id, current_base_revision):
+def restore_revision(actor, revision_id, current_base_revision, *, expected_path=None):
     from django.core.exceptions import PermissionDenied
     from .contracts import FormatResult
     from .saves import save_note
@@ -175,10 +179,13 @@ def restore_revision(actor, revision_id, current_base_revision):
         record = SavedRevision.objects.get(pk=revision_id)
     except SavedRevision.DoesNotExist:
         raise StorageError('not_found', 404) from None
+    if expected_path is not None and record.path != expected_path:
+        raise StorageError('history_revision_changed', 412)
     recovery_path(record.path)
     raw = bytes(record.original)
     source = (raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw).decode('utf-8')
     # Explicit restore uses the same source-recovery grant and guarded write path.
     result = FormatResult(source, (Diagnostic('history_restore', 'Explicit restoration; formatting skipped.', 'warning'),), '', 'failed', '')
     token = issue_recovery(actor, record.path, current_base_revision, source, result)
-    return save_note(actor, record.path, source, current_base_revision, 'source_recovery', token, restore_bom=raw.startswith(b'\xef\xbb\xbf'))
+    return save_note(actor, record.path, source, current_base_revision, 'source_recovery', token,
+        restore_bom=raw.startswith(b'\xef\xbb\xbf'), restore_revision_id=record.pk)
