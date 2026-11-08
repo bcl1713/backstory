@@ -23,35 +23,45 @@ rooted at the opening note. New shorter paths update those depths and springs.
 Selection never refits, recenters or reseeds the view. Surviving positions,
 orientation, zoom, focus, pause and reduced motion remain intact.
 
-Indexed outgoing adjacency is batched and retained in an expiring, stamp-bound
-exploration session. Repeated completed selections need no new neighborhood
-request. Continuations advance automatically for larger work; there is no fixed
-graph-size ceiling. Refresh and returning from a hidden tab revalidate accumulated
-evidence before showing it again. Changing root, filters or depth starts a new
-scope. An incoming-only note does not join merely by linking into the graph.
+The enhanced graph loads one compact snapshot of the entire authorized, eligible
+indexed graph, including isolated notes, into browser memory. Outgoing adjacency
+is independent of the explored subset: selecting a node runs directed BFS locally
+and adds its neighborhood without another neighborhood request. Only explored
+nodes and their directed edges enter layout/rendering. Incoming-only notes remain
+outside the visible local graph unless reached through an explored outgoing path.
+Selected-note incoming/outgoing evidence comes from the snapshot.
 
-SQL retains its emergency per-statement watchdog (2,000,000 VM steps or one
-second). Per-response work, endpoint eligibility and automatic continuations
-bound large traversals independently. Generation, mutation, relation and
-eligibility changes revoke old exploration tokens and cursors.
+**All notes** displays every eligible node in that snapshot, including disconnected
+notes. Canonical nodes and directed aggregate edges are deduplicated; repeated
+selections never add occurrence counts. All eligible directed links between included
+nodes remain visible, including same-depth, back and reciprocal links. Folder,
+exact-tag and literal path/title/name filters apply at the bulk endpoint before
+transfer; active filters are shown beside the local/whole-wiki scope.
 
-**All notes** starts automatic loading of every eligible wiki component, including
-disconnected notes. Bounded pages accumulate without repeated Load more clicks;
-empty continuing pages advance too. Canonical nodes and directed aggregate edges
-are deduplicated; repeated aggregate counts replace earlier counts. Local views
-also follow continuations automatically. All eligible directed links between
-included nodes remain visible, including same-depth, back and reciprocal links. Folder, exact
-tag and literal path/title/name filters use the shared JSON/WebMCP service. Active
-filters are shown beside the local/whole-wiki scope, including their values.
+A visible graph revalidates its snapshot every **15 seconds**, on Refresh, and on
+return from a hidden tab. The existing index worker's filesystem notifications and
+polling recovery maintain external edits, creation, deletion, renames, aliases and
+resolution changes. The graph endpoint never reparses note bodies. Index-worker
+lag and incomplete resolution remain explicitly partial; a transported snapshot
+is not an atomic snapshot of disk, and the polling interval is not a promise that
+external changes finish indexing within 15 seconds.
 
-The summary shows loaded notes/links and Complete, Loading, Loading paused, or
-Partial. Complete means all pages in the requested scope were exhausted with valid
-evidence; counts are loaded counts, not invented whole-wiki totals. **Pause loading**
-retains results and continuation; **Resume loading** continues automatically. Loading
-pause is independent of **Pause motion**. Errors and expired/stalled cursors expose
-**Restart loading**; authorization/storage/namespace failures clear retained evidence.
-Scope/filter/depth changes cancel obsolete requests. Close releases pending work.
-A request with a different index/eligibility version cannot mix with earlier pages.
+Same-scope reconciliation recomputes all explored neighborhoods against the new
+snapshot, removes revoked/deleted evidence and preserves surviving positions,
+camera, selection, focus, pause and reduced motion. Authorization/storage/policy
+scope changes clear prior private data. Failed revalidation also clears it rather
+than showing potentially revoked evidence as last-known-good. Hidden tabs,
+page navigation and close clear snapshot contents and abort pending work; stale
+responses cannot repopulate a superseded graph. Already delivered data cannot
+revoke itself while disconnected: visible tabs detect revocation on their next
+revalidation, and hidden tabs retain no graph evidence.
+
+The summary distinguishes Complete, Loading, Updating, paused and Partial states.
+Complete describes the current eligible indexed evidence, not guaranteed current
+disk contents. Incomplete indexing, resource failure and unavailable storage never
+look like a complete empty wiki. There is no hard visible node/edge ceiling or
+manual Load more step. A failed bulk load exposes restart recovery; changing hop
+depth cannot reduce the amount of data required by the snapshot transport.
 
 **Graph settings → Forces** starts collapsed. Spring strength, Repulsion and
 Gravity apply live from **0.25× to 4× default**, in quarter steps. Linked pairs use
@@ -166,9 +176,11 @@ identity; authorization/storage failures clear cached map, titles, counts and de
 panels and cancel older requests. Leaving/closing the graph releases private state.
 No private graph contents are persisted in browser storage.
 
-Each response remains bounded to 200 nodes, 500 directed aggregate edges, 100 link
-items and 512 KiB JSON. Paths/cursors are at most 4096 characters, search/tag 256;
-candidate, SQL instruction/time and depth budgets remain enforced. Queries never
+The legacy paged JSON/WebMCP queries remain bounded to 200 nodes, 500 directed
+aggregate edges, 100 link items and 512 KiB JSON per response. The authenticated
+`/tools/graph/snapshot/` bulk endpoint has no artificial membership truncation;
+actual database or memory exhaustion fails explicitly. Paths/cursors are at most 4096 characters, search/tag 256;
+Legacy candidate/depth budgets and the shared SQL watchdog remain enforced. Queries never
 scan the vault or parse/read note bodies. Signed continuations bind query, limits,
 policy/storage namespace and index/publication versions, and expire after an hour.
 

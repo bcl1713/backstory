@@ -6,6 +6,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 from django.views.decorators.http import require_GET
 from indexing.graph import query_graph, query_links, query_link_issues
+from indexing.graph_snapshot import authorization_scope, query_snapshot
 from .contracts import StorageError
 from .policy import authorize_content
 from .tool_views import _json, _tool
@@ -14,6 +15,7 @@ from .tool_views import _json, _tool
 SCHEMAS = {
     'graph': {'path', 'depth', 'folder', 'tag', 'query', 'cursor', 'node_limit', 'edge_limit', 'expand', 'exploration'},
     'links': {'path', 'direction', 'cursor', 'limit'},
+    'snapshot': {'folder', 'tag', 'query'},
     'issues': {'folder', 'issue', 'cursor', 'limit'},
 }
 
@@ -46,6 +48,12 @@ def arguments(request, kind, *, form=False):
 def graph(request):
     page = query_graph(**arguments(request, 'graph'))
     return _json(asdict(page), 503 if page.state == 'unavailable' else 200)
+
+
+@_tool
+def snapshot(request):
+    data = query_snapshot(scope=authorization_scope(request), **arguments(request, 'snapshot'))
+    return _json(data, 503 if data['state'] == 'unavailable' else 200)
 
 
 @_tool

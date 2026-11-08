@@ -107,3 +107,44 @@ test('closing graph restores visible plain-text fallback and caret', async ({ pa
   await panel(page).getByRole('button', { name: 'Close graph', exact: true }).click();
   await expect(page.locator('#source')).toBeFocused(); expect(await page.locator('#source').evaluate(el => el.selectionStart)).toBe(4);
 });
+
+test('enhanced direct graph removes private fallback evidence before revalidation can revoke it', async ({ page }) => {
+  await setup(page);
+  await page.goto('/graph/?path=Graph%20A.md&depth=2');
+  const graph = page.locator('[data-graph-page]');
+  await expect(graph.locator('[data-graph-summary]')).toContainText('Complete');
+  await expect(graph.locator('[data-graph-server-list]')).toHaveCount(0);
+  await expect(page.locator('#graph-initial-data, #graph-initial-params')).toHaveCount(0);
+  await page.route('**/tools/graph/snapshot/**', route => route.fulfill({status:401,
+    json:{untrusted_content:true,reason_code:'authentication_required'}}));
+  await graph.locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
+  await graph.getByRole('button', {name:'Refresh',exact:true}).click();
+  await expect(graph.locator('[data-graph-status]')).toContainText('Session expired');
+  await expect(graph.locator('[data-graph-map]')).toHaveAttribute('data-node-count','0');
+  await expect(graph.locator('[data-graph-nodes]')).not.toContainText('Graph B.md');
+  await expect(graph.locator('[data-graph-details]')).not.toContainText('Cluster A');
+});
+
+test('paused map stays hidden until private evidence is revalidated on tab return', async ({ page }) => {
+  await setup(page); await openGraph(page);
+  const graphicsAvailable = await map(page).getAttribute('data-renderer') === 'webgl';
+  await map(page).evaluate(el => el.graphView.setPaused(true));
+  let release;
+  await page.route('**/tools/graph/snapshot/**', async route => {
+    const response = await route.fetch();
+    await new Promise(resolve => { release = resolve; });
+    await route.fulfill({response}).catch(() => {});
+  });
+  await page.evaluate(() => { Object.defineProperty(document,'hidden',{value:true,configurable:true}); document.dispatchEvent(new Event('visibilitychange')); });
+  await expect(map(page)).toHaveAttribute('data-node-count','0');
+  await expect(map(page)).toBeHidden();
+  await page.evaluate(() => { Object.defineProperty(document,'hidden',{value:false,configurable:true}); document.dispatchEvent(new Event('visibilitychange')); });
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await expect(map(page)).toBeHidden();
+  await expect(panel(page).locator('[data-graph-nodes] > li strong')).toHaveCount(0);
+  await expect(panel(page).locator('[data-graph-edges]')).toBeEmpty();
+  release();
+  if (graphicsAvailable) await expect(map(page)).toBeVisible();
+  else await expect(panel(page).locator('[data-graph-list]')).toBeVisible();
+  await expect(map(page)).toHaveAttribute('data-node-count','4');
+});

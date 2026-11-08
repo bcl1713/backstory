@@ -4,15 +4,15 @@ import { revealChrome } from './support/chrome.js';
 test.use({ video: { mode: 'on', size: { width: 1180, height: 900 } } });
 const fixture = () => {
   const revision = '"' + 'a'.repeat(64) + '"';
-  const nodes = Array.from({ length: 240 }, (_, i) => ({ path: `Synthetic/Node ${String(i).padStart(3, '0')}.md`,
+  const nodes = Array.from({ length: 240 }, (_, i) => ({ path: i === 0 ? 'Slice.md' : `Synthetic/Node ${String(i).padStart(3, '0')}.md`,
     title: i === 5 ? '<img src=https://example.invalid/tracker> Synthetic' : `Synthetic ${String(i).padStart(3, '0')}`,
-    revision, href: `/notes/Synthetic/Node%20${String(i).padStart(3, '0')}.md` }));
+    revision, href: i === 0 ? '/notes/Slice.md' : `/notes/Synthetic/Node%20${String(i).padStart(3, '0')}.md` }));
   const edges = [];
   const add = (a, b) => edges.push({ source: nodes[a].path, destination: nodes[b].path, occurrence_count: 2,
     source_revision: revision, occurrence_id: edges.length + 1, position: [2, 1], position_precision: 'advisory' });
   for (let i = 1; i < 239; i++) add(0, i);
   for (let i = 1; i < 200; i++) { add(i, i + 1); if (i < 100) add(i, i + 2); }
-  const meta = { state: 'ok', authoritative: false, untrusted_content: true, projection_complete: true,
+  const meta = { schema_version:1, scope:'synthetic-policy', snapshot_id:'synthetic-snapshot', state: 'ok', authoritative: false, untrusted_content: true, projection_complete: true,
     generation: 1, mutation: 1, relation_epoch: 1, observed_at: '2026-11-07T00:00:00Z',
     freshness: { state: 'ready', scope: 'synthetic_renderer_fixture' }, limiting_reasons: [], boundary_connections: false };
   return { nodes, edges, meta };
@@ -22,32 +22,19 @@ async function login(page) {
   await page.getByLabel('Password', { exact: true }).fill('synthetic-slice-browser-only');
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
-async function stub(page, holdContinuation = false) {
+async function stub(page) {
   const data = fixture();
-  const continuation = holdContinuation ? new Promise(resolve => { data.resume = resolve; }) : Promise.resolve();
-  const slice = (start, end, next_cursor) => {
-    const edges = data.edges.slice(start, end), wanted = new Set(edges.flatMap(e => [e.source, e.destination]));
-    return { ...data.meta, nodes: data.nodes.filter(n => wanted.has(n.path)), edges, next_cursor };
-  };
-  // Every individual page obeys the existing API caps; the accumulated scope exceeds both.
-  const pages = { '': slice(0, 190, 'two'), two: slice(190, 238, 'empty'), empty: { ...data.meta, nodes: [], edges: [], next_cursor: 'four' },
-    four: slice(238, 430, 'five'), five: (() => { const part = slice(430, data.edges.length, null); return { ...part, nodes: [...part.nodes, data.nodes[239]] }; })() };
-  await page.route(/\/tools\/graph\//, async route => {
-    const cursor = new URL(route.request().url()).searchParams.get('cursor') || '';
-    if (cursor) await continuation;
-    return route.fulfill({ json: pages[cursor] });
-  });
-  await page.route(/\/tools\/links\//, route => route.fulfill({ json: { ...data.meta, items: [], next_cursor: null } }));
+  await page.route(/\/tools\/graph\/snapshot\//, route => route.fulfill({json:{...data.meta,nodes:data.nodes,edges:data.edges,next_cursor:null}}));
   return data;
 }
 
-test('progressive 3D graph retains pages, selection and camera, with theme, phone and context recovery evidence', async ({ page }, info) => {
-  test.setTimeout(60000); await login(page); const data = await stub(page, true);
+test('bulk 3D graph retains selection, selection and camera, with theme, phone and context recovery evidence', async ({ page }, info) => {
+  test.setTimeout(60000); await login(page); const data = await stub(page);
   const external = []; page.on('request', r => { if (new URL(r.url()).origin !== new URL(page.url()).origin) external.push(r.url()); });
   await page.goto('/notes/Slice.md'); await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
   await page.evaluate(() => document.dispatchEvent(new Event('backstory:open-graph')));
   const panel = page.locator('[data-graph-dialog]'), map = panel.locator('[data-graph-map]');
-  await expect(panel.locator('[data-graph-summary]')).toContainText('191 notes');
+  await expect(panel.locator('[data-graph-summary]')).toContainText('239 notes');
   await expect(map).toHaveAttribute('data-renderer', 'webgl');
   await expect(map.locator('canvas')).toHaveCount(2);
   await panel.locator('[data-graph-map-options]').evaluate(el => { el.open = true; });
@@ -56,7 +43,8 @@ test('progressive 3D graph retains pages, selection and camera, with theme, phon
   await panel.getByRole('button', { name: 'Inspect Synthetic 000', exact: true }).click();
   await panel.getByRole('button', { name: 'Connection list', exact: true }).click();
   const camera = await map.getAttribute('data-camera-yaw'), selection = await map.getAttribute('data-selected');
-  data.resume();
+  await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);
+  await panel.getByRole('button',{name:'All notes',exact:true}).click();
   await expect(panel.locator('[data-graph-summary]')).toContainText('240 notes');
   await expect(panel.locator('[data-graph-summary]')).toContainText('Complete');
   await expect(map).toHaveAttribute('data-node-count', '240');
@@ -123,31 +111,26 @@ test('obsolete filter and closed-graph responses cannot repopulate retained priv
   await panel.getByRole('button', { name: 'Close graph', exact: true }).click(); await expect(panel).not.toBeVisible();
 });
 
-for (const fault of ['session', 'unavailable', 'policy']) test(`retained graph is cleared on ${fault} evidence and an older page cannot restore it`, async ({ page }) => {
-  await login(page); const data = fixture(); let releaseDetail, releaseGraph;
-  await page.route(/\/tools\/graph\//, async route => {
-    const cursor = new URL(route.request().url()).searchParams.get('cursor');
-    if (cursor) await new Promise(resolve => { releaseGraph = resolve; });
-    await route.fulfill({ json: { ...data.meta, eligibility_version: 'old', nodes: data.nodes.slice(0, 2), edges: [], next_cursor: cursor ? null : 'two' } }).catch(() => {});
-  });
-  await page.route(/\/tools\/links\//, async route => {
-    await new Promise(resolve => { releaseDetail = resolve; });
-    const payload = { ...data.meta, eligibility_version: fault === 'policy' ? 'new' : 'old',
-      state: fault === 'unavailable' ? 'unavailable' : 'incomplete', items: [], next_cursor: null };
-    await route.fulfill({ status: fault === 'session' ? 401 : 200, json: payload }).catch(() => {});
-  });
-  await page.goto('/notes/Slice.md'); await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
-  await page.evaluate(() => document.dispatchEvent(new Event('backstory:open-graph')));
-  const panel = page.locator('[data-graph-dialog]');
-  await expect(panel.locator('[data-graph-summary]')).toContainText('2 notes');
-  if (!await panel.locator('[data-graph-list]').isVisible()) await panel.getByRole('button', { name: 'Connection list', exact: true }).click();
-  await panel.getByRole('button', { name: 'Inspect Synthetic 000', exact: true }).click();
-  await expect.poll(() => Boolean(releaseDetail)).toBe(true);
-  await expect.poll(() => Boolean(releaseGraph)).toBe(true);
-  releaseDetail(); await expect(panel.locator('[data-graph-nodes] > li strong')).toHaveCount(0);
-  releaseGraph(); await expect(panel.locator('[data-graph-nodes] > li strong')).toHaveCount(0);
-  await expect(panel.locator('[data-graph-details]')).not.toContainText('Synthetic');
-  await expect(panel.locator('[data-graph-next]')).toBeHidden();
+for(const fault of ['session','unavailable','policy'])test(`retained graph clears removed evidence on ${fault} refresh`,async({page})=>{
+ await login(page);const data=fixture();let refreshed=false;
+ await page.route(/\/tools\/graph\/snapshot\//,route=>{
+  if(refreshed && fault==='session')return route.fulfill({status:401,json:{untrusted_content:true,reason_code:'authentication_required'}});
+  if(refreshed && fault==='unavailable')return route.fulfill({status:503,json:{untrusted_content:true,state:'unavailable',reason_code:'storage_unavailable'}});
+  return route.fulfill({json:{...data.meta,scope:refreshed?'new-policy':data.meta.scope,nodes:refreshed?[]:data.nodes.slice(0,2),edges:[],next_cursor:null}});
+ });
+ await page.goto('/notes/Slice.md');await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
+ await page.evaluate(()=>document.dispatchEvent(new Event('backstory:open-graph')));
+ const panel=page.locator('[data-graph-dialog]');
+ // Whole-wiki visibility includes the isolate without changing backend scope.
+ await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);
+ await expect(panel.locator('[data-graph-summary]')).toContainText('1 notes');
+ await panel.getByRole('button',{name:'All notes',exact:true}).click();
+ await expect(panel.locator('[data-graph-summary]')).toContainText('2 notes');
+ if(!await panel.locator('[data-graph-list]').isVisible())await panel.getByRole('button',{name:'Connection list',exact:true}).click();
+ await panel.getByRole('button',{name:'Inspect Synthetic 000',exact:true}).click();
+ refreshed=true;await panel.getByRole('button',{name:'Refresh',exact:true}).click();
+ await expect(panel.locator('[data-graph-nodes] > li strong')).toHaveCount(0);
+ await expect(panel.locator('[data-graph-details]')).not.toContainText('Synthetic');
 });
 
 test('orbit changes parallax, node dragging tugs neighbors and cancellation releases pins', async ({ page }) => {
@@ -202,7 +185,7 @@ test('explicit list choice survives reopening and phone controls remain reachabl
   await page.goto('/notes/Slice.md'); await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
   await page.evaluate(() => document.dispatchEvent(new Event('backstory:open-graph')));
   const panel = page.locator('[data-graph-dialog]');
-  await expect(panel.locator('[data-graph-summary]')).toContainText('191 notes');
+  await expect(panel.locator('[data-graph-summary]')).toContainText('239 notes');
   await page.keyboard.press('Escape');
   await panel.getByRole('button', { name: 'Connection list', exact: true }).click();
   await panel.getByRole('button', { name: 'Close graph', exact: true }).click(); await expect(panel).not.toBeVisible();
