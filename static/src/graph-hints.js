@@ -1,8 +1,9 @@
 // Assign once on entry. Movement and streamed topology never retarget a code.
 const KEYS = 'asdfghjkl';
-export function hintAssignments({nodes, edges, selected, projected, width, height}) {
-  const outbound = new Set(edges.filter(e => e.source === selected).map(e => e.destination));
-  const visible = nodes.filter(n => { const p=projected.get(n.path); return p?.visible && p.x>=0 && p.x<=width && p.y>=0 && p.y<=height; });
+export const outboundDestinations = (edges, selected) => new Set(edges.filter(e => e.source === selected && e.destination !== selected).map(e => e.destination));
+export function hintAssignments({nodes, edges, selected, projected, width, height, visibleOnly = true}) {
+  const outbound = outboundDestinations(edges,selected);
+  const visible = nodes.filter(n => { if (!visibleOnly) return true; const p=projected.get(n.path); return p?.visible && p.x>=0 && p.x<=width && p.y>=0 && p.y<=height; });
   visible.sort((a,b) => Number(outbound.has(b.path))-Number(outbound.has(a.path)) || a.path.localeCompare(b.path));
   if (!visible.length) return [];
   const levels = [[], [...KEYS]];
@@ -21,7 +22,11 @@ export function hintAssignments({nodes, edges, selected, projected, width, heigh
 }
 export class GraphHints {
   constructor(){this.assignments=[];this.active=false;this.prefix='';}
-  begin(options){this.assignments=hintAssignments(options);this.active=this.assignments.length>0;this.prefix='';}
+  begin(options){
+    const {projected,width,height}=options;
+    this.assignments=options.assignments ? options.assignments.filter(h=>{const p=projected.get(h.path);return p?.visible && p.x>=0 && p.x<=width && p.y>=0 && p.y<=height;}) : hintAssignments(options);
+    this.active=this.assignments.length>0;this.prefix='';
+  }
   cancel(){this.active=false;this.assignments=[];this.prefix='';}
   key(key){
     if(!this.active)return {};

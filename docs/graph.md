@@ -97,16 +97,23 @@ context, including cross-links, backward links and unreachable components. This
 distinction follows the opening root and loaded topology even while motion is paused.
 Forced colors keeps all links legible.
 
-Choose **Node hints (f)** or press `f` while the map has focus. Type the displayed
-code to select and expand a node; immediate outbound neighbors receive the easiest
-codes. Codes are prefix-free and stay assigned to the same nodes throughout an
+One-hop outbound destinations use the theme's green accent and a circle cue.
+Their title labels show the actual `f <code>` shortcut before hint mode is opened.
+One hop means an outgoing link from the **selected note**; the opening root still
+controls BFS and springs independently.
+
+Choose the always-visible **Node hints (f)** control or press `f` while the map has
+focus, then type a code to select and expand a node. The same assignments supply
+the advertised shortcuts and active hint mode; immediate outbound destinations
+receive the easiest codes. Codes are prefix-free and stay assigned to the same nodes throughout an
 in-progress sequence, even during movement or appended results. Backspace edits;
 Escape cancels; Tab leaves hint mode. Search and editor typing are unaffected.
 
-The selected node and its immediate neighbors get label priority. Secondary
-labels use smaller, quieter text only where they fit, and density reduces the
-simultaneous label budget. Full titles remain accessible through named targets
-and selected-note evidence. Mesh radii and soft glow are world-space geometry:
+Only the selected note and its immediate outbound destinations have title labels.
+Two-hop, incoming-only and more distant titles are hidden. Density and collision
+rules still bound simultaneous labels; full titles remain accessible through
+named hint targets, selected-note evidence and the existing connection list.
+Mesh radii and soft glow are world-space geometry:
 zooming out shrinks their footprints. Text, hint codes and focus feedback remain
 readable in screen space; pointer/touch picking keeps its independent target size.
 Lines and arrowheads meet the projected world-space node boundaries.

@@ -28,7 +28,8 @@ test('directed spring context stays quiet across root changes, appended shortcut
         assert.equal(colors.itemSize, 4, 'batched vertex alpha provides per-edge transparency');
         for (let v = 0; v < vertices; v++) {
           const alpha = colors.getW(i * vertices + v);
-          assert.ok(eligible ? alpha === 1 : alpha > 0 && alpha <= .15, `${edge.source}:${edge.destination} alpha ${alpha}`);
+          const direct=edge.source===view.selected && edge.destination!==view.selected;
+          assert.ok(eligible || direct ? alpha === 1 : alpha > 0 && alpha <= .15, `${edge.source}:${edge.destination} alpha ${alpha}`);
         }
       }
     });

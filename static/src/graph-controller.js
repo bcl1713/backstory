@@ -139,6 +139,7 @@ export function mountGraph(root, { currentPath = '', initial = null, onClose = (
     map.hidden = listMode;
     if (listMode) view?.stop(); else view?.wake();
     find('[data-graph-list-toggle]').setAttribute('aria-pressed', String(listMode));
+    find('[data-graph-hints]').disabled = listMode || !graphicsAvailable;
   }
   function controls() {
     const global = wholeWiki(), depth = Number(input('depth').value), filters = ['query', 'folder', 'tag'].filter(name => (activeParams?.[name] || '').trim());

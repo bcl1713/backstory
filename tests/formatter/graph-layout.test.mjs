@@ -11,7 +11,7 @@ const edge = (source, destination, occurrence_count = 1) => ({ source, destinati
 
 test('graph visual roles alias the installed semantic theme tokens', async () => {
   const { GRAPH_THEME_ROLES } = await import('../../static/src/theme-palette.js');
-  assert.deepEqual(GRAPH_THEME_ROLES, { background: 'surface', node: 'link', edge: 'muted', highlight: 'heading-3', label: 'foreground', focus: 'focus', bloom: 'link' });
+  assert.deepEqual(GRAPH_THEME_ROLES, { background: 'surface', node: 'link', destination: 'heading-4', edge: 'muted', highlight: 'heading-3', label: 'foreground', focus: 'focus', bloom: 'link' });
 });
 
 test('springs use unique undirected pairs, preserve symmetry and finite coincident forces', async () => {
