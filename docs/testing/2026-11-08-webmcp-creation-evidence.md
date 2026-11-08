@@ -69,3 +69,25 @@ Backstory WebMCP. Registration stubs prove the adapter contract only. No private
 live note was created, changed or deleted. Real creation acceptance needs a
 disposable wiki or a verified reversible fixture lifecycle; publishing an image
 is not deployment or actual-host acceptance.
+
+## Required merge gate and concurrency fixture correction
+
+The first proposed merge, `f8eca520fac6af53348950f61ddc780af568e493`, stopped
+in Python: **1,678 passed, one failed** (161.19s). Its new threaded `Client`
+concurrency fixture raced on `accounts_sessiondevice.last_seen_at` in Django's
+shared-cache in-memory SQLite database, before reaching creation. It produced no
+successful receipt and was neither approved nor landed. Logs remain under that
+candidate's `evidence/python.log`; they are not transferable to another commit.
+
+The correction changes only that fixture to two barrier-synchronized calls to the
+real decorated creation endpoint using `RequestFactory`, an active real actor and
+independent per-thread database connections, closed after each call. Writer locks,
+formatting, publication and readback remain real. Dedicated `Client` tests retain
+session revocation/expiry/disablement and CSRF coverage. No application guard,
+SQLite setting or production middleware changed to accommodate the test.
+
+Affected check after this correction:
+`.venv/bin/python -m pytest -n 2 --dist loadfile tests/integration/test_tool_create.py -q`.
+**30 passed**, 5.19s, `/tmp/backstory-106-concurrency-green.log`.
+The corrected source requires a new exact merge candidate and full gate; unchanged
+focused adapter/browser/graph results remain applicable and are not rerun.

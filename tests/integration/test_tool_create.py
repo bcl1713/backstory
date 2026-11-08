@@ -95,15 +95,29 @@ def test_create_target_appearing_during_format_is_preserved(reader, wiki, monkey
 
 
 def test_two_concurrent_creates_have_one_winner(reader, wiki):
-    # Separate real HTTP clients/DB connections; the cooperative writer lock is real.
-    clients = [Client(), Client()]
-    for client in clients:
-        client.cookies = reader.cookies.copy()
+    from threading import Barrier
+    from django.contrib.auth import get_user_model
+    from django.db import connections
+    from django.test import RequestFactory
+    from wiki.tool_views import create_note
+    actor = get_user_model().objects.get(username='synthetic-reader')
+    start = Barrier(2)
+    def invoke(source):
+        # Exercise the real endpoint and cooperative writer concurrently. Session
+        # middleware activity updates race in SQLite's shared-memory test DB;
+        # real Client session/CSRF enforcement is covered separately below.
+        request = RequestFactory().post('/tools/create-note/',
+            json.dumps({'path': 'new.md', 'source': source}), content_type='application/json')
+        request.user = actor
+        try:
+            start.wait(timeout=5)
+            return create_note(request)
+        finally:
+            connections.close_all()
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(lambda pair: create(pair[0], source=pair[1]),
-                                zip(clients, ['# First\n', '# Second\n'])))
+        results = list(pool.map(invoke, ['# First\n', '# Second\n']))
     assert sorted(r.status_code for r in results) == [201, 412]
-    winner = next(r.json() for r in results if r.status_code == 201)
+    winner = next(json.loads(r.content) for r in results if r.status_code == 201)
     assert (wiki / 'new.md').read_text() == winner['source']
 
 
