@@ -52,3 +52,12 @@ then land exactly that SHA using atomic expected leases. Publication reuses its
 receipt and unchanged runtime provenance; it must not substitute feature-head
 results or start another unconditional correctness run. No live notes or
 production settings were used or changed. Publication does not redeploy a wiki.
+
+The first exact candidate `c9a6ed204002ec39b20876ed213a0275a006c485` passed
+1,642 Python tests, 427 formatter tests and nine Firefox code checks. Its renderer
+lane passed 87/88: the new paused-map regression incorrectly required a visible
+WebGL map when Firefox had correctly selected its supported connection-list
+fallback. The corrected test preserves pending-revalidation concealment/empty
+rows/edges assertions and checks the available map or fallback after acceptance.
+This test-only change requires a new candidate and full gate under queue policy;
+the failed candidate's partial evidence is retained, never promoted or copied.

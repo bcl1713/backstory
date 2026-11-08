@@ -127,6 +127,7 @@ test('enhanced direct graph removes private fallback evidence before revalidatio
 
 test('paused map stays hidden until private evidence is revalidated on tab return', async ({ page }) => {
   await setup(page); await openGraph(page);
+  const graphicsAvailable = await map(page).getAttribute('data-renderer') === 'webgl';
   await map(page).evaluate(el => el.graphView.setPaused(true));
   let release;
   await page.route('**/tools/graph/snapshot/**', async route => {
@@ -140,7 +141,10 @@ test('paused map stays hidden until private evidence is revalidated on tab retur
   await page.evaluate(() => { Object.defineProperty(document,'hidden',{value:false,configurable:true}); document.dispatchEvent(new Event('visibilitychange')); });
   await expect.poll(() => Boolean(release)).toBe(true);
   await expect(map(page)).toBeHidden();
+  await expect(panel(page).locator('[data-graph-nodes] > li strong')).toHaveCount(0);
+  await expect(panel(page).locator('[data-graph-edges]')).toBeEmpty();
   release();
-  await expect(map(page)).toBeVisible();
+  if (graphicsAvailable) await expect(map(page)).toBeVisible();
+  else await expect(panel(page).locator('[data-graph-list]')).toBeVisible();
   await expect(map(page)).toHaveAttribute('data-node-count','4');
 });
