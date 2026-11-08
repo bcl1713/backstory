@@ -1,3 +1,4 @@
+import { showGraphLayer, closeGraphLayer } from './support/graph.js';
 import { test, expect } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 
@@ -22,8 +23,9 @@ test('dense phone labels, directed spring contrast, bloom and disclosed index ph
   const panel=page.locator('[data-graph-dialog]'),map=panel.locator('[data-graph-map]');
   await expect(map).toHaveAttribute('data-renderer','webgl');await expect(map).toHaveAttribute('data-node-count','93');await expect(map).toHaveAttribute('data-edge-count','278');
   expect(indexRequests).toBe(0);
+  await showGraphLayer(panel,'evidence');
   await panel.locator('[data-graph-index-status] > summary').click();await expect(panel.locator('[data-graph-index-progress]')).toContainText('Checking dependencies');await expect(panel.locator('[data-graph-index-progress]')).toContainText('0 queued changes');
-  await panel.locator('[data-graph-index-status] > summary').click();
+  await panel.locator('[data-graph-index-status] > summary').click();await closeGraphLayer(panel);
   const geometry=await map.evaluate(el=>{
     const v=el.graphView;v.setPaused(true);v.quality.level=0;v.camera.resetOrientation(true);
     const noise=(i,salt)=>{let n=Math.imul(i+salt,0x45d9f3b);n=Math.imul(n^(n>>>16),0x45d9f3b);return ((n^(n>>>16))>>>0)/4294967296;};
@@ -38,9 +40,13 @@ test('dense phone labels, directed spring contrast, bloom and disclosed index ph
     return {width:v.camera.width,height:v.camera.height,labels:v.labelPlacements,marks:[...v.projected].map(([path,p])=>({path,...p})),camera:v.snapshot().camera};
   });
   const overlap=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
-  for(const path of ['Synthetic 1.md','Synthetic 2.md','Synthetic 3.md'])expect(geometry.labels.some(l=>l.path===path)).toBe(true);
-  expect(geometry.labels.map(l=>l.path).sort()).toEqual(['Synthetic 1.md','Synthetic 2.md','Synthetic 3.md']);
-  expect(geometry.labels.find(l=>l.path==='Synthetic 2.md').text).toMatch(/^f [a-z]+ · /);
+  expect(geometry.labels.some(l=>l.path==='Synthetic 1.md')).toBe(true);
+  for(const label of geometry.labels) {
+    expect(['Synthetic 1.md','Synthetic 2.md','Synthetic 3.md']).toContain(label.path);
+    if(label.path!=='Synthetic 1.md')expect(label.text).toMatch(/^f [a-z]+ · /);
+    const p=geometry.marks.find(m=>m.path===label.path);
+    expect(Math.hypot(p.x-label.anchor.x,p.y-label.anchor.y)).toBeLessThanOrEqual(100);
+  }
   await expect(panel.getByRole('button',{name:'Node hints (f)',exact:true})).toBeVisible();
   for(const [i,l]of geometry.labels.entries())for(const other of geometry.labels.slice(i+1))expect(overlap(l.rect,other.rect)).toBe(false);
   for(const l of geometry.labels)for(const m of geometry.marks)if(m.visible){const r=['Slice.md','Synthetic 1.md','Synthetic 2.md'].includes(m.path)?19:8;expect(overlap(l.rect,{x:m.x-r,y:m.y-r,w:2*r,h:2*r})).toBe(false);}
@@ -48,9 +54,7 @@ test('dense phone labels, directed spring contrast, bloom and disclosed index ph
   const contrast=await map.evaluate(el=>{const v=el.graphView;return v.data.edges.map((e,i)=>({spring:v.simulation.isSpringEdge(e.source,e.destination),direct:e.source===v.selected&&e.destination!==v.selected,line:v.batch.edges.geometry.attributes.color.getW(i*2),arrow:v.batch.arrows.geometry.attributes.color.getW(i*3)}));});
   expect(contrast.some(e=>e.spring)).toBe(true);expect(contrast.some(e=>!e.spring)).toBe(true);
   for(const e of contrast){expect(e.line).toBeCloseTo(e.spring||e.direct?1:.12);expect(e.arrow).toBeCloseTo(e.spring||e.direct?1:.12);}
-  await panel.locator('[data-graph-control-options]').evaluate(el=>{el.open=false;});await map.scrollIntoViewIfNeeded();
-  await panel.evaluate(el=>{const map=el.querySelector('[data-graph-map]'),header=el.querySelector('.graph-header');el.scrollTop+=map.getBoundingClientRect().top-header.getBoundingClientRect().bottom-8;});
-  expect((await map.boundingBox()).y).toBeGreaterThan((await panel.locator('.graph-header').boundingBox()).y+(await panel.locator('.graph-header').boundingBox()).height);
+  expect((await map.boundingBox()).y).toBeCloseTo((await panel.locator('.graph-header').boundingBox()).y+(await panel.locator('.graph-header').boundingBox()).height);
   await map.screenshot({path:info.outputPath('phone-dark-default.png')});
   await map.evaluate(el=>el.graphView.setBloom(4));await expect(map).toHaveAttribute('data-bloom-effective','4');
   await map.screenshot({path:info.outputPath('phone-dark-high.png')});

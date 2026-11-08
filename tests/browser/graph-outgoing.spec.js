@@ -1,3 +1,4 @@
+import { showGraphLayer, closeGraphLayer, graphControl } from './support/graph.js';
 import { test, expect } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -35,18 +36,20 @@ test('local outgoing hops, backlinks, recentering and whole wiki stay independen
   await panel.getByRole('button', { name: 'Inspect Root', exact: true }).click();
   await expect(panel.locator('[data-graph-details]')).toContainText('Inbound X.md');
   await expect(nodes).toHaveCount(3);
-  await panel.locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
-  await panel.getByRole('button', { name: 'Decrease hop depth' }).click();
+  await showGraphLayer(panel, 'controls'); await panel.locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
+  await graphControl(panel, 'Decrease hop depth');
   await expect(summary).toContainText('2 notes · 1 directed links · Complete');
   await expect(panel.locator('[data-graph-nodes]')).not.toContainText('Outbound B.md');
+  await closeGraphLayer(panel);
   await page.screenshot({ path: info.outputPath('outgoing-one-hop.png'), fullPage: true });
   await panel.getByRole('button', { name: 'Inspect A', exact: true }).click();
+  await showGraphLayer(panel,'evidence');
   await panel.getByRole('button', { name: 'Expand selected note', exact: true }).click();
   await expect(panel.locator('[name=path]')).toHaveValue('Outbound R.md');
   await expect(summary).toContainText('3 notes · 2 directed links · Complete');
   await expect(panel.locator('[data-graph-nodes]')).toContainText('Outbound R.md');
   await expect(panel.locator('[data-graph-nodes]')).toContainText('Outbound B.md');
-  await panel.getByRole('button', { name: 'All notes', exact: true }).click();
+  await graphControl(panel, 'All notes');
   await expect(summary).toContainText('Complete');
   await expect(panel.locator('[data-graph-nodes]')).toContainText('Inbound X.md');
   await expect(panel.locator('[data-graph-nodes]')).toContainText('Inbound Y.md');

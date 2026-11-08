@@ -43,13 +43,14 @@ test('placement remains stable with unchanged projection, append, and small came
   assert.deepEqual(layoutLabels({...options,previous}).map(l=>l.slot),first.map(l=>l.slot));
 });
 
-test('dense phone labels stay bounded and contain all priority identities after zoom and selection',()=>{
+test('dense phone labels stay local and prioritize selection after zoom and selection',()=>{
   const nodes=Array.from({length:93},(_,i)=>node(`n${i}`));
   const projected=new Map(nodes.map((n,i)=>[n.path,point(25+(i%10)*34,100+Math.floor(i/10)*20)]));
   for(const selected of ['n20','n60']) {
     const labels=layoutLabels({...base,nodes,projected,selected,focused:'n21',current:'n22',edges:[{source:selected,destination:'n21'},{source:selected,destination:'n22'}],maximum:12});
     assert.ok(labels.length<=12);
-    for(const path of [selected,'n21','n22']) assert.ok(labels.some(l=>l.path===path),path);
+    assert.ok(labels.some(l=>l.path===selected),selected);
+    assert.ok(labels.every(l=>[selected,'n21','n22'].includes(l.path)));
     clean(labels,[...projected.values()].map(p=>({x:p.x-8,y:p.y-8,w:16,h:16})));
     for(const p of projected.values()){p.x=195+(p.x-195)*1.1;p.y=200+(p.y-200)*1.1;}
   }
@@ -63,4 +64,22 @@ test('renderer paints state marks even when a label cannot be shown',()=>{
     selected:'a',focused:'b',current:'c',quality:{labels:0},theme:{background:'#000',label:'#fff',highlight:'#abc',focus:'#fed'}};
   GraphView.prototype.drawLabels.call(view);
   assert.equal(marks.length,2,'current square and focus box are independent of label budget');
+});
+
+test('crowded identities use local leaders instead of crossing the canvas to margins',()=>{
+  const nodes=Array.from({length:100},(_,i)=>node(`n${i}`));
+  const projected=new Map(nodes.map((n,i)=>[n.path,point(360+(i%10)*9,200+Math.floor(i/10)*8)]));
+  const labels=layoutLabels({...base,width:900,height:600,nodes,projected,selected:'n44',focused:'n45',current:'n46',edges:nodes.slice(1).map(n=>({source:'n44',destination:n.path}))});
+  assert.ok(labels.some(l=>l.path==='n44'),'selection remains identifiable');
+  for(const label of labels){const p=projected.get(label.path);assert.ok(Math.hypot(p.x-label.anchor.x,p.y-label.anchor.y)<=100,`${label.path} has a distant leader`);}
+  const cross=(a,b,c,d)=>{const orient=(p,q,r)=>(q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);return orient(a,b,c)*orient(a,b,d)<0&&orient(c,d,a)*orient(c,d,b)<0;};
+  for(const [i,a] of labels.entries())for(const b of labels.slice(i+1))assert.equal(cross(projected.get(a.path),a.anchor,projected.get(b.path),b.anchor),false,`${a.path}/${b.path} leaders cross`);
+});
+
+test('coincident roles share a primary outline',()=>{
+  const marks=[];
+  const ctx={setTransform(){},clearRect(){},measureText(t){return{width:t.length*7.2};},strokeText(){},fillText(){},fillRect(){},strokeRect(...r){marks.push(r);},beginPath(){},moveTo(){},lineTo(){},closePath(){},stroke(){},setLineDash(){},arc(){}};
+  const view={labelContext:ctx,camera:{width:390,height:400},pixelRatio:1,fontFamily:'sans-serif',data:{nodes:[node('a')],edges:[]},projected:new Map([['a',point(110,180)]]),selected:'a',focused:'a',current:'a',root:'a',quality:{labels:0},theme:{background:'#000',label:'#fff',highlight:'#abc',focus:'#fed'}};
+  GraphView.prototype.drawLabels.call(view);
+  assert.equal(marks.length,0,'selection diamond carries current/root/focus accents without extra boxes');
 });

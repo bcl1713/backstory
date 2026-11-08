@@ -44,34 +44,35 @@ export function layoutLabels({ nodes, projected, width, height, selected, focuse
     const positions = [];
     // Slot identities stay constant while orbiting/zooming. Keep the previous
     // valid slot before trying alternatives, so labels do not flip every frame.
-    for (const distance of [22, 42, 66]) {
+    for (const distance of [22, 42, 66, 88]) {
       positions.push({ slot:`r${distance}`,x:p.x+distance,y:p.y-HEIGHT/2 },
         { slot:`l${distance}`,x:p.x-distance-w,y:p.y-HEIGHT/2 },
-        { slot:`u${distance}`,x:p.x-w/2,y:p.y-distance-HEIGHT },
-        { slot:`d${distance}`,x:p.x-w/2,y:p.y+distance },
+        { slot:`u${distance}`,x:Math.max(PAD,Math.min(width-PAD-w,p.x-w/2)),y:p.y-distance-HEIGHT },
+        { slot:`d${distance}`,x:Math.max(PAD,Math.min(width-PAD-w,p.x-w/2)),y:p.y+distance },
         { slot:`ur${distance}`,x:p.x+distance,y:p.y-distance-HEIGHT },
         { slot:`ul${distance}`,x:p.x-distance-w,y:p.y-distance-HEIGHT },
         { slot:`dr${distance}`,x:p.x+distance,y:p.y+distance },
         { slot:`dl${distance}`,x:p.x-distance-w,y:p.y+distance });
     }
-    if (priority(node.path)) {
-      // Crowded important identities can move to clear viewport margins, with
-      // a leader to their original node. Never paint them over one another.
-      const margins = [];
-      for (let y = PAD; y + HEIGHT <= height-PAD; y += HEIGHT + PAD) {
-        margins.push({ slot:`left${y}`,x:PAD,y }, { slot:`right${y}`,x:width-PAD-w,y });
-      }
-      const distance = s => Math.hypot(Math.max(s.x-p.x,0,p.x-s.x-w), Math.max(s.y-p.y,0,p.y-s.y-HEIGHT));
-      margins.sort((a,b) => distance(a)-distance(b)); positions.push(...margins);
-    }
     const old = previous.get(node.path), index = positions.findIndex(s => s.slot === old);
     if (index > 0) positions.unshift(positions.splice(index,1)[0]);
-    let position = positions.find(s => clear({ x:s.x,y:s.y,w,h:HEIGHT }));
-    if (!position && priority(node.path)) {
-      // Last resort for a viewport filled with marks: use a distinct backed
-      // identity chip. Marks are still painted separately, above every label.
-      position = positions.find(s => s.slot.startsWith('left') && !occupied.some(r => overlaps({ x:s.x,y:s.y,w,h:HEIGHT },r)));
-    }
+    const anchorAt = rect => ({ x:Math.max(rect.x,Math.min(rect.x+rect.w,p.x)), y:Math.max(rect.y,Math.min(rect.y+rect.h,p.y)) });
+    const crosses = (a,b,c,d) => {
+      const side = (p,q,r) => (q.x-p.x)*(r.y-p.y)-(q.y-p.y)*(r.x-p.x);
+      return side(a,b,c)*side(a,b,d)<0 && side(c,d,a)*side(c,d,b)<0;
+    };
+    const position = positions.find(s => {
+      const rect = {x:s.x,y:s.y,w,h:HEIGHT}, anchor = anchorAt(rect);
+      if (!clear(rect) || Math.hypot(p.x-anchor.x,p.y-anchor.y)>100) return false;
+      // Keep leaders local and non-crossing. Omit a crowded secondary title
+      // rather than send a line across the canvas to a viewport margin.
+      return !placed.some(label => {
+        const other = projected.get(label.path);
+        const r = label.rect, corners = [{x:r.x,y:r.y},{x:r.x+r.w,y:r.y},{x:r.x+r.w,y:r.y+r.h},{x:r.x,y:r.y+r.h}];
+        const own = [{x:rect.x,y:rect.y},{x:rect.x+rect.w,y:rect.y},{x:rect.x+rect.w,y:rect.y+rect.h},{x:rect.x,y:rect.y+rect.h}];
+        return crosses(p,anchor,other,label.anchor) || corners.some((c,i)=>crosses(p,anchor,c,corners[(i+1)%4])) || own.some((c,i)=>crosses(other,label.anchor,c,own[(i+1)%4]));
+      });
+    });
     if (!position) continue;
     const rect = { x:position.x,y:position.y,w,h:HEIGHT };
     const anchor = { x:Math.max(rect.x,Math.min(rect.x+rect.w,p.x)), y:Math.max(rect.y,Math.min(rect.y+rect.h,p.y)) };

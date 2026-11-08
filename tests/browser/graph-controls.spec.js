@@ -1,3 +1,4 @@
+import { showGraphLayer, closeGraphLayer, graphControl, applyGraphFilter } from './support/graph.js';
 import { test, expect } from '@playwright/test';
 
 const meta = { schema_version: 1, scope: 'synthetic-session-policy', snapshot_id: 'snapshot', state: 'ok', authoritative: false, untrusted_content: true, projection_complete: true,
@@ -24,7 +25,7 @@ test('returning to the graph restores selected springs and layout after private 
   });
   await open(page);
   response = payload(nodes, edges);
-  await panel(page).getByRole('button', { name: 'All notes', exact: true }).click();
+  await graphControl(panel(page), 'All notes');
   await expect(map(page)).toHaveAttribute('data-node-count', '5');
   await map(page).evaluate(el => {
     const v = el.graphView; v.setPaused(true); v.actions.onSelect('B.md', true); v.orbit(.3, .1);
@@ -102,16 +103,16 @@ async function setup(page, handler) {
   await page.goto('/notes/Slice.md'); await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
 }
 async function navigation(page) { return await map(page).isVisible() ? map(page) : panel(page).getByRole('button', { name: 'Connection list', exact: true }); }
-async function open(page) {
+async function open(page, search = false) {
   await page.locator('.cm-content').focus(); await page.keyboard.type('g/');
-  await expect(panel(page).getByRole('searchbox', { name: 'Graph search' })).toBeFocused();
+  await expect(panel(page).getByRole('searchbox', { name: 'Find a note' })).toBeFocused();
   await expect(panel(page).locator('[data-graph-summary]')).toContainText('3 notes');
   // Mobile entry gives the map priority; these scenarios exercise its controls.
-  await panel(page).locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
+  if (!search) await showGraphLayer(panel(page), 'controls');
 }
 
 test('current-note two-hop entry, bracket depth, stable scope/camera and typing guards', async ({ page }) => {
-  await setup(page); await open(page);
+  await setup(page); await open(page, true);
   await expect(panel(page).locator('[data-graph-depth-value]')).toContainText('2 hops');
   await page.keyboard.type('[]'); await expect(panel(page).getByRole('searchbox')).toHaveValue('[]');
   await panel(page).getByRole('searchbox').fill(''); await page.keyboard.press('Escape');
@@ -125,9 +126,11 @@ test('current-note two-hop entry, bracket depth, stable scope/camera and typing 
   expect((await map(page).evaluate(el => el.graphView.snapshot())).camera).toEqual(before.camera);
   await page.keyboard.press('['); await expect(map(page)).toHaveAttribute('data-node-count', '4');
   await page.keyboard.press('['); await expect(map(page)).toHaveAttribute('data-node-count', '3');
+  await showGraphLayer(panel(page),'controls');
   await expect(panel(page).getByRole('button', { name: 'Decrease hop depth' })).toBeDisabled();
+  await closeGraphLayer(panel(page));
   await page.keyboard.press('Escape'); await expect(panel(page)).not.toBeVisible();
-  await open(page); await panel(page).getByRole('button', { name: 'All notes', exact: true }).click();
+  await open(page); await graphControl(panel(page), 'All notes');
   await expect(panel(page).locator('[data-graph-depth-controls]')).toBeHidden();
   await panel(page).getByRole('button', { name: 'Close graph', exact: true }).click();
   await open(page); await expect(panel(page).locator('[name=path]')).toHaveValue('Slice.md');
@@ -137,10 +140,10 @@ test('current-note two-hop entry, bracket depth, stable scope/camera and typing 
 for (const width of [1180, 390]) test(`live low/default/high force controls persist and respect pause at ${width}px`, async ({ page }, info) => {
   await page.setViewportSize({ width, height: 900 }); await setup(page); await open(page); await page.keyboard.press('Escape');
   expect(['webgl', 'unavailable']).toContain(await map(page).getAttribute('data-renderer'));
-  await panel(page).locator('[data-graph-settings]').evaluate(el => { el.open = true; });
+  await showGraphLayer(panel(page), 'controls'); await panel(page).locator('[data-graph-settings]').evaluate(el => { el.open = true; });
   await panel(page).locator('[data-graph-forces]').evaluate(el => { el.open = true; });
   const positions = () => map(page).evaluate(el => [...el.graphView.simulation.nodes].map(([path,n]) => [path,n.x,n.y,n.z]));
-  await panel(page).getByRole('button', { name: 'Pause motion', exact: true }).click();
+  await graphControl(panel(page), 'Pause motion');
   const before = await positions(), camera = await map(page).evaluate(el => el.graphView.snapshot().camera);
   for (const value of ['0.25', '1', '4']) {
     for (const name of ['Spring strength', 'Repulsion', 'Gravity']) await panel(page).getByRole('slider', { name, exact: true }).fill(value);
@@ -149,12 +152,12 @@ for (const width of [1180, 390]) test(`live low/default/high force controls pers
     expect(await map(page).evaluate(el => el.graphView.simulation.forces)).toEqual({ spring: Number(value), repulsion: Number(value), gravity: Number(value) });
   }
   expect(await map(page).evaluate(el => el.graphView.snapshot().camera)).toEqual(camera);
-  await panel(page).getByRole('button', { name: 'Pause motion', exact: true }).click();
+  await graphControl(panel(page), 'Pause motion');
   const measurements = {};
   for (const name of ['Spring strength', 'Repulsion', 'Gravity']) {
     measurements[name] = [];
     for (const value of ['0.25', '1', '4']) {
-      await panel(page).getByRole('button', { name: 'Reset defaults', exact: true }).click();
+      await graphControl(panel(page), 'Reset defaults');
       await panel(page).getByRole('slider', { name, exact: true }).fill(value);
       const settled = await map(page).evaluate(el => {
         const sim = el.graphView.simulation; sim.settle(720); el.graphView.draw();
@@ -174,8 +177,8 @@ for (const width of [1180, 390]) test(`live low/default/high force controls pers
   await panel(page).getByRole('button', { name: 'Close graph', exact: true }).click(); await open(page);
   expect(await map(page).evaluate(el => el.graphView.simulation.forces.spring)).toBe(4);
   await page.reload(); await open(page); expect(await map(page).evaluate(el => el.graphView.simulation.forces.gravity)).toBe(4);
-  await panel(page).locator('[data-graph-settings]').evaluate(el => { el.open = true; }); await panel(page).locator('[data-graph-forces]').evaluate(el => { el.open = true; });
-  await panel(page).getByRole('button', { name: 'Reset defaults', exact: true }).click();
+  await showGraphLayer(panel(page), 'controls'); await panel(page).locator('[data-graph-settings]').evaluate(el => { el.open = true; }); await panel(page).locator('[data-graph-forces]').evaluate(el => { el.open = true; });
+  await graphControl(panel(page), 'Reset defaults');
   expect(await map(page).evaluate(el => el.graphView.simulation.forces)).toEqual({ spring: 1, repulsion: 1, gravity: 1 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await panel(page).getByRole('slider', { name: 'Repulsion', exact: true }).fill('2');
@@ -190,7 +193,7 @@ test('whole wiki and cumulative selection use one canonical bulk snapshot', asyn
   await open(page);
   await map(page).evaluate(el => el.graphView.actions.onSelect('C.md', true));
   await expect(panel(page).locator('[data-graph-summary]')).toContainText('4 notes · 3 directed links · Complete');
-  await panel(page).getByRole('button', { name:'All notes', exact:true }).click();
+  await graphControl(panel(page), 'All notes');
   await expect(panel(page).locator('[data-graph-summary]')).toContainText('5 notes · 3 directed links · Complete');
   await map(page).evaluate(el => el.graphView.actions.onSelect('C.md', true));
   expect(requests).toHaveLength(1);
@@ -206,11 +209,11 @@ test('pausing an in-flight snapshot clears private evidence and resume retains m
   });
   await open(page);await map(page).evaluate(el=>{el.graphView.setPaused(true);el.graphView.orbit(.2,.1);});
   const camera=await map(page).evaluate(el=>el.graphView.snapshot().camera);
-  hold=true;await panel(page).getByRole('button',{name:'Refresh',exact:true}).click();await expect.poll(()=>Boolean(release)).toBe(true);
-  await panel(page).getByRole('button',{name:'Pause loading',exact:true}).click();hold=false;release();
+  hold=true;await graphControl(panel(page), 'Refresh');await expect.poll(()=>Boolean(release)).toBe(true);
+  await graphControl(panel(page), 'Pause loading');hold=false;release();
   await expect(map(page)).toHaveAttribute('data-node-count','0');
   await expect(panel(page).locator('[data-graph-details]')).not.toContainText('Slice.md');
-  await panel(page).getByRole('button',{name:'Resume loading',exact:true}).click();
+  await graphControl(panel(page), 'Resume loading');
   await expect(panel(page).locator('[data-graph-summary]')).toContainText('Complete');
   expect(await map(page).evaluate(el=>el.graphView.snapshot().camera)).toEqual(camera);
   expect(await map(page).evaluate(el=>el.graphView.paused)).toBe(true);
@@ -224,11 +227,11 @@ test('rapid filter scopes and close/reopen reject obsolete snapshot responses',a
   await route.fulfill({json:payload(q.get('query')==='old'?[node('Obsolete.md')]:nodes,q.get('query')==='old'?[]:edges)}).catch(()=>{});
  });
  await open(page);hold=true;
- await panel(page).getByRole('searchbox').fill('old');await expect.poll(()=>Boolean(release)).toBe(true);
- await panel(page).getByRole('searchbox').fill('new');
+ await applyGraphFilter(panel(page), 'old');await expect.poll(()=>Boolean(release)).toBe(true);
+ await applyGraphFilter(panel(page), 'new');
  await expect(map(page)).toHaveAttribute('data-node-count','3');release();
  await expect(panel(page).locator('[data-graph-nodes]')).not.toContainText('Obsolete.md');
- release=null;await panel(page).getByRole('searchbox').fill('old');await expect.poll(()=>Boolean(release)).toBe(true);
+ release=null;await applyGraphFilter(panel(page), 'old');await expect.poll(()=>Boolean(release)).toBe(true);
  await panel(page).getByRole('button',{name:'Close graph',exact:true}).click();await open(page);release();
  await expect(map(page)).toHaveAttribute('data-node-count','3');
 });
@@ -236,7 +239,7 @@ test('rapid filter scopes and close/reopen reject obsolete snapshot responses',a
 test('local depth changes retain surviving coordinates without transport requests',async({page})=>{
  let calls=0;
  await setup(page,route=>{calls++;return route.fulfill({json:payload(nodes,edges)});});
- await open(page);await page.keyboard.press('Escape');
+ await open(page);await page.keyboard.press('Escape');await (await navigation(page)).focus();
  await map(page).evaluate(el=>{el.graphView.setPaused(true);el.graphView.pan(20,30);});
  const before=await map(page).evaluate(el=>({camera:el.graphView.snapshot().camera,positions:el.graphView.simulation.all.map(n=>[n.path,n.x,n.y,n.z])}));
  await page.keyboard.press(']');await page.keyboard.press(']');
@@ -289,7 +292,7 @@ for (const width of [1180, 390]) test(`opening-root BFS retains dense links and 
   expect(after).toEqual(before);
   expect(await map(page).evaluate(el => el.graphView.data.edges.length)).toBe(237);
   expect(await map(page).evaluate(el => el.graphView.paused)).toBe(true);
-  await panel(page).locator('[data-graph-filter-options]').evaluate(el => { el.open = false; });
+  await closeGraphLayer(panel(page)); await panel(page).locator('[data-graph-filter-options]').evaluate(el => { el.open = false; });
   await panel(page).locator('[data-graph-control-options]').evaluate(el => { el.open = false; });
   await map(page).evaluate(el => {
     const view = el.graphView, sim = view.simulation;
@@ -320,16 +323,16 @@ for(const width of [1180,390])test(`snapshot refresh keeps frame and presentatio
   if(hold){const result=await new Promise(resolve=>release=resolve);await route.fulfill(result).catch(()=>{});}
   else await route.fulfill({json:payload(nodes,edges)});
  });
- await open(page);await page.keyboard.press('Escape');
+ await open(page);await page.keyboard.press('Escape');await (await navigation(page)).focus();
  await map(page).evaluate(el=>{const v=el.graphView;v.setPaused(true);v.orbit(.2,.1);v.actions.onSelect('B.md',true);});
  const snapshot=()=>map(page).evaluate(el=>{const v=el.graphView;return {camera:v.snapshot().camera,positions:v.simulation.all.map(n=>[n.path,n.x,n.y,n.z]),selected:v.selected,focused:v.focused,paused:v.paused};});
  const before=await snapshot(),bounds=await panel(page).locator('.graph-workspace').boundingBox();
- hold=true;await panel(page).getByRole('button',{name:'Refresh',exact:true}).click();await expect.poll(()=>Boolean(release)).toBe(true);
+ hold=true;await graphControl(panel(page), 'Refresh');await expect.poll(()=>Boolean(release)).toBe(true);
  expect(await snapshot()).toEqual(before);expect(await panel(page).locator('.graph-workspace').boundingBox()).toEqual(bounds);
  release({json:payload(nodes,edges,null,{generation:2,snapshot_id:'new'})});
  await expect(panel(page).locator('[data-graph-summary]')).toContainText('Complete');expect(await snapshot()).toEqual(before);
  await page.screenshot({path:info.outputPath(`stable-snapshot-${width}.png`),fullPage:true});
- release=null;await panel(page).getByRole('button',{name:'Refresh',exact:true}).click();await expect.poll(()=>Boolean(release)).toBe(true);
+ release=null;await graphControl(panel(page), 'Refresh');await expect.poll(()=>Boolean(release)).toBe(true);
  release({status:401,json:{untrusted_content:true,reason_code:'authentication_required'}});
  await expect(panel(page).locator('[data-graph-status]')).toContainText('Session expired');
  await expect(map(page)).toHaveAttribute('data-node-count','0');

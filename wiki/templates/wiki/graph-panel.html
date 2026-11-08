@@ -1,12 +1,31 @@
 <div class="graph-panel" data-graph-panel>
+<div class="graph-workspace">
+<div class="graph-map" data-graph-map tabindex="0" role="group" aria-label="Note relationship map" aria-describedby="graph-map-description" hidden></div>
+<div data-graph-list hidden><h2>Connections</h2><nav data-graph-notes-navigation aria-label="Loaded notes" hidden></nav><ul data-graph-nodes></ul><h2>Directed links</h2><nav data-graph-links-navigation aria-label="Loaded links" hidden></nav><ul data-graph-edges></ul></div>
+</div>
+<nav class="graph-actions" aria-label="Graph actions">
+<button type="button" data-graph-toggle="find" aria-controls="graph-find-layer" aria-expanded="false" title="Find a note (/)">Find</button>
+<button type="button" data-graph-toggle="controls" aria-controls="graph-controls-layer" aria-expanded="false" title="Graph controls (o)">Controls</button>
+<button type="button" data-graph-toggle="evidence" aria-controls="graph-evidence-layer" aria-expanded="false" title="Selected note and evidence (e)">Evidence</button>
+<button type="button" data-graph-list-toggle aria-pressed="false" hidden>Connection list</button>
+</nav>
+<div class="graph-status-layer"><p data-graph-selection></p><p data-graph-scope></p><p class="graph-caption" data-graph-summary role="status" aria-live="polite"></p><p data-graph-status role="status" aria-live="polite" aria-atomic="true"></p></div>
+<section class="graph-overlay" data-graph-overlay="find" id="graph-find-layer" aria-labelledby="graph-find-title" hidden>
+<div class="graph-overlay-header"><h2 id="graph-find-title">Find a note</h2><button type="button" data-graph-dismiss>Close find</button></div>
+<label>Find a note <input type="search" data-graph-find maxlength="256" autocomplete="off" aria-describedby="graph-find-scope"></label>
+<p id="graph-find-scope" class="graph-caption" data-graph-find-scope>Find in the loaded snapshot. Selecting expands the exploration; the opening root stays fixed.</p>
+<p class="graph-caption" data-graph-find-count role="status"></p><ul data-graph-find-results></ul>
+</section>
+<section class="graph-overlay" data-graph-overlay="controls" id="graph-controls-layer" aria-labelledby="graph-controls-title" hidden>
+<div class="graph-overlay-header"><h2 id="graph-controls-title">Graph controls</h2><button type="button" data-graph-dismiss>Close controls</button></div>
 <details data-graph-filter-options><summary>Filters</summary>
 <form method="get" action="{% url 'wiki:graph' %}" data-graph-filters>
 <label>Opening root <input name="path" maxlength="4096" value="{{ graph_params.path|default:'' }}" placeholder="Blank for overview"></label>
-<label>Graph search <input name="query" type="search" maxlength="256" value="{{ graph_params.query|default:'' }}" autocomplete="off"></label>
+<label>Title/path filter <input name="query" type="search" maxlength="256" value="{{ graph_params.query|default:'' }}" autocomplete="off"></label>
 <label>Folder <input name="folder" maxlength="4096" value="{{ graph_params.folder|default:'' }}"></label>
 <label>Tag <input name="tag" maxlength="256" value="{{ graph_params.tag|default:'' }}"></label>
 <label>Local hop depth <select name="depth"><option value="1" {% if graph_params.depth == 1 %}selected{% endif %}>1 hop</option><option value="2" {% if graph_params.depth == 2 %}selected{% endif %}>2 hops</option><option value="3" {% if graph_params.depth == 3 %}selected{% endif %}>3 hops</option><option value="4" {% if graph_params.depth == 4 %}selected{% endif %}>4 hops</option><option value="5" {% if graph_params.depth == 5 %}selected{% endif %}>5 hops</option><option value="6" {% if graph_params.depth == 6 %}selected{% endif %}>6 hops</option><option value="7" {% if graph_params.depth == 7 %}selected{% endif %}>7 hops</option><option value="8" {% if graph_params.depth == 8 %}selected{% endif %}>8 hops</option></select></label>
-<button type="submit">Apply filters</button><button type="button" data-graph-clear hidden>Clear search</button>
+<button type="submit">Apply filters</button><button type="button" data-graph-clear hidden>Clear filters</button>
 </form>
 </details>
 <details class="graph-control-options" data-graph-control-options open><summary>Graph controls</summary>
@@ -27,13 +46,6 @@
 </div></details>
 
 </div></details>
-<div class="graph-scope-bar"><p data-graph-scope></p><button type="button" data-graph-list-toggle aria-pressed="false" hidden>Connection list</button></div>
-<p class="graph-caption" data-graph-summary role="status" aria-live="polite"></p>
-<p data-graph-help hidden>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space expands selection; one-hop labels show f + code shortcuts; f shows all visible node hints (type a code, Backspace edits, Escape cancels); / focuses search; +/− zoom; ? toggles help. Escape leaves search first, then closes the graph. Tab leaves the map. Drag a node to tug its links; drag the background to orbit. Shift-drag or two fingers pans; pinch or the wheel zooms. Scroll outside the map to scroll the page. Fit and Reset orientation recover your view. [ and ] decrease/increase local depth from the same opening root (1–8 hops, with resource limits reported). Selecting any node adds its outgoing neighborhood without moving the view or changing the opening root. Every selected hop scope and All notes load automatically; Pause loading and Resume are separate from Pause motion. Active filters narrow either scope. Bloom describes this displayed graph only.</p>
-<div class="graph-workspace">
-<div class="graph-map" data-graph-map tabindex="0" role="group" aria-label="Note relationship map" aria-describedby="graph-map-description" hidden></div>
-<div data-graph-list hidden><h2>Connections</h2><nav data-graph-notes-navigation aria-label="Loaded notes" hidden></nav><ul data-graph-nodes></ul><h2>Directed links</h2><nav data-graph-links-navigation aria-label="Loaded links" hidden></nav><ul data-graph-edges></ul></div>
-<aside class="graph-sidebar">
 <details data-graph-settings><summary>Graph settings</summary>
 <details data-graph-forces><summary>Forces</summary><div class="graph-force-settings">
 <p class="graph-force-scope">Saved in this browser for this site. Only force settings are stored.</p>
@@ -45,11 +57,19 @@
 <p id="graph-gravity-help">How strongly notes move toward the graph center. Link springs bring linked neighborhoods together.</p></div>
 <button type="button" data-graph-forces-reset>Reset defaults</button>
 </div></details></details>
+
+</section>
+<section class="graph-overlay" data-graph-overlay="evidence" id="graph-evidence-layer" aria-labelledby="graph-evidence-title" hidden>
+<div class="graph-overlay-header"><h2 id="graph-evidence-title">Selected note and evidence</h2><button type="button" data-graph-dismiss>Close evidence</button></div>
 <section class="graph-details" data-graph-details aria-label="Selected note"><h2>Selected note</h2><p>Select a note to inspect its saved relationship evidence.</p></section>
-</aside>
-</div>
-<p data-graph-status role="status" aria-live="polite" aria-atomic="true"></p>
 <details class="graph-evidence" data-graph-index-status><summary>Index progress</summary><p data-graph-index-progress>Open for current indexing progress.</p></details>
 <details class="graph-evidence"><summary>About this graph and evidence</summary><p>Indexed saved content. Unsaved edits stay in your editor.</p><p data-graph-diagnostics></p>
-<p id="graph-map-description" class="graph-caption">□ current note · ◇ selected note · circle one-hop outbound destination · corner reticle focused note. Two-hop and more distant titles are hidden. Arrows show explicit link direction. Coordinates and node size do not measure meaning. Bloom fades with shortest link hops inside this displayed graph.</p></details>
+<p id="graph-map-description" class="graph-caption">□ current note · ◇ selected note · dashed outline keyboard focus · dot on outline opening root · circle one-hop outbound destination. Coincident roles share one outline with small accents. Two-hop and more distant titles are hidden. Arrows show explicit link direction. Coordinates and node size do not measure meaning. Bloom fades with shortest link hops inside this displayed graph.</p></details>
+
+</section>
+<section class="graph-overlay" data-graph-overlay="help" id="graph-help-layer" aria-labelledby="graph-help-title" hidden>
+<div class="graph-overlay-header"><h2 id="graph-help-title">Graph help</h2><button type="button" data-graph-dismiss>Close help</button></div>
+<p data-graph-help>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space expands selection; one-hop labels show f + code shortcuts; f shows all visible node hints (type a code, Backspace edits, Escape cancels); / opens Find; o opens controls; e opens evidence; +/− zoom; ? toggles help. Escape dismisses the active layer first, then closes the graph. Tab leaves the map. Drag a node to tug its links; drag the background to orbit. Shift-drag or two fingers pans; pinch or the wheel zooms. Scroll within an open sheet to read its content. Fit and Reset orientation recover your view. [ and ] decrease/increase local depth from the same opening root (1–8 hops, with resource limits reported). Selecting any node adds its outgoing neighborhood without moving the view or changing the opening root. Every selected hop scope and All notes load automatically; Pause loading and Resume are separate from Pause motion. Active filters narrow either scope. Bloom describes this displayed graph only.</p>
+
+</section>
 </div>

@@ -1,3 +1,4 @@
+import { showGraphLayer, graphControl, applyGraphFilter } from './support/graph.js';
 import { test, expect } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { runtime } from './support/server.js';
@@ -36,8 +37,9 @@ async function openGraph(page, reason) {
 test('bulk query limits offer restart and filter recovery without depth requests', async ({ page }) => {
   const { panel, requests } = await openGraph(page, 'graph_query_limited');
   await expect(panel.locator('[data-graph-status]')).toContainText('query limit');
+  await showGraphLayer(panel,'controls');
   await expect(panel.getByRole('button', { name: 'Restart loading', exact: true })).toBeVisible();
-  await panel.getByRole('searchbox', { name: 'Graph search' }).fill('saved');
+  await applyGraphFilter(panel, 'saved');
   await expect.poll(() => requests.at(-1)?.query).toBe('saved');
   await expect(panel.locator('[data-graph-summary]')).toContainText('2 notes');
   expect(requests.at(-1)).toEqual({ query: 'saved' });
@@ -61,7 +63,7 @@ test('complete bulk transport of a partial index stays explicitly incomplete', a
   await expect(panel.locator('[data-graph-summary]')).not.toContainText('Complete');
   await expect(panel.locator('[data-graph-summary]')).toContainText('Index updating');
   await expect(panel.getByRole('button', { name: 'Try one hop', exact: true })).toHaveCount(0);
-  await panel.getByRole('searchbox', { name: 'Graph search' }).fill('saved');
+  await applyGraphFilter(panel, 'saved');
   await expect(panel.locator('[data-graph-summary]')).toContainText('2 notes');
   await expect(panel.locator('[data-graph-summary]')).toContainText('Complete');
 });
@@ -102,13 +104,13 @@ test('real two-hop hub loads one bulk snapshot and changes depth locally', async
   console.log('synthetic_population_browser', metrics);
   await info.attach('population-timing', { body: JSON.stringify(metrics), contentType: 'application/json' });
   await page.screenshot({ path: info.outputPath('population-complete.png'), fullPage: true });
-  await panel.locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
+  await showGraphLayer(panel, 'controls'); await panel.locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
   // Change local depth while a bulk refresh is in flight. Its response must use
   // the current requested depth and retain the opening root.
-  await panel.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await panel.getByRole('button', { name: 'Decrease hop depth' }).click();
+  await graphControl(panel, 'Refresh');
+  await graphControl(panel, 'Decrease hop depth');
   await expect(summary).toContainText('8 notes · 7 directed links · Complete');
-  await panel.getByRole('button', { name: 'Increase hop depth' }).click();
+  await graphControl(panel, 'Increase hop depth');
   await expect(summary).toContainText('93 notes · 278 directed links · Complete');
   await page.screenshot({ path: info.outputPath('population-depth-retry.png'), fullPage: true });
 });

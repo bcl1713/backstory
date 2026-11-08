@@ -1,3 +1,4 @@
+import { showGraphLayer, closeGraphLayer, graphControl, applyGraphFilter } from './support/graph.js';
 import { test, expect } from '@playwright/test';
 import { revealChrome } from './support/chrome.js';
 
@@ -37,28 +38,28 @@ test('bulk 3D graph retains selection, selection and camera, with theme, phone a
   await expect(panel.locator('[data-graph-summary]')).toContainText('239 notes');
   await expect(map).toHaveAttribute('data-renderer', 'webgl');
   await expect(map.locator('canvas')).toHaveCount(2);
-  await panel.locator('[data-graph-map-options]').evaluate(el => { el.open = true; });
-  await panel.getByRole('button', { name: 'Pause motion' }).click();
+  await showGraphLayer(panel, 'controls'); await panel.locator('[data-graph-map-options]').evaluate(el => { el.open = true; });
+  await graphControl(panel, 'Pause motion');
   await panel.getByRole('button', { name: 'Connection list', exact: true }).click();
   await panel.getByRole('button', { name: 'Inspect Synthetic 000', exact: true }).click();
   await panel.getByRole('button', { name: 'Connection list', exact: true }).click();
   const camera = await map.getAttribute('data-camera-yaw'), selection = await map.getAttribute('data-selected');
-  await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);
-  await panel.getByRole('button',{name:'All notes',exact:true}).click();
+  await showGraphLayer(panel, 'controls'); await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);
+  await graphControl(panel, 'All notes');
   await expect(panel.locator('[data-graph-summary]')).toContainText('240 notes');
   await expect(panel.locator('[data-graph-summary]')).toContainText('Complete');
   await expect(map).toHaveAttribute('data-node-count', '240');
   await expect(map).toHaveAttribute('data-edge-count', String(data.edges.length));
   expect(await map.getAttribute('data-selected')).toBe(selection);
   expect(await map.getAttribute('data-camera-yaw')).toBe(camera);
-  await panel.getByRole('button', { name: 'Orbit right', exact: true }).click();
+  await graphControl(panel, 'Orbit right');
   await expect(map).not.toHaveAttribute('data-camera-yaw', camera);
-  await panel.getByRole('button', { name: 'Reset orientation', exact: true }).click();
+  await graphControl(panel, 'Reset orientation');
   for (const intensity of ['0', '2', '4']) {
     await panel.getByRole('slider', { name: 'Bloom intensity' }).fill(intensity);
     await expect(map).toHaveAttribute('data-bloom', intensity);
   }
-  await panel.locator('[data-graph-filter-options]').evaluate(el => { el.open = false; });
+  await closeGraphLayer(panel); await panel.locator('[data-graph-filter-options]').evaluate(el => { el.open = false; });
   await panel.locator('[data-graph-map-options]').evaluate(el => { el.open = false; });
   await page.screenshot({ path: info.outputPath('graph-desktop-dark.png'), fullPage: true });
   const stableCamera = await map.getAttribute('data-camera-yaw');
@@ -103,9 +104,9 @@ test('obsolete filter and closed-graph responses cannot repopulate retained priv
   await page.goto('/notes/Slice.md'); await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
   await page.evaluate(() => document.dispatchEvent(new Event('backstory:open-graph')));
   const panel = page.locator('[data-graph-dialog]');
-  await panel.getByRole('searchbox', { name: 'Graph search' }).fill('slow');
+  await applyGraphFilter(panel, 'slow');
   await expect.poll(() => Boolean(finish)).toBe(true);
-  await panel.getByRole('searchbox', { name: 'Graph search' }).fill('new');
+  await applyGraphFilter(panel, 'new');
   await expect(panel.locator('[data-graph-summary]')).toContainText('0 notes');
   finish(); await expect(panel.locator('[data-graph-summary]')).toContainText('0 notes');
   await panel.getByRole('button', { name: 'Close graph', exact: true }).click(); await expect(panel).not.toBeVisible();
@@ -122,13 +123,13 @@ for(const fault of ['session','unavailable','policy'])test(`retained graph clear
  await page.evaluate(()=>document.dispatchEvent(new Event('backstory:open-graph')));
  const panel=page.locator('[data-graph-dialog]');
  // Whole-wiki visibility includes the isolate without changing backend scope.
- await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);
+ await showGraphLayer(panel, 'controls'); await panel.locator('[data-graph-control-options]').evaluate(el=>el.open=true);
  await expect(panel.locator('[data-graph-summary]')).toContainText('1 notes');
- await panel.getByRole('button',{name:'All notes',exact:true}).click();
+ await graphControl(panel, 'All notes');
  await expect(panel.locator('[data-graph-summary]')).toContainText('2 notes');
  if(!await panel.locator('[data-graph-list]').isVisible())await panel.getByRole('button',{name:'Connection list',exact:true}).click();
  await panel.getByRole('button',{name:'Inspect Synthetic 000',exact:true}).click();
- refreshed=true;await panel.getByRole('button',{name:'Refresh',exact:true}).click();
+ refreshed=true;await graphControl(panel, 'Refresh');
  await expect(panel.locator('[data-graph-nodes] > li strong')).toHaveCount(0);
  await expect(panel.locator('[data-graph-details]')).not.toContainText('Synthetic');
 });
@@ -141,24 +142,28 @@ test('orbit changes parallax, node dragging tugs neighbors and cancellation rele
   await page.evaluate(() => document.dispatchEvent(new Event('backstory:open-graph')));
   const panel = page.locator('[data-graph-dialog]'), map = panel.locator('[data-graph-map]');
   await expect(map).toHaveAttribute('data-node-count', '3');
-  await panel.locator('[data-graph-filter-options]').evaluate(el => { el.open = false; });
-  await panel.locator('[data-graph-map-options]').evaluate(el => { el.open = true; });
-  await panel.getByRole('button', { name: 'Pause motion' }).click();
+  await closeGraphLayer(panel); await panel.locator('[data-graph-filter-options]').evaluate(el => { el.open = false; });
+  await showGraphLayer(panel, 'controls'); await panel.locator('[data-graph-map-options]').evaluate(el => { el.open = true; });
+  await graphControl(panel, 'Pause motion');
   const snapshot = () => map.evaluate(el => el.graphView.snapshot());
+  // Screen-space navigation needs a target to the right regardless of the
+  // viewport's fit distance and stable seed orientation.
+  await map.evaluate(el=>{const v=el.graphView;v.simulation.all.forEach((n,i)=>Object.assign(n,v.camera.world({x:v.camera.width*(.35+i*.2),y:v.camera.height*.5})));v.draw();});
   const before = await snapshot();
   await map.focus(); await page.keyboard.press('ArrowRight');
   await expect(map).toHaveAttribute('data-selected', /Synthetic/);
   expect((await snapshot()).camera).toEqual(before.camera);
   const selectedBefore = await map.getAttribute('data-selected'), positionedBefore = await snapshot();
-  await panel.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await graphControl(panel, 'Refresh');
   await expect(map).toHaveAttribute('data-node-count', '3');
   await expect(map).toHaveAttribute('data-selected', selectedBefore);
   expect((await snapshot()).projected).toEqual(positionedBefore.projected);
-  await panel.getByRole('button', { name: 'Orbit right', exact: true }).click();
+  await graphControl(panel, 'Orbit right');
   const after = await snapshot();
   expect(after.projected.map(p => [p.x, p.y, p.depth])).not.toEqual(before.projected.map(p => [p.x, p.y, p.depth]));
   expect(after.camera.distance).toBe(before.camera.distance);
-  await panel.getByRole('button', { name: 'Pause motion' }).click();
+  await graphControl(panel, 'Pause motion');
+  await closeGraphLayer(panel);
   const node = (await snapshot()).projected[0], bounds = await map.boundingBox();
   await map.evaluate(el => el.addEventListener('pointerdown', event => { window.graphDragPointer = event.pointerId; }, { once: true }));
   await page.mouse.move(bounds.x + node.x, bounds.y + node.y); await page.mouse.down();

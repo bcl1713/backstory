@@ -1,3 +1,4 @@
+import { showGraphLayer, closeGraphLayer, graphControl } from './support/graph.js';
 import { test, expect } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -40,16 +41,8 @@ for (const width of [390, 320]) test(`Menu graph leaves useful space and reachab
   await page.getByRole('link', { name: 'Graph', exact: true }).click();
   await expect(panel(page).locator('[data-graph-controls]')).toBeAttached();
   await expect(panel(page).locator('[data-graph-summary]')).toContainText('2 notes');
-  const sidebar = await panel(page).locator('.graph-sidebar').evaluate(el => {
-    const style = getComputedStyle(el), r = el.getBoundingClientRect();
-    return { position: style.position, zIndex: style.zIndex, paddingTop: style.paddingTop, width: r.width, height: r.height };
-  });
-  await info.attach('sidebar-computed-style', { body: JSON.stringify(sidebar), contentType: 'application/json' });
-  await writeFile(info.outputPath('sidebar-computed-style.json'), JSON.stringify(sidebar));
+  await expect(panel(page).locator('[data-graph-overlay]:visible')).toHaveCount(0);
   await page.screenshot({ path: info.outputPath('menu-graph.png') });
-  // A navigation drawer rule must never turn graph details into an overlay.
-  expect(sidebar.position).not.toBe('fixed');
-  await expect(panel(page).locator('[data-graph-control-options]')).not.toHaveAttribute('open', '');
   await expect(panel(page).locator('[data-graph-scope]')).toContainText('Local');
   await expect(panel(page).locator('[data-graph-scope]')).toContainText('2 hops');
   await reachableClose(page);
@@ -58,14 +51,16 @@ for (const width of [390, 320]) test(`Menu graph leaves useful space and reachab
   const workspace = await panel(page).locator('.graph-workspace').boundingBox();
   expect(workspace.y).toBeLessThan((await page.evaluate(() => innerHeight)) * .5);
   expect(await panel(page).evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
-  for (const selector of ['[data-graph-filter-options]', '[data-graph-control-options]', '[data-graph-map-options]', '[data-graph-settings]', '[data-graph-forces]']) {
+  const before = await panel(page).locator('[data-graph-map]').boundingBox();
+  await showGraphLayer(panel(page),'controls');
+  for (const selector of ['[data-graph-filter-options]', '[data-graph-map-options]', '[data-graph-settings]', '[data-graph-forces]']) {
     await panel(page).locator(selector).locator(':scope > summary').tap();
     await expect(panel(page).locator(selector)).toHaveAttribute('open', '');
     await reachableClose(page);
+    expect(await panel(page).locator('[data-graph-map]').boundingBox()).toEqual(before);
   }
   await panel(page).getByRole('slider', { name: 'Gravity', exact: true }).fill('2');
-  await reachableClose(page);
-  await panel(page).locator('[data-graph-control-options] > summary').tap();
+  await closeGraphLayer(panel(page));
   await expect(panel(page).getByRole('button', { name: 'All notes', exact: true })).toBeHidden();
   await reachableClose(page);
   await panel(page).getByRole('button', { name: 'Close graph', exact: true }).tap();
@@ -95,17 +90,17 @@ test('direct phone graph keeps disclosures and connection list usable without We
   await page.goto('/graph/?path=Slice.md');
   const direct = page.locator('[data-graph-page]');
   await expect(direct.locator('[data-graph-list]')).toBeVisible();
-  await expect(direct.locator('[data-graph-control-options]')).not.toHaveAttribute('open', '');
+  await expect(direct.locator('[data-graph-overlay]:visible')).toHaveCount(0);
   await expect(direct.getByRole('button', { name: 'Connection list', exact: true })).toBeVisible();
-  await direct.locator('[data-graph-filter-options] > summary').tap();
-  await direct.getByRole('searchbox', { name: 'Graph search' }).focus();
+  await showGraphLayer(direct,'find');
+  await direct.getByRole('searchbox', { name: 'Find a note' }).focus();
   await page.keyboard.press('Escape');
-  await expect(direct.getByRole('button', { name: 'Connection list', exact: true })).toBeFocused();
-  await direct.locator('[data-graph-control-options] > summary').tap();
+  await expect(direct.getByRole('button', { name: 'Find', exact: true })).toBeFocused();
+  await showGraphLayer(direct,'controls');
   await expect(direct.getByRole('button', { name: 'Retry map', exact: true })).toBeVisible();
-  await direct.getByRole('button', { name: 'All notes', exact: true }).tap();
+  await graphControl(direct,'All notes');
   await expect(direct.locator('[data-graph-scope]')).toContainText('Whole wiki');
-  await direct.locator('[data-graph-control-options] > summary').tap();
+  await closeGraphLayer(direct);
   await expect(direct.locator('[data-graph-scope]')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath('direct-list-graph.png'), fullPage: true });

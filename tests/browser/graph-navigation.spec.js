@@ -1,3 +1,4 @@
+import { showGraphLayer, closeGraphLayer, graphControl } from './support/graph.js';
 import { test, expect } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
@@ -28,10 +29,10 @@ const map = page => panel(page).locator('[data-graph-map]');
 async function openGraph(page) {
   await page.locator('.cm-content').focus(); await page.keyboard.type('g/');
   await expect(panel(page)).toBeVisible();
-  await expect(panel(page).getByRole('searchbox', { name: 'Graph search' })).toBeFocused();
+  await expect(panel(page).getByRole('searchbox', { name: 'Find a note' })).toBeFocused();
   await expect(panel(page).locator('[data-graph-summary]')).toContainText('4 notes');
 }
-async function viewOptions(page) { await panel(page).locator('[data-graph-map-options]').evaluate(el => { el.open = true; }); }
+async function viewOptions(page) { await showGraphLayer(panel(page), 'controls'); await panel(page).locator('[data-graph-map-options]').evaluate(el => { el.open = true; }); }
 
 test('g/ opens search; two Escapes restore exact editor caret and Normal mode without saving', async ({ page }) => {
   await setup(page);
@@ -68,6 +69,7 @@ test('list and tools share canonical edges; technical evidence starts behind dis
   await expect(panel(page).locator('[data-graph-nodes] > li')).toHaveCount(evidence.nodes.length);
   await expect(panel(page).locator('[data-graph-edges] > li')).toHaveCount(evidence.edges.length);
   await expect(panel(page).locator('[data-graph-summary]')).not.toContainText(/epoch|revision|observed/);
+  await showGraphLayer(panel(page),'evidence');
   await expect(panel(page).getByText('Technical evidence', { exact: true })).toBeVisible();
   await expect(panel(page).locator('[data-graph-details] code:visible')).toHaveCount(0);
   await viewOptions(page); await panel(page).getByRole('slider', { name: 'Bloom intensity' }).fill('0');
@@ -95,7 +97,9 @@ test('missing WebGL retains full list, filters, continuation and guarded navigat
   });
   await page.reload(); await openGraph(page);
   await expect(panel(page).locator('[data-graph-list]')).toBeVisible();
+  await showGraphLayer(panel(page),'controls');
   await expect(panel(page).getByRole('button', { name: 'Retry map' })).toBeVisible();
+  await closeGraphLayer(panel(page));
   await panel(page).getByRole('button', { name: 'Inspect Cluster B', exact: true }).click();
   await expect(panel(page).getByRole('link', { name: 'Open selected note' })).toHaveAttribute('href', '/notes/Graph%20B.md');
 });
@@ -117,8 +121,8 @@ test('enhanced direct graph removes private fallback evidence before revalidatio
   await expect(page.locator('#graph-initial-data, #graph-initial-params')).toHaveCount(0);
   await page.route('**/tools/graph/snapshot/**', route => route.fulfill({status:401,
     json:{untrusted_content:true,reason_code:'authentication_required'}}));
-  await graph.locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
-  await graph.getByRole('button', {name:'Refresh',exact:true}).click();
+  await showGraphLayer(graph, 'controls'); await graph.locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
+  await graphControl(graph, 'Refresh');
   await expect(graph.locator('[data-graph-status]')).toContainText('Session expired');
   await expect(graph.locator('[data-graph-map]')).toHaveAttribute('data-node-count','0');
   await expect(graph.locator('[data-graph-nodes]')).not.toContainText('Graph B.md');
