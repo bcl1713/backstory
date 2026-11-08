@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { spawnSync } from 'node:child_process';
+import { runtime } from './support/server.js';
 
 const meta = { state: 'ok', authoritative: false, untrusted_content: true, projection_complete: true,
   generation: 1, mutation: 1, relation_epoch: 1, eligibility_version: 'synthetic', observed_at: '2026-11-07T00:00:00Z',
@@ -63,4 +65,50 @@ test('bounded partial neighborhoods retain evidence and offer a smaller scope', 
   await panel.getByRole('button', { name: 'Try one hop', exact: true }).click();
   await expect(panel.locator('[data-graph-summary]')).toContainText('2 notes');
   await expect(panel.locator('[data-graph-summary]')).toContainText('Complete');
+});
+
+test('real two-hop hub streams connections, completes automatically and survives retry and depth changes', async ({ page }, info) => {
+  const env = { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings',
+    BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`,
+    BACKSTORY_IDENTITY_PATH: '.backstory-marker', BACKSTORY_COOKIE_MODE: 'localhost',
+    BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' };
+  const indexed = spawnSync('.venv/bin/python', ['-c',
+    'import django; django.setup(); from django.conf import settings; from tests.fixtures.graph import populate_two_hop_hub; populate_two_hop_hub(settings.BACKSTORY_WIKI_ROOT)'],
+  { env, encoding: 'utf8' });
+  expect(indexed.status, indexed.stderr).toBe(0);
+  await page.goto('/accounts/login/');
+  await page.getByLabel('Username', { exact: true }).fill('slice');
+  await page.getByLabel('Password', { exact: true }).fill('synthetic-slice-browser-only');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.goto('/notes/Population%20Root.md');
+  await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
+  const responses = [], started = performance.now();
+  const observe = async response => {
+    if (new URL(response.url()).pathname !== '/tools/graph/') return;
+    responses.push({ status: response.status(), data: await response.json(),
+      elapsedMs: Math.round(performance.now() - started) });
+  };
+  page.on('response', observe);
+  await page.evaluate(() => document.dispatchEvent(new Event('backstory:open-graph')));
+  const panel = page.locator('[data-graph-dialog]'), summary = panel.locator('[data-graph-summary]');
+  await expect.poll(() => responses.length).toBeGreaterThan(0);
+  expect(responses[0].status).toBe(200);
+  expect(responses[0].data.edges.length).toBeGreaterThan(0);
+  await expect(summary).toContainText('93 notes · 278 directed links · Complete');
+  expect(responses.every(r => r.status === 200)).toBe(true);
+  const metrics = { requests: responses.length, firstConnectedMs: responses[0].elapsedMs,
+    completeMs: Math.round(performance.now() - started), scope: 'browser_HTTP_and_UI_including_client_timers' };
+  page.off('response', observe);
+  console.log('synthetic_population_browser', metrics);
+  await info.attach('population-timing', { body: JSON.stringify(metrics), contentType: 'application/json' });
+  await page.screenshot({ path: info.outputPath('population-complete.png'), fullPage: true });
+  await panel.locator('[data-graph-control-options]').evaluate(el => { el.open = true; });
+  // Change depth while a refresh is in flight: obsolete continuations cannot
+  // restore the old scope. Returning to two hops starts a fresh complete load.
+  await panel.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await panel.getByRole('button', { name: 'Decrease hop depth' }).click();
+  await expect(summary).toContainText('8 notes · 7 directed links · Complete');
+  await panel.getByRole('button', { name: 'Increase hop depth' }).click();
+  await expect(summary).toContainText('93 notes · 278 directed links · Complete');
+  await page.screenshot({ path: info.outputPath('population-depth-retry.png'), fullPage: true });
 });

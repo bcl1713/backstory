@@ -109,12 +109,12 @@ def test_search_database_failure_is_not_budget_exhaustion(wiki, caplog):
 
 
 def test_graph_budget_has_source_free_diagnostic(wiki, monkeypatch, caplog):
-    from indexing import search
+    from indexing import graph_budget
     from tests.integration.test_graph_index import build_graph
     from wiki.contracts import StorageError
     graph = build_graph(wiki, {'private-name.md': '[[target]]', 'target.md': '# Secret title'})
     with monkeypatch.context() as patch:
-        patch.setattr(search, 'SQLITE_VM_STEPS', 1)
+        patch.setattr(graph_budget, 'SQLITE_VM_STEPS', 1)
         with pytest.raises(StorageError, match='graph_query_limited'):
             graph.query_graph('private-name.md', depth=2)
     event, = events(caplog)

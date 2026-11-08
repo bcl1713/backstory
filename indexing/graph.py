@@ -21,7 +21,7 @@ from .graph_contracts import GraphNode, LinkOccurrence, GraphEdge, LinkPage, Gra
 from .graph_projection import namespace_version
 from .models import IndexGeneration, IndexedNote, LinkEdge, RelationState, ResolvedRelation
 from .scanner import file_stat
-from .search import QueryBudget, sqlite_budget
+from .graph_budget import QueryBudget, sqlite_budget
 from .diagnostics import record_failure
 
 CANDIDATE_LIMIT = 300
@@ -398,10 +398,10 @@ def query_graph(path=None, depth=1, folder='', tag='', query='', cursor=None, no
     _limit(edge_limit, 500)
     context = Query({'kind': 'graph', 'path': path, 'depth': depth, 'folder': folder, 'tag': tag,
                      'query': query, 'node_limit': node_limit, 'edge_limit': edge_limit,
-                     **({'membership': 'outgoing-v2'} if path else {})}, cursor)
+                     **({'membership': 'outgoing-v3'} if path else {})}, cursor)
     if context.index.state == 'unavailable':
         return context.finish(GraphPage)
-    if path and cursor is None:
+    if path and depth == 1 and cursor is None:
         from .graph_traversal import small_page
         small = small_page(context, path, depth, folder, tag, query, node_limit, edge_limit)
         if small is not None:
