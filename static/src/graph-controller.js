@@ -28,6 +28,17 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   const form = find('[data-graph-filters]');
   const input = name => form.elements.namedItem(name);
   const status = find('[data-graph-status]');
+  const selectedLink = find('[data-graph-open-selected]');
+  function selectionStatus(identity) {
+    find('[data-graph-selection]').textContent = identity ? `Selected · ${identity.title}` : '';
+    selectedLink.hidden = !identity;
+    if (identity) {
+      selectedLink.setAttribute('href', identity.href);
+      selectedLink.setAttribute('aria-label', `Open selected note: ${identity.title}`);
+    } else {
+      selectedLink.removeAttribute('href'); selectedLink.removeAttribute('aria-label');
+    }
+  }
   const details = find('[data-graph-details]');
   const indexDisclosure = find('[data-graph-index-status]'), indexText = find('[data-graph-index-progress]');
   if (indexDisclosure) indexDisclosure.open = false;
@@ -158,8 +169,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     find('[data-graph-depth-value]').textContent = `${depth} hop${depth === 1 ? '' : 's'}`;
     find('[data-graph-local]').setAttribute('aria-pressed', String(!global));
     find('[data-graph-global]').setAttribute('aria-pressed', String(global));
-    const identity = snapshot.nodes.get(selected);
-    find('[data-graph-selection]').textContent = identity ? `Selected · ${identity.title}` : '';
+    selectionStatus(snapshot.nodes.get(selected));
     find('[data-graph-scope]').textContent = `${global ? 'Whole wiki' : `Local · ${depth} hop${depth === 1 ? '' : 's'} · ${activeParams?.path || input('path').value}`}${filters.length ? ` · Filtered by ${filters.map(name => `${name}: ${activeParams[name]}`).join(', ')}` : ''}`;
     const state = loadingError ? 'Partial — loading stopped' : loadingPaused ? 'Loading paused · Partial' :
       request ? 'Loading…' : snapshot.complete ? 'Complete' :
@@ -293,7 +303,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     if (!page?.nodes.some(node => node.path === path)) return;
     selected = path; if (takeFocus) focused = path;
     if (activeParams.path) snapshot.expand(path);
-    renderExploration(); say(`Selected ${path}. Enter on the map opens it.`);
+    renderExploration(); say(`Selected ${path}.`);
   }
   function updateExploration({ fit = false, params = parameters() } = {}) {
     if (!snapshot.data || filterKey(params) !== filterKey(activeParams)) { void load({fit,params}); return; }
@@ -448,7 +458,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
       for (const name of ['root', 'selected', 'focused']) delete map.dataset[name];
       map.setAttribute('aria-label', '3D note relationship map');
       find('[data-graph-find-results]').replaceChildren(); find('[data-graph-find]').value = ''; find('[data-graph-find-count]').textContent = '';
-      delete details.dataset.path; find('[data-graph-selection]').textContent = '';
+      delete details.dataset.path; selectionStatus(null);
       details.replaceChildren(); find('[data-graph-summary]').textContent = ''; find('[data-graph-diagnostics]').textContent = ''; say('');
     },
   };

@@ -105,3 +105,35 @@ test('direct phone graph keeps disclosures and connection list usable without We
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath('direct-list-graph.png'), fullPage: true });
 });
+
+for (const width of [390,320]) test(`selected graph note opens directly by touch at ${width}px`,async({page,browserName},info)=>{
+  test.skip(browserName !== 'chromium','Real touch map interaction requires WebGL; the navigation test also covers the list fallback.');
+  await page.setViewportSize({width,height:width===320?568:844});
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await setup(page);
+  await page.evaluate(()=>document.dispatchEvent(new Event('backstory:open-graph')));
+  const graph=panel(page),map=graph.locator('[data-graph-map]');
+  await expect(map).toHaveAttribute('data-node-count','2');
+  await graph.getByRole('button',{name:'Close find',exact:true}).tap();
+  await expect(map).toHaveAttribute('data-renderer','webgl');
+  const point=await map.evaluate(el=>{
+    const v=el.graphView;v.setPaused(true);
+    for(const [path,n] of v.simulation.nodes)Object.assign(n,v.camera.world({x:v.camera.width*(path==='Other.md'?.7:.25),y:v.camera.height*.4}));
+    v.draw();return v.projected.get('Other.md');
+  });
+  const bounds=await map.boundingBox(),camera=await map.evaluate(el=>el.graphView.snapshot().camera);
+  await page.touchscreen.tap(bounds.x+point.x,bounds.y+point.y);
+  await expect(map).toHaveAttribute('data-selected','Other.md');
+  await expect(map).toHaveAttribute('data-root','Slice.md');
+  expect(await map.boundingBox()).toEqual(bounds);
+  expect(await map.evaluate(el=>el.graphView.snapshot().camera)).toEqual(camera);
+  await expect(graph.locator('[data-graph-overlay]:visible')).toHaveCount(0);
+  const open=graph.getByRole('link',{name:'Open selected note: Other',exact:true});
+  await expect(open).toHaveText('Open note');await expect(open).toHaveAttribute('href','/notes/Other.md');
+  await expect(open).toBeInViewport();
+  const box=await open.boundingBox();expect(box.height).toBeGreaterThanOrEqual(44);expect(box.width).toBeGreaterThanOrEqual(44);
+  expect(await open.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));})).toBe(true);
+  await page.screenshot({path:info.outputPath(`open-selected-${width}.png`)});
+  await open.tap();await expect(page).toHaveURL(/\/notes\/Other.md$/);
+  await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
+});
