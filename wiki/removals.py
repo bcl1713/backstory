@@ -14,6 +14,7 @@ import uuid
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.db import DatabaseError, transaction
+from django.db.models import F
 from django.utils import timezone
 
 from .contracts import PathDenied, StorageError
@@ -191,6 +192,9 @@ def preview_removal(actor, path, kind, revision=None):
                 _verify_context(operation, directory)
                 _exact_original(operation, directory)
                 with application_lock('revision-quota'), transaction.atomic():
+                    # Acquire write intent before capacity/quota reads, even
+                    # though this new journal UUID currently matches no row.
+                    RemovalOperation.objects.filter(pk=operation.pk).update(state=F('state'))
                     if RemovalOperation.objects.count() >= 1024:
                         raise StorageError('removal_capacity', 503)
                     _check_quota(_record_charge(path, revision, original, json.dumps(plan).encode(), kind.encode()) + 1024)
