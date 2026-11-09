@@ -16,13 +16,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .contracts import PathDenied, StorageError
-from .models import MoveOperation, SavedRevision
+from .models import MoveOperation, MovePreviewJob, SavedRevision
 from .policy import authorize_content, policy_version
 from .revisions import recovery_path, restore_revision
 from .saves import parse_precondition
 from .storage import open_directory, read_note
 from .tool_views import _json, _paging, _tool
-from . import relocations
+from . import move_previews, relocations
 
 MAX_REVIEW_BYTES = 512 * 1024
 MAX_REQUEST_BYTES = 16 * 1024
@@ -78,7 +78,12 @@ def _operation(request, value):
     except (ValueError, TypeError, AttributeError):
         raise StorageError('invalid_operation_id') from None
     try:
-        return MoveOperation.objects.get(pk=operation_id, actor=request.user)
+        try:
+            return MovePreviewJob.objects.get(pk=operation_id, actor=request.user)
+        except MovePreviewJob.DoesNotExist:
+            # Publication replaces job -> operation atomically. Looking for the
+            # job first permits a stale preparing read, never an absent handle.
+            return MoveOperation.objects.get(pk=operation_id, actor=request.user)
     except MoveOperation.DoesNotExist:
         raise StorageError('not_found', 404) from None
     except DatabaseError:
@@ -115,6 +120,8 @@ def _review_binding(request, operation, review):
 
 
 def _move_data(request, operation, *, expected_revision=None):
+    if isinstance(operation, MovePreviewJob):
+        return _preparation_data(request, operation)
     review = _review(request, operation)
     data = {**review, 'state': operation.state, 'reason_code': operation.reason_code,
             'index_state': operation.index_state, 'authoritative': False,
@@ -143,6 +150,23 @@ def _move_data(request, operation, *, expected_revision=None):
     return data
 
 
+def _preparation_data(request, job):
+    for path in (job.source, job.destination):
+        _eligible(request, path)
+    if job.context['policy'] != policy_version():
+        raise StorageError('move_policy_changed', 409)
+    move_previews.assert_preview_storage_context(job)
+    state = {'queued': 'preparing', 'running': 'preparing',
+             'failed': 'preview_failed', 'cancelled': 'cancelled'}[job.state]
+    data = {'operation_id': str(job.pk), 'source': job.source, 'source_path': job.source,
+            'destination': job.destination, 'kind': job.context['kind'],
+            'affected_paths': [job.source, job.destination], 'state': state,
+            'reason_code': job.reason_code, 'authoritative': False}
+    if state == 'preparing':
+        data.update(poll_after_ms=1000, next_action='get_move')
+    return data
+
+
 def _move_response(data):
     response = _json(data, 503 if data['state'] == 'uncertain' else 409 if data['state'] == 'recovery_required' else 200)
     if data.get('authoritative') and 'revision' in data:
@@ -156,10 +180,18 @@ def preview_move_tool(request):
     for key in ('source', 'destination'):
         authorize_content(request, body[key])
     try:
-        operation = relocations.preview_move(request.user, body['source'], body['destination'])
+        operation = move_previews.enqueue_move_preview(request.user, body['source'], body['destination'])
     except (DatabaseError, OSError):
         raise StorageError('move_unavailable', 503) from None
-    return _move_response(_move_data(request, operation))
+    try:
+        return _json(_move_data(request, operation), 202)
+    except (StorageError, DatabaseError, OSError):
+        # Queue publication succeeded. A failed observation cannot establish
+        # that no preparation exists, so retain its handle without old paths.
+        return _json({'operation_id': str(operation.pk), 'state': 'uncertain',
+                      'reason_code': 'move_preparation_readback_unconfirmed',
+                      'authoritative': False, 'inspect_before_retry': True,
+                      'read_before_retry': True}, 503)
 
 
 @_tool
@@ -172,6 +204,18 @@ def _mutate_move(request, *, rollback):
     allowed = {'operation_id'} if rollback else {'operation_id', 'review_token'}
     body = _body(request, allowed, allowed)
     operation = _operation(request, body['operation_id'])
+    if isinstance(operation, MovePreviewJob):
+        _preparation_data(request, operation)
+        if not rollback:
+            raise StorageError('move_preview_not_ready', 409)
+        try:
+            operation = move_previews.cancel_move_preview(request.user, operation.pk)
+        except DatabaseError:
+            raise StorageError('move_unavailable', 503) from None
+        if isinstance(operation, MovePreviewJob):
+            return _move_response(_preparation_data(request, operation))
+        # The worker may have published before cancellation acquired its short
+        # journal transaction. Apply the normal ready-plan rollback safeguards.
     review = _review(request, operation)
     if not rollback:
         try:

@@ -8,6 +8,7 @@ from indexing.schema import enable_wal
 from indexing.scanner import clear_cursors
 from indexing.watcher import WatchService
 from indexing.worker import run_batch
+from wiki.move_previews import run_pending_move_preview
 
 
 def batch_delay(result, elapsed):
@@ -43,6 +44,7 @@ class Command(BaseCommand):
                     watcher.poll()
                     started = time.monotonic()
                     result = run_batch()
+                    run_pending_move_preview()
                     if options['once']:
                         return
                     until = time.monotonic() + batch_delay(result, time.monotonic() - started)
