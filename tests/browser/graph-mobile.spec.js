@@ -119,7 +119,7 @@ for (const width of [390,320]) test(`selected graph note opens directly by touch
   const point=await map.evaluate(el=>{
     const v=el.graphView;v.setPaused(true);
     for(const [path,n] of v.simulation.nodes)Object.assign(n,v.camera.world({x:v.camera.width*(path==='Other.md'?.7:.25),y:v.camera.height*.4}));
-    v.draw();return v.projected.get('Other.md');
+    v.draw({positionsChanged:true});return v.projected.get('Other.md');
   });
   const bounds=await map.boundingBox(),camera=await map.evaluate(el=>el.graphView.snapshot().camera);
   await page.touchscreen.tap(bounds.x+point.x,bounds.y+point.y);

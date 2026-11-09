@@ -29,7 +29,7 @@ test('returning to the graph restores selected springs and layout after private 
   await expect(map(page)).toHaveAttribute('data-node-count', '5');
   await map(page).evaluate(el => {
     const v = el.graphView; v.setPaused(true); v.actions.onSelect('B.md', true); v.orbit(.3, .1);
-    v.simulation.nodes.get('B.md').x = 1234; v.draw();
+    v.simulation.nodes.get('B.md').x = 1234; v.draw({positionsChanged:true});
   });
   const state = () => map(page).evaluate(el => {
     const v = el.graphView;

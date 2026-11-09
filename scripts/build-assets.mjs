@@ -13,7 +13,7 @@ await build({
 
 // Separate ESM entry: the editor's IIFE import stays a real lazy local load.
 await build({ entryPoints: ['static/src/math-renderer.js'], outdir: 'static', bundle: true, format: 'esm', minify: true, logLevel: 'info' });
-await build({ entryPoints: ['static/src/graph-controller.js', 'static/src/graph.css'], outdir: 'static', bundle: true, format: 'esm', minify: true, logLevel: 'info' });
+await build({ entryPoints: ['static/src/graph-physics-worker.js', 'static/src/graph-controller.js', 'static/src/graph.css'], outdir: 'static', bundle: true, format: 'esm', minify: true, logLevel: 'info' });
 
 await mkdir('static/fonts', { recursive: true });
 await copyFile('assets/fonts/OFL.txt', 'static/fonts/OFL.txt');
