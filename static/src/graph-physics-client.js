@@ -4,8 +4,9 @@ import { validateForces } from './graph-preferences.js';
 // Public node records remain the coherent rendering/picking state. Only topology
 // changes send identities/springs; ordinary frames return one positions buffer.
 export class WorkerGraphPhysics extends GraphPhysics {
-  constructor() {
+  constructor({ onStatus } = {}) {
     super();
+    this.onStatus = onStatus;
     this.generation = 0; this.epoch = 0; this.pinSerial = 0; this.command = 0;
     this.overrides = new Map(); this.pinUpdates = new Map();
     try {
@@ -13,8 +14,12 @@ export class WorkerGraphPhysics extends GraphPhysics {
       this.worker.onmessage = event => this.receive(event.data);
       this.worker.onerror = event => { event.preventDefault(); this.fallback(); };
       this.worker.onmessageerror = () => this.fallback();
-      this.graphDirty = true; this.changed();
-    } catch { this.worker = null; }
+      this.setMode('starting'); this.graphDirty = true; this.changed();
+    } catch { this.fallback(); }
+  }
+  setMode(mode) {
+    if (this.mode === mode) return;
+    this.mode = mode; this.onStatus?.(mode);
   }
   changed(graph = false, epoch = false) {
     if (!this.worker) return;
@@ -50,7 +55,7 @@ export class WorkerGraphPhysics extends GraphPhysics {
   receive(packet) {
     if (!this.worker) return;
     if (packet.type === 'ack') {
-      if (packet.command === this.inFlight) { this.inFlight = null; this.flush(); }
+      if (packet.command === this.inFlight) { this.setMode('worker'); this.inFlight = null; this.flush(); }
     } else if (packet.type === 'positions') {
       if (packet.generation !== this.generation || packet.epoch !== this.epoch || this.suspended || !this.active) this.recycle(packet);
       else this.snapshotPacket = packet;
@@ -65,7 +70,7 @@ export class WorkerGraphPhysics extends GraphPhysics {
     this.worker?.terminate(); this.worker = null; this.snapshotPacket = null;
     this.pinUpdates?.clear(); this.overrides?.clear(); this.indices?.clear(); this.inFlight = null;
     // Resume from the last coherent public positions, never a partial result.
-    super.cancelPending();
+    super.cancelPending(); this.setMode('fallback');
   }
   setGraph(nodes, edges) { super.setGraph(nodes, edges); this.changed(true); }
   setRoot(root) { if (root === this.root) return; super.setRoot(root); this.changed(true); }
@@ -121,6 +126,6 @@ export class WorkerGraphPhysics extends GraphPhysics {
   }
   destroy() {
     this.worker?.terminate(); this.worker = null; this.snapshotPacket = null;
-    this.overrides?.clear(); this.pinUpdates?.clear(); this.indices?.clear(); super.destroy();
+    this.overrides?.clear(); this.pinUpdates?.clear(); this.indices?.clear(); this.onStatus = null; super.destroy();
   }
 }

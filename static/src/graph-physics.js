@@ -45,20 +45,20 @@ class Octree {
     }
     this.insert(all, point, index, depth + 1);
   }
-  *build(all) {
+  *build(all, chunkSize) {
     let radius = 1, work = 0; this.used = 0;
     for (const n of all) {
       radius = Math.max(radius, Math.abs(n.x), Math.abs(n.y), Math.abs(n.z));
-      if (++work % PHYSICS.chunkSize === 0) yield;
+      if (chunkSize && ++work % chunkSize === 0) yield;
     }
     this.cell(0, 0, 0, radius + 1);
     for (let i = 0; i < all.length; i++) {
       this.insert(all, i, 0, 0);
-      if (++work % PHYSICS.chunkSize === 0) yield;
+      if (chunkSize && ++work % chunkSize === 0) yield;
     }
     for (let i = 0; i < this.used; i++) {
       const c = this.cells[i]; c.mx = c.sx / c.count; c.my = c.sy / c.count; c.mz = c.sz / c.count;
-      if (++work % PHYSICS.chunkSize === 0) yield;
+      if (chunkSize && ++work % chunkSize === 0) yield;
     }
   }
 }
@@ -159,23 +159,23 @@ export class GraphPhysics {
     this.pendingStep = null;
   }
   // Capture the epoch at creation, including generators retained before first next().
-  stepWork() { return this.integrateStep(this.version); }
-  *integrateStep(version) {
+  stepWork(chunkSize = PHYSICS.chunkSize) { return this.integrateStep(this.version, chunkSize); }
+  *integrateStep(version, chunkSize) {
     if (version !== this.version) return;
     const all = this.all, staged = this.staged; this.interactions = 0;
     let work = 0;
     for (const n of all) {
       n.fx = -n.x * PHYSICS.center * this.forces.gravity; n.fy = -n.y * PHYSICS.center * this.forces.gravity; n.fz = -n.z * PHYSICS.center * this.forces.gravity;
-      if (++work % PHYSICS.chunkSize === 0) { yield; if (version !== this.version) return; }
+      if (chunkSize && ++work % chunkSize === 0) { yield; if (version !== this.version) return; }
     }
     if (all.length <= 64) {
       for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
         const a = all[i], b = all[j], dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
         repel(this, a, dx, dy, dz, dx * dx + dy * dy + dz * dz, 1, b.path, b);
-        if (++work % PHYSICS.chunkSize === 0) { yield; if (version !== this.version) return; }
+        if (chunkSize && ++work % chunkSize === 0) { yield; if (version !== this.version) return; }
       }
     } else {
-      const tree = this.tree, build = tree.build(all);
+      const tree = this.tree, build = tree.build(all, chunkSize);
       while (!build.next().done) { yield; if (version !== this.version) return; }
       for (const a of all) {
         const stack = tree.stack; let length = 1, visits = 0; stack[0] = 1;
@@ -195,7 +195,7 @@ export class GraphPhysics {
             for (let i = 0; i < 8; i++) if (c.children[i] >= 0) stack[length++] = (c.children[i] + 1) * (i === octant ? 1 : -1);
           } else repel(this, a, dx, dy, dz, squared, count, 'cell');
         }
-        if (++work % PHYSICS.chunkSize === 0) { yield; if (version !== this.version) return; }
+        if (chunkSize && ++work % chunkSize === 0) { yield; if (version !== this.version) return; }
       }
     }
     for (const [a, b] of this.springs) {
@@ -203,7 +203,7 @@ export class GraphPhysics {
       const spring = PHYSICS.stiffness * this.forces.spring * (distance - PHYSICS.restLength) / distance;
       a.fx += dx * spring; a.fy += dy * spring; a.fz += dz * spring;
       b.fx -= dx * spring; b.fy -= dy * spring; b.fz -= dz * spring;
-      if (++work % PHYSICS.chunkSize === 0) { yield; if (version !== this.version) return; }
+      if (chunkSize && ++work % chunkSize === 0) { yield; if (version !== this.version) return; }
     }
     let maxSpeed = 0, anyPinned = false;
     const dt = PHYSICS.step, damping = Math.exp(-PHYSICS.damping * dt), cooling = Math.max(.08, 1 - this.steps / PHYSICS.maxSteps);
@@ -223,7 +223,7 @@ export class GraphPhysics {
       staged[offset + 1] = n.y + (n.pinned ? 0 : vy * dt);
       staged[offset + 2] = n.z + (n.pinned ? 0 : vz * dt);
       staged[offset + 3] = vx; staged[offset + 4] = vy; staged[offset + 5] = vz;
-      if (++work % PHYSICS.chunkSize === 0) { yield; if (version !== this.version) return; }
+      if (chunkSize && ++work % chunkSize === 0) { yield; if (version !== this.version) return; }
     }
     const steps = this.steps + 1, quiet = maxSpeed < PHYSICS.restSpeed && !anyPinned ? this.quiet + 1 : 0;
     const resting = steps >= PHYSICS.maxSteps || quiet >= PHYSICS.restSteps || !all.length;
