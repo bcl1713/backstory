@@ -101,7 +101,7 @@ test('missing WebGL retains full list, filters, continuation and guarded navigat
   await expect(panel(page).getByRole('button', { name: 'Retry map' })).toBeVisible();
   await closeGraphLayer(panel(page));
   await panel(page).getByRole('button', { name: 'Inspect Cluster B', exact: true }).click();
-  await expect(panel(page).getByRole('link', { name: 'Open selected note' })).toHaveAttribute('href', '/notes/Graph%20B.md');
+  await expect(panel(page).getByRole('link', { name: 'Open selected note', exact: true })).toHaveAttribute('href', '/notes/Graph%20B.md');
 });
 test('closing graph restores visible plain-text fallback and caret', async ({ page }) => {
   await setup(page); await revealChrome(page);
@@ -151,4 +151,23 @@ test('paused map stays hidden until private evidence is revalidated on tab retur
   if (graphicsAvailable) await expect(map(page)).toBeVisible();
   else await expect(panel(page).locator('[data-graph-list]')).toBeVisible();
   await expect(map(page)).toHaveAttribute('data-node-count','4');
+});
+
+test('direct selected-note action respects draft guards and clears revoked destinations',async({page})=>{
+  await setup(page);
+  const editor=page.locator('[data-markdown-editor]');
+  await editor.evaluate(el=>el.markdownEditor.view.dispatch({changes:{from:0,insert:'Unsaved mobile draft\n'}}));
+  await openGraph(page);await page.keyboard.press('Escape');
+  await map(page).evaluate(el=>el.graphView.actions.onSelect('Graph B.md',true));
+  const open=panel(page).getByRole('link',{name:'Open selected note: Cluster B',exact:true});
+  await expect(open).toBeVisible();
+  const dialogs=[];page.on('dialog',async d=>{dialogs.push(d.message());await d.dismiss();});
+  await open.click();expect(dialogs).toHaveLength(1);expect(dialogs[0]).toContain('unsaved draft');
+  await expect(page).toHaveURL(/\/notes\/Graph%20A.md$/);
+  expect(await editor.evaluate(el=>el.markdownEditor.getSource())).toContain('Unsaved mobile draft');
+  await page.route('**/tools/graph/snapshot/**',r=>r.fulfill({status:401,json:{untrusted_content:true,reason_code:'authentication_required'}}));
+  await graphControl(panel(page),'Refresh');
+  await expect(panel(page).locator('[data-graph-status]')).toContainText('Session expired');
+  const revoked=panel(page).locator('[data-graph-open-selected]');
+  await expect(revoked).toBeHidden();expect(await revoked.getAttribute('href')).toBeNull();
 });
