@@ -28,6 +28,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   const form = find('[data-graph-filters]');
   const input = name => form.elements.namedItem(name);
   const status = find('[data-graph-status]');
+  const physicsStatus = find('[data-graph-physics-status]');
   const selectedLink = find('[data-graph-open-selected]');
   function selectionStatus(identity) {
     find('[data-graph-selection]').textContent = identity ? `Selected · ${identity.title}` : '';
@@ -140,6 +141,11 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
         onSelect: (path, focus) => select(path, focus), onOpen: open, onCenter: path => center(path),
         onSearch: focusSearch, onEscape: escape, onHelp: toggleHelp, onHint:say,
         onPause: paused => { find('[data-graph-pause]').setAttribute('aria-pressed', String(paused)); },
+        onPhysicsStatus: mode => {
+          if (closed || !physicsStatus) return;
+          physicsStatus.textContent = mode === 'worker' ? 'Layout worker active.' : mode === 'starting' ?
+            'Starting layout worker…' : 'Layout worker unavailable. Using a slower fallback; graph controls remain available.';
+        },
         onUnavailable: unavailable,
         onRestored: () => { graphicsAvailable = true; find('[data-graph-graphics-retry]').hidden = true; say('Map ready. Switch to the map to continue.'); },
         onLimit: () => {},

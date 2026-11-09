@@ -44,7 +44,9 @@ export function createGraphBatches(nodes, edges) {
 export class GraphView {
   constructor(container, actions = {}) {
     this.container = container; this.actions = actions; this.life = new AbortController();
-    this.simulation = new WorkerGraphPhysics(); this.camera = new GraphCamera(); this.quality = new AdaptiveQuality();
+    this.simulation = new WorkerGraphPhysics({ onStatus: mode => {
+      this.container.dataset.physics = mode; this.actions.onPhysicsStatus?.(mode);
+    } }); this.camera = new GraphCamera(); this.quality = new AdaptiveQuality();
     this.data = { nodes: [], edges: [] }; this.selected = this.focused = null;
     this.frame = null; this.destroyed = false; this.intensity = BLOOM_DEFAULT; this.pointers = new Map(); this.projected = new Map();
     this.reduced = matchMedia('(prefers-reduced-motion: reduce)'); this.forced = matchMedia('(forced-colors: active)');
