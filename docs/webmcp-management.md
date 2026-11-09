@@ -35,28 +35,52 @@ current authoritative records. A quota/query-budget failure is explicit.
 
 ## Review and commit a move, rename or archive
 
-1. `preview_move({source, destination})` creates one actor-owned plan through the
-   existing relocation preview. Both paths are exact root-relative names;
-   the destination parent must exist. A deliberate archive destination is simply
-   a reviewed move, never an inferred copy/delete rewrite.
-2. Review the entire `inventory`, affected-link `changes`/diffs and
-   `affected_paths`. The public review is bounded to 512 KiB; larger plans fail
-   closed and cannot be committed through this adapter. No recovery bytes or
-   filesystem witnesses are returned.
-3. After explicit authorization, call `commit_move({operation_id, review_token})`.
-   The signed token binds the actor, operation, policy and complete public review.
-   The domain writer still revalidates all filesystem/revision witnesses,
-   collisions and plan age. Receiving a token is not user authorization.
-4. Inspect `get_move({operation_id})` after uncertainty. It never resumes work.
-   `rollback_move({operation_id})` deliberately cancels a pending preview or
-   rolls back an interrupted recovery using the existing guarded service; it is
-   not an arbitrary undo of a completed move.
+1. `preview_move({source, destination})` queues an actor-owned preview and
+   returns HTTP 202 with `state=preparing`, a durable `operation_id`,
+   `next_action=get_move` and `poll_after_ms`. Retain that ID. Both paths are exact
+   root-relative names; the destination parent must exist. This request performs
+   bounded preflight only, so whole-wiki planning does not have to fit inside a
+   browser-host evaluation deadline. It does not move content.
+2. Deliberately inspect `get_move({operation_id})` after the suggested delay.
+   Preparation runs in the separately supervised application worker. GET never
+   starts or resumes planning, and remains inspectable while that worker plans.
+   While `state=preparing`, no review token or partial inventory is available.
+   Do not reissue `preview_move` to poll.
+3. When `state=preview`, review the entire `inventory`, affected-link
+   `changes`/diffs and `affected_paths`. The public review is bounded to 512 KiB;
+   larger plans fail closed and cannot be committed through this adapter. No
+   recovery bytes or filesystem witnesses are returned. The completed plan uses
+   exactly the same operation ID as its preparation handle. A deliberate archive
+   destination is a reviewed move, never an inferred copy/delete rewrite.
+4. After explicit authorization, call `commit_move({operation_id, review_token})`.
+   The signed token binds actor, operation, policy and the complete public review.
+   The domain writer still revalidates filesystem/revision witnesses, collisions
+   and plan age. Preparing/failed jobs cannot commit; receiving a token is not
+   user authorization.
+5. Inspect `get_move` after uncertainty. `rollback_move({operation_id})` explicitly
+   cancels queued/running preparation or a ready preview, or rolls back interrupted
+   recovery through the existing guarded service. Cancellation during planning
+   cannot be overwritten by publication of a ready plan. It is not an arbitrary
+   undo of a completed move.
 
-Move previews expire after 30 minutes. Recovery journals pause ordinary writes.
+Preparation failures remain inspectable as `preview_failed` with a fixed reason
+code and no commit token. Changed source/storage context, policy, expiry,
+quota/capacity and interrupted preparation fail closed. A worker crash does not
+automatically replay planning or any content mutation. Cancellation of preparation
+acknowledges its journal state, without claiming a source-content readback.
+
+The production supervisor already runs the worker. A development installation
+using only `manage.py runserver` must also run `manage.py run_indexer` for queued
+previews to progress. A waiting preview is not permission to increase request
+timeouts, replay a write or bypass the worker's guards. The existing ordinary UI
+and Python domain preview remain synchronous; these preparation states describe
+the WebMCP response lifecycle.
+
+Previews expire after 30 minutes. Recovery journals pause ordinary writes.
 Completion includes authoritative note readback, or verified directory identity,
 with index lag separate. A lost/malformed acknowledgement is `uncertain` and
 retains the operation handle when known. Never automatically replay commit or
-rollback. Re-read any changed sources before deciding what to do next.
+rollback. Re-read changed sources before deciding what to do next.
 
 The browser inspects the current affected paths before sending a mutation. It
 protects an open editor containing a rewritten incoming link, as well as new

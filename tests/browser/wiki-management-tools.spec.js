@@ -18,6 +18,20 @@ async function call(page, name, input) {
   await expect.poll(() => page.evaluate(name => Boolean(window.registeredWikiTools[name]), name)).toBe(true);
   return page.evaluate(async ({ name, input }) => JSON.parse(await window.registeredWikiTools[name].execute(input)), { name, input });
 }
+async function prepareMove(page, input) {
+  const queued = await call(page, 'preview_move', input);
+  expect(queued).toMatchObject({ state: 'preparing', next_action: 'get_move', poll_after_ms: 1000, authoritative: false });
+  expect(queued.review_token).toBeUndefined();
+  expect(queued.inventory).toBeUndefined();
+  // The browser fixture supervises only the HTTP server. Run its separate
+  // worker explicitly, then deliberately inspect the same durable handle.
+  execFileSync('.venv/bin/python', ['-c', 'import django; django.setup(); from wiki.move_previews import run_pending_move_preview; assert run_pending_move_preview()'], {
+    env: { ...process.env, DJANGO_SETTINGS_MODULE: 'backstory.settings', BACKSTORY_WIKI_ROOT: `${runtime}/wiki`, BACKSTORY_DATA_DIR: `${runtime}/data`, BACKSTORY_IDENTITY_PATH: '.backstory-marker', BACKSTORY_COOKIE_MODE: 'localhost', BACKSTORY_ALLOWED_HOSTS: 'localhost,127.0.0.1' }, stdio: 'pipe', timeout: 30000,
+  });
+  const review = await call(page, 'get_move', { operation_id: queued.operation_id });
+  expect(review).toMatchObject({ state: 'preview', operation_id: queued.operation_id });
+  return review;
+}
 const source = page => page.evaluate(() => document.querySelector('[data-markdown-editor]').markdownEditor.getSource());
 const setSource = (page, value) => page.evaluate(value => document.querySelector('[data-markdown-editor]').markdownEditor.setSource(value), value);
 
@@ -60,7 +74,7 @@ test('move protects an incoming-link editor draft, then rewrites links without n
   await page.goto('/notes/Tool%20move%20links.md');
   await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
   await setSource(page, '# Keep this human draft\n');
-  const review = await call(page, 'preview_move', { source: 'Tool move from.md', destination: 'Tool move to.md' });
+  const review = await prepareMove(page, { source: 'Tool move from.md', destination: 'Tool move to.md' });
   expect(review.state).toBe('preview');
   expect(review.affected_paths).toContain('Tool move links.md');
   const args = { operation_id: review.operation_id, review_token: review.review_token };
@@ -79,7 +93,7 @@ test('move protects an incoming-link editor draft, then rewrites links without n
 test('folder move and empty-folder removal protect new child drafts missing from disk inventory', async ({ page }) => {
   await login(page);
   await call(page, 'create_folder', { path: 'Tool draft folder' });
-  const move = await call(page, 'preview_move', { source: 'Tool draft folder', destination: 'Tool folder archive' });
+  const move = await prepareMove(page, { source: 'Tool draft folder', destination: 'Tool folder archive' });
   const removal = await call(page, 'preview_removal', { path: 'Tool draft folder', kind: 'folder' });
   await page.goto('/new/?folder=Tool%20draft%20folder');
   await expect(page.locator('[data-editor-readiness]')).toContainText('Ready');
