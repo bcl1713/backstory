@@ -321,14 +321,20 @@ def preview_move(actor, source, destination):
             if MoveOperation.objects.filter(state='preview').count() >= 32:
                 raise StorageError('move_preview_capacity', 503)
             plan = _plan(source, destination)
+            operation = MoveOperation(actor=actor, source=source, destination=destination, plan=plan)
             with application_lock('revision-quota'), transaction.atomic():
+                # Reserve SQLite's writer before quota reads. The new UUID
+                # matches no row, but UPDATE still prevents a session/index
+                # commit from invalidating our snapshot before INSERT.
+                MoveOperation.objects.filter(pk=operation.pk).update(state=F('state'))
                 try:
                     _check_quota(len(json.dumps(plan).encode()))
                 except StorageError as error:
                     if error.reason_code == 'backup_quota_exceeded':
                         raise StorageError('move_journal_capacity', 503) from None
                     raise
-                return MoveOperation.objects.create(actor=actor, source=source, destination=destination, plan=plan)
+                operation.save(force_insert=True)
+                return operation
     except OSError as error:
         raise _os_error(error) from None
 
