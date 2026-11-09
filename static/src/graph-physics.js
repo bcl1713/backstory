@@ -16,35 +16,67 @@ function seed(path) {
   return { x: Math.cos(angle) * Math.sqrt(1 - z * z) * radius,
     y: Math.sin(angle) * Math.sqrt(1 - z * z) * radius, z: z * radius };
 }
-// A depth-bounded octree aggregates coincident leaves instead of comparing every
-// overlapping pair. Each target has a fixed visit budget; remaining cells are
-// evaluated at their center of mass when the budget is nearly exhausted.
-function* treeFor(all) {
-  let radius = 1;
-  let work = 0;
-  for (const n of all) {
-    radius = Math.max(radius, Math.abs(n.x), Math.abs(n.y), Math.abs(n.z));
-    if (++work % PHYSICS.chunkSize === 0) yield;
+// Lazy singleton leaves split only on collision. Cells, child indices and the
+// traversal stack survive steps; coincident buckets stop at the depth/radius cap.
+class Octree {
+  constructor() { this.cells = []; this.stack = new Int32Array(PHYSICS.visits); }
+  cell(x, y, z, radius) {
+    const index = this.used++;
+    const c = this.cells[index] ||= { children: new Int32Array(8) };
+    Object.assign(c, { x, y, z, radius, count: 0, sx: 0, sy: 0, sz: 0, point: -1, split: false, childCount: 0 });
+    c.children.fill(-1); return index;
   }
-  const root = { x: 0, y: 0, z: 0, radius: radius + 1, count: 0, sx: 0, sy: 0, sz: 0 };
-  for (const n of all) {
-    let cell = root;
-    for (let depth = 0; ; depth++) {
-      cell.count++; cell.sx += n.x; cell.sy += n.y; cell.sz += n.z;
-      if (depth === 16 || cell.radius < .1) break;
-      cell.children ||= Array(8);
-      const index = (n.x >= cell.x ? 1 : 0) | (n.y >= cell.y ? 2 : 0) | (n.z >= cell.z ? 4 : 0);
-      const r = cell.radius / 2;
-      cell = cell.children[index] ||= { x: cell.x + (index & 1 ? r : -r),
-        y: cell.y + (index & 2 ? r : -r), z: cell.z + (index & 4 ? r : -r),
-        radius: r, count: 0, sx: 0, sy: 0, sz: 0 };
+  octant(n, c) { return (n.x >= c.x ? 1 : 0) | (n.y >= c.y ? 2 : 0) | (n.z >= c.z ? 4 : 0); }
+  insert(all, point, index, depth) {
+    const n = all[point], c = this.cells[index];
+    c.count++; c.sx += n.x; c.sy += n.y; c.sz += n.z;
+    if (c.count === 1) { c.point = point; return; }
+    if (depth === 16 || c.radius < .1) return;
+    if (!c.split) { c.split = true; this.child(all, c.point, c, depth); c.point = -1; }
+    this.child(all, point, c, depth);
+  }
+  child(all, point, c, depth) {
+    const octant = this.octant(all[point], c), r = c.radius / 2;
+    let index = c.children[octant];
+    if (index < 0) {
+      index = c.children[octant] = this.cell(c.x + (octant & 1 ? r : -r),
+        c.y + (octant & 2 ? r : -r), c.z + (octant & 4 ? r : -r), r);
+      c.childCount++;
     }
-    if (++work % PHYSICS.chunkSize === 0) yield;
+    this.insert(all, point, index, depth + 1);
   }
-  return root;
+  *build(all) {
+    let radius = 1, work = 0; this.used = 0;
+    for (const n of all) {
+      radius = Math.max(radius, Math.abs(n.x), Math.abs(n.y), Math.abs(n.z));
+      if (++work % PHYSICS.chunkSize === 0) yield;
+    }
+    this.cell(0, 0, 0, radius + 1);
+    for (let i = 0; i < all.length; i++) {
+      this.insert(all, i, 0, 0);
+      if (++work % PHYSICS.chunkSize === 0) yield;
+    }
+    for (let i = 0; i < this.used; i++) {
+      const c = this.cells[i]; c.mx = c.sx / c.count; c.my = c.sy / c.count; c.mz = c.sz / c.count;
+      if (++work % PHYSICS.chunkSize === 0) yield;
+    }
+  }
+}
+function repel(sim, a, dx, dy, dz, squared, count, salt, b = null) {
+  if (squared < .0001) {
+    const offset = seed(a.path + '\0' + salt);
+    dx = offset.x; dy = offset.y; dz = offset.z; squared = dx * dx + dy * dy + dz * dz;
+  }
+  const distance = Math.sqrt(squared);
+  const scale = (Math.min(PHYSICS.forceCap * Math.sqrt(count), PHYSICS.repulsion * sim.forces.repulsion * count / (squared + PHYSICS.softening))
+    + Math.max(0, PHYSICS.collisionRadius * 2 - distance) * PHYSICS.collisionStrength) / distance;
+  const fx = dx * scale, fy = dy * scale, fz = dz * scale;
+  a.fx -= fx; a.fy -= fy; a.fz -= fz;
+  if (b) { b.fx += fx; b.fy += fy; b.fz += fz; }
+  sim.interactions++;
 }
 export class GraphPhysics {
-  constructor(nodes = [], edges = [], selected = null) { this.positionVersion = 0; this.version = 0; this.staged = new Float64Array(0); this.nodes = new Map(); this.forces = { ...DEFAULT_FORCES }; this.root = selected; this.selected = selected; this.setGraph(nodes, edges); }
+  constructor(nodes = [], edges = [], selected = null) { this.tree = new Octree(); this.positionVersion = 0; this.version = 0; this.staged = new Float64Array(0); this.nodes = new Map(); this.forces = { ...DEFAULT_FORCES }; this.root = selected; this.selected = selected; this.setGraph(nodes, edges); }
   setGraph(nodes, edges) {
     const previous = this.nodes;
     this.nodes = new Map(nodes.map(node => [node.path, previous.get(node.path) || {
@@ -63,6 +95,7 @@ export class GraphPhysics {
     this.all = [...this.nodes.values()];
     if (!this.all.length) { this.staged.fill(0); this.staged = new Float64Array(0); }
     else if (this.staged.length < this.all.length * 6) this.staged = new Float64Array(this.all.length * 6);
+    if (!this.all.length) this.tree = new Octree();
     this.positionVersion++; this.updateSprings(); this.reheat();
   }
   setSelection(selected) {
@@ -135,35 +168,32 @@ export class GraphPhysics {
       n.fx = -n.x * PHYSICS.center * this.forces.gravity; n.fy = -n.y * PHYSICS.center * this.forces.gravity; n.fz = -n.z * PHYSICS.center * this.forces.gravity;
       if (++work % PHYSICS.chunkSize === 0) { yield; if (version !== this.version) return; }
     }
-    const repel = (a, x, y, z, count, salt) => {
-      let dx = x - a.x, dy = y - a.y, dz = z - a.z, distance = Math.hypot(dx, dy, dz);
-      if (distance < .01) { const offset = seed(a.path + '\0' + salt); dx = offset.x; dy = offset.y; dz = offset.z; distance = Math.hypot(dx, dy, dz); }
-      const force = Math.min(PHYSICS.forceCap * Math.sqrt(count), PHYSICS.repulsion * this.forces.repulsion * count / (distance * distance + PHYSICS.softening)) + Math.max(0, PHYSICS.collisionRadius * 2 - distance) * PHYSICS.collisionStrength;
-      a.fx -= dx / distance * force; a.fy -= dy / distance * force; a.fz -= dz / distance * force;
-      this.interactions++;
-    };
-    if (all.length <= 256) {
+    if (all.length <= 64) {
       for (let i = 0; i < all.length; i++) for (let j = i + 1; j < all.length; j++) {
-        const a = all[i], b = all[j], fx = a.fx, fy = a.fy, fz = a.fz;
-        repel(a, b.x, b.y, b.z, 1, b.path);
-        b.fx -= a.fx - fx; b.fy -= a.fy - fy; b.fz -= a.fz - fz;
+        const a = all[i], b = all[j], dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+        repel(this, a, dx, dy, dz, dx * dx + dy * dy + dz * dz, 1, b.path, b);
         if (++work % PHYSICS.chunkSize === 0) { yield; if (version !== this.version) return; }
       }
     } else {
-      const tree = treeFor(all); let next;
-      while (!(next = tree.next()).done) { yield; if (version !== this.version) return; }
-      const root = next.value;
+      const tree = this.tree, build = tree.build(all);
+      while (!build.next().done) { yield; if (version !== this.version) return; }
       for (const a of all) {
-        const stack = [root]; let visits = 0;
-        while (stack.length) {
-          const c = stack.pop(); visits++;
-          const contains = Math.abs(a.x - c.x) <= c.radius && Math.abs(a.y - c.y) <= c.radius && Math.abs(a.z - c.z) <= c.radius;
-          const count = c.count - (contains ? 1 : 0);
+        const stack = tree.stack; let length = 1, visits = 0; stack[0] = 1;
+        while (length) {
+          // Positive indices own the target; only its actual insertion octant
+          // inherits ownership. Adjacent split-boundary cells never subtract it.
+          const entry = stack[--length], owns = entry > 0, c = tree.cells[Math.abs(entry) - 1]; visits++;
+          const count = c.count - (owns ? 1 : 0);
           if (count <= 0) continue;
-          const x = (c.sx - (contains ? a.x : 0)) / count, y = (c.sy - (contains ? a.y : 0)) / count, z = (c.sz - (contains ? a.z : 0)) / count;
-          if (c.children && visits + stack.length + 8 < PHYSICS.visits && (contains || c.radius * 2 / Math.max(1, Math.hypot(x - a.x, y - a.y, z - a.z)) > .9)) {
-            for (const child of c.children) if (child) stack.push(child);
-          } else repel(a, x, y, z, count, 'cell');
+          const x = owns ? (c.sx - a.x) / count : c.mx;
+          const y = owns ? (c.sy - a.y) / count : c.my;
+          const z = owns ? (c.sz - a.z) / count : c.mz;
+          const dx = x - a.x, dy = y - a.y, dz = z - a.z, squared = dx * dx + dy * dy + dz * dz;
+          if (c.split && visits + length + c.childCount <= PHYSICS.visits
+              && (owns || c.radius * c.radius * 4 > .81 * Math.max(1, squared))) {
+            const octant = owns ? tree.octant(a, c) : -1;
+            for (let i = 0; i < 8; i++) if (c.children[i] >= 0) stack[length++] = (c.children[i] + 1) * (i === octant ? 1 : -1);
+          } else repel(this, a, dx, dy, dz, squared, count, 'cell');
         }
         if (++work % PHYSICS.chunkSize === 0) { yield; if (version !== this.version) return; }
       }
@@ -232,5 +262,5 @@ export class GraphPhysics {
     for (const n of this.all) n.vx = n.vy = n.vz = 0;
     this.positionVersion++;
   }
-  destroy() { this.pause(); this.releaseAll(); this.staged.fill(0); this.staged = new Float64Array(0); this.positionVersion++; this.nodes.clear(); this.outgoing.clear(); this.depths.clear(); this.all = []; this.springs = []; }
+  destroy() { this.pause(); this.releaseAll(); this.staged.fill(0); this.staged = new Float64Array(0); this.positionVersion++; this.tree = new Octree(); this.nodes.clear(); this.outgoing.clear(); this.depths.clear(); this.all = []; this.springs = []; }
 }

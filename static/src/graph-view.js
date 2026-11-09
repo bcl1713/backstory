@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GraphPhysics } from './graph-physics.js';
+import { WorkerGraphPhysics } from './graph-physics-client.js';
 import { GraphCamera } from './graph-camera.js';
 import { layoutLabels } from './graph-labels.js';
 import { GraphHints, hintAssignments, outboundDestinations } from './graph-hints.js';
@@ -44,11 +44,12 @@ export function createGraphBatches(nodes, edges) {
 export class GraphView {
   constructor(container, actions = {}) {
     this.container = container; this.actions = actions; this.life = new AbortController();
-    this.simulation = new GraphPhysics(); this.camera = new GraphCamera(); this.quality = new AdaptiveQuality();
+    this.simulation = new WorkerGraphPhysics(); this.camera = new GraphCamera(); this.quality = new AdaptiveQuality();
     this.data = { nodes: [], edges: [] }; this.selected = this.focused = null;
     this.frame = null; this.destroyed = false; this.intensity = BLOOM_DEFAULT; this.pointers = new Map(); this.projected = new Map();
     this.reduced = matchMedia('(prefers-reduced-motion: reduce)'); this.forced = matchMedia('(forced-colors: active)');
     this.paused = this.reduced.matches;
+    if (this.paused) this.simulation.suspend();
     this.canvas = document.createElement('canvas'); this.canvas.setAttribute('aria-hidden', 'true');
     this.labels = document.createElement('canvas'); this.labels.setAttribute('aria-hidden', 'true'); this.labelContext = this.labels.getContext('2d');
     this.swatch = document.createElement('canvas'); this.swatch.width = this.swatch.height = 1; this.swatchContext = this.swatch.getContext('2d', { willReadFrequently: true });
@@ -68,7 +69,7 @@ export class GraphView {
       this.renderer.outputColorSpace = THREE.SRGBColorSpace;
       this.container.dataset.renderer = 'webgl';
     } catch {
-      this.unavailable = true; this.container.dataset.renderer = 'unavailable';
+      this.unavailable = true; this.simulation.suspend(); this.container.dataset.renderer = 'unavailable';
       queueMicrotask(() => { if (!this.destroyed) this.actions.onUnavailable?.('WebGL is unavailable. Your loaded notes remain available in the list.'); });
     }
     this.resize = new ResizeObserver(() => { if (!this.syncSize()) return; if (!this.sized && this.loaded && !this.cameraControlled && this.camera.width > 0) this.camera.fit(this.simulation.nodes, true); this.sized = true; this.draw(); });
@@ -86,10 +87,12 @@ export class GraphView {
     listen(document, 'visibilitychange', () => { if (document.hidden) { this.release(null, true); this.stop(); } else this.wake(); });
     listen(this.reduced, 'change', () => { this.paused = this.reduced.matches; if (this.paused) { this.simulation.pause(); this.camera.snap(); this.stop(); } else this.simulation.reheat(); this.actions.onPause?.(this.paused); this.draw(); this.wake(); });
     listen(this.forced, 'change', () => { this.updateTheme(); this.draw(); });
+    if (document.fonts) listen(document.fonts, 'loadingdone', () => { this.labelMetrics?.clear(); this.draw(); });
   }
   get available() { return !this.unavailable; }
   updateTheme() {
     const style = getComputedStyle(this.container), ctx = this.swatchContext;
+    this.labelMetrics?.clear();
     this.fontFamily = style.fontFamily || 'sans-serif';
     const read = (token, fallback) => {
       const value = style.getPropertyValue(token).trim() || fallback;
@@ -122,7 +125,7 @@ export class GraphView {
     const changed = topology !== this.topology;
     if (!data.nodes.length) this.cancelHints();
     this.data = data; this.current = current; this.root = root;
-    if (!changed) { this.simulation.setRoot(root); if (this.paused) this.simulation.pause(); this.themeDirty = true; this.draw(); return; }
+    if (!changed) { this.refreshShortcuts(); this.simulation.setRoot(root); if (this.paused) this.simulation.pause(); this.themeDirty = true; this.draw(); return; }
     this.topology = topology; this.release(null, true);
     // Drop derived identities immediately, including when a hidden map cannot draw.
     this.projected?.clear(); this.pickGrid?.clear();
@@ -181,6 +184,10 @@ export class GraphView {
     this.shortcutKey=key;
     this.shortcutAssignments=hintAssignments({...this.data,selected:this.selected,visibleOnly:false});
     this.shortcutCodes=new Map(this.shortcutAssignments.map(h=>[h.path,h.code]));
+    const destinations = outboundDestinations(this.data.edges, this.selected);
+    this.labelCandidates = this.data.nodes.filter(n => n.path === this.selected || destinations.has(n.path)).map(node =>
+      destinations.has(node.path) && this.shortcutCodes.has(node.path) ? {...node, title:`f ${this.shortcutCodes.get(node.path)} · ${node.title}`} : node);
+    this.labelMetrics = new Map();
   }
   beginHints() {
     if (this.unavailable || this.container.hidden) return;
@@ -330,13 +337,13 @@ export class GraphView {
     for (const o of [batch.halos, batch.edges, batch.arrows, batch.edgeHalos]) o.geometry.attributes.color.needsUpdate = true;
     this.themeDirty = false;
   }
-  draw({ positionsChanged = true } = {}) {
+  draw({ positionsChanged = false } = {}) {
     if (this.destroyed || this.unavailable || !this.renderer || !this.batch || document.hidden || this.container.hidden) return;
     const batch = this.batch, camera = this.camera, basis = camera.basis(), eye = camera.eye(basis);
     const fields = ['x', 'y', 'z', 'yaw', 'pitch', 'distance', 'width', 'height'];
     const previousCamera = this.drawnCamera;
     const cameraChanged = !previousCamera || fields.some(key => previousCamera[key] !== camera[key]);
-    const worldChanged = positionsChanged || this.drawnBatch !== batch || this.drawnSelection !== this.selected;
+    const worldChanged = positionsChanged || this.drawnPositionVersion !== this.simulation.positionVersion || this.drawnBatch !== batch || this.drawnSelection !== this.selected;
     const geometryChanged = worldChanged || cameraChanged;
     this.renderCamera.aspect = camera.width / camera.height; this.renderCamera.position.set(eye.x, eye.y, eye.z); this.renderCamera.lookAt(camera.x, camera.y, camera.z); this.renderCamera.updateProjectionMatrix(); this.renderCamera.updateMatrixWorld();
     const bloom = this.quality.bloom(this.intensity, this.forced.matches);
@@ -391,7 +398,7 @@ export class GraphView {
       batch.halos.geometry.attributes.position.needsUpdate = true;
     }
     this.drawnCamera ||= {}; for (const key of fields) this.drawnCamera[key] = camera[key];
-    this.drawnBatch = batch; this.drawnSelection = this.selected; this.drawnBloom = bloom;
+    this.drawnPositionVersion = this.simulation.positionVersion; this.drawnBatch = batch; this.drawnSelection = this.selected; this.drawnBloom = bloom;
     this.renderer.render(this.scene, this.renderCamera); this.drawLabels(); this.drawHints();
     Object.assign(this.container.dataset, { motion: this.paused ? 'paused' : this.simulation.active ? 'moving' : 'settled', lowWork: String(this.quality.level > 0), quality: String(this.quality.level), cameraYaw: String(camera.yaw), cameraPitch: String(camera.pitch), bloomEffective: String(bloom) });
   }
@@ -400,11 +407,14 @@ export class GraphView {
     const camera = this.camera; ctx.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0); ctx.clearRect(0, 0, camera.width, camera.height);
     ctx.font = `12px ${this.fontFamily}`; ctx.lineJoin = 'round'; ctx.lineWidth = 4;
     const destinations = this.destinations || outboundDestinations(this.data.edges || [],this.selected);
-    const titled = this.data.nodes.map(node => destinations.has(node.path) && this.shortcutCodes?.has(node.path) ?
-      {...node,title:`f ${this.shortcutCodes.get(node.path)} · ${node.title}`} : node);
-    const labels = layoutLabels({ nodes: titled, projected: this.projected,
-      width: camera.width, height: camera.height, selected: this.selected, focused: this.focused, current: this.current, edges: this.data.edges,
-      measure: (text,secondary) => { ctx.font = `${secondary ? 11 : 12}px ${this.fontFamily}`; return ctx.measureText(text).width; }, maximum: this.hints?.active ? 0 : this.quality.labels, previous: this.labelSlots });
+    const labels = layoutLabels({ nodes: this.labelCandidates || this.data.nodes, projected: this.projected,
+      width: camera.width, height: camera.height, selected: this.selected, focused: this.focused, current: this.current, edges: this.data.edges, neighbors: destinations,
+      measure: (text,secondary) => {
+        this.labelMetrics ||= new Map();
+        const key = `${secondary}:${text}`;
+        if (!this.labelMetrics.has(key)) { ctx.font = `${secondary ? 11 : 12}px ${this.fontFamily}`; this.labelMetrics.set(key, ctx.measureText(text).width); }
+        return this.labelMetrics.get(key);
+      }, maximum: this.hints?.active ? 0 : this.quality.labels, previous: this.labelSlots });
     this.labelSlots = new Map(labels.map(label => [label.path, label.slot]));
     this.labelPlacements = labels;
     // Short local leaders keep each backed identity tied to its node.
@@ -450,7 +460,7 @@ export class GraphView {
   snapshot() { return { renderer: this.container.dataset.renderer, nodes: this.data.nodes.length, edges: this.data.edges.length, selected: this.selected, focused: this.focused, camera: { x: this.camera.x, y: this.camera.y, z: this.camera.z, yaw: this.camera.yaw, pitch: this.camera.pitch, distance: this.camera.distance }, projected: [...this.projected].map(([path, p]) => ({ path, ...p })) }; }
   wake() {
     if (this.destroyed || this.unavailable || document.hidden || this.container.hidden || this.frame !== null || this.paused) return;
-    this.lastTime = performance.now(); this.frame = requestAnimationFrame(time => this.tick(time));
+    this.simulation.resume?.(); this.lastTime = performance.now(); this.frame = requestAnimationFrame(time => this.tick(time));
   }
   tick(time) {
     this.frame = null; if (this.destroyed || this.unavailable || document.hidden || this.container.hidden || this.paused) return;
@@ -460,15 +470,16 @@ export class GraphView {
     // Keep camera input independent, and redraw only a coherent changed scene.
     const version = this.simulation.positionVersion;
     this.simulation.advance(elapsed);
-    const positionsChanged = this.simulation.positionVersion !== version;
+    const positionsChanged = this.simulation.positionVersion !== version || this.drawnPositionVersion != null && this.drawnPositionVersion !== this.simulation.positionVersion;
     const moving = this.camera.tick(elapsed);
     if (positionsChanged || moving || this.themeDirty) this.draw({ positionsChanged });
     if (this.simulation.active || moving) this.frame = requestAnimationFrame(next => this.tick(next));
     else if (this.simulation.limitReached) this.actions.onLimit?.();
   }
-  stop() { if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.simulation.cancelPending?.(); }
+  stop() { if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.simulation.suspend?.(); this.simulation.cancelPending?.(); }
   destroy() {
     this.cancelHints(); this.release(null, true); this.destroyed = true; this.stop(); this.life.abort(); this.resize.disconnect(); this.themeObserver.disconnect();
+    this.labelCandidates = []; this.labelMetrics?.clear();
     this.batch?.dispose(); this.renderer?.dispose(); this.simulation.destroy(); this.projected.clear(); this.pickGrid?.clear(); this.pickBuckets = []; this.edgeGeometry = null; this.drawnCamera = this.drawnBatch = null;
     if (this.container.graphView === this) delete this.container.graphView; this.container.replaceChildren();
   }

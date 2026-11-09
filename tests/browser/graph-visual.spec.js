@@ -148,7 +148,7 @@ test('orbit changes parallax, node dragging tugs neighbors and cancellation rele
   const snapshot = () => map.evaluate(el => el.graphView.snapshot());
   // Screen-space navigation needs a target to the right regardless of the
   // viewport's fit distance and stable seed orientation.
-  await map.evaluate(el=>{const v=el.graphView;v.simulation.all.forEach((n,i)=>Object.assign(n,v.camera.world({x:v.camera.width*(.35+i*.2),y:v.camera.height*.5})));v.draw();});
+  await map.evaluate(el=>{const v=el.graphView;v.simulation.all.forEach((n,i)=>Object.assign(n,v.camera.world({x:v.camera.width*(.35+i*.2),y:v.camera.height*.5})));v.draw({positionsChanged:true});});
   const before = await snapshot();
   await map.focus(); await page.keyboard.press('ArrowRight');
   await expect(map).toHaveAttribute('data-selected', /Synthetic/);
