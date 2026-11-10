@@ -68,7 +68,8 @@ def get_recovery(actor, path, base_revision, source, token):
 
 
 def _prune(timestamp):
-    from .models import RecoveryDraft
+    from .models import RecoveryDraft, MovePreviewJob
+    MovePreviewJob.objects.filter(state__in=['failed', 'cancelled'], settled_at__lte=timestamp - timedelta(hours=1)).delete()
     cutoff = timestamp - timedelta(days=getattr(settings, 'BACKSTORY_REVISION_RETENTION_DAYS', 30))
     SavedRevision.objects.filter(created_at__lt=cutoff).delete()
     RecoveryDraft.objects.filter(created_at__lt=cutoff).delete()
@@ -85,8 +86,8 @@ def _record_charge(path, base_revision, *payloads):
         + len((base_revision or '').encode('utf-8')) + sum(len(value) for value in payloads))
 
 
-def _check_quota(extra):
-    from .models import RecoveryDraft, RemovalOperation, MoveOperation
+def _check_quota(extra, *, exclude_move_preview=None):
+    from .models import RecoveryDraft, RemovalOperation, MoveOperation, MovePreviewJob
     from django.db.models import BigIntegerField, BinaryField, Sum, Value
     from django.db.models.functions import Cast, Coalesce, Length
     # SQLite length(TEXT) counts code points, so cast text/JSON to BLOB first.
@@ -101,6 +102,12 @@ def _check_quota(extra):
         + Length(Cast('kind', BinaryField())) + Value(1024))
     total += RemovalOperation.objects.aggregate(total=Sum(removal_charge, output_field=BigIntegerField()))['total'] or 0
     total += MoveOperation.objects.aggregate(total=Sum(Length(Cast('plan', BinaryField())), output_field=BigIntegerField()))['total'] or 0
+    preview_charge = (Value(_RECORD_OVERHEAD + 128) + Length(Cast('source', BinaryField()))
+        + Length(Cast('destination', BinaryField())) + Length(Cast('context', BinaryField())))
+    previews = MovePreviewJob.objects.all()
+    if exclude_move_preview is not None:
+        previews = previews.exclude(pk=exclude_move_preview)
+    total += previews.aggregate(total=Sum(preview_charge, output_field=BigIntegerField()))['total'] or 0
     if total + extra > settings.BACKSTORY_REVISION_QUOTA_BYTES:
         raise StorageError('backup_quota_exceeded', 503)
 

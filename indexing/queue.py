@@ -62,6 +62,9 @@ def request_scan(kind):
     if kind not in {'incremental', 'verify', 'rebuild'}:
         raise ValueError('invalid_scan_kind')
     with transaction.atomic():
+        # Reserve the writer before reading priority, including bootstrap.
+        # A concurrent session commit must not invalidate this snapshot.
+        ScanState.objects.filter(pk=1).update(requested=F('requested'))
         state, _ = ScanState.objects.get_or_create(pk=1)
         order = {'': 0, 'incremental': 1, 'verify': 2, 'rebuild': 3}
         if order[kind] > order[state.requested]:

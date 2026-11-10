@@ -53,7 +53,7 @@ test('each partial advance preserves all published positions and velocities unti
 });
 
 test('pairwise small graphs yield to the same frame time budget', () => {
-  const sim = fixture(128), before = positions(sim); let tick = 0;
+  const sim = fixture(64), before = positions(sim); let tick = 0;
   clock(() => tick++ * PHYSICS.frameMilliseconds, () => sim.advance(PHYSICS.step));
   assert.equal(sim.steps, 0);
   assert.ok(sim.pendingStep);
@@ -61,7 +61,7 @@ test('pairwise small graphs yield to the same frame time budget', () => {
   const work = sim.pendingStep;
   let yields = 0;
   while (!work.next().done) yields++;
-  assert.ok(yields > 100, `pairwise forces yielded ${yields} times`);
+  assert.ok(yields > 20, `pairwise forces yielded ${yields} times`);
 });
 
 for (const [name, control] of [

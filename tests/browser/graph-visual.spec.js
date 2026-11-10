@@ -148,11 +148,12 @@ test('orbit changes parallax, node dragging tugs neighbors and cancellation rele
   const snapshot = () => map.evaluate(el => el.graphView.snapshot());
   // Screen-space navigation needs a target to the right regardless of the
   // viewport's fit distance and stable seed orientation.
-  await map.evaluate(el=>{const v=el.graphView;v.simulation.all.forEach((n,i)=>Object.assign(n,v.camera.world({x:v.camera.width*(.35+i*.2),y:v.camera.height*.5})));v.draw();});
+  await map.evaluate(el=>{const v=el.graphView;v.simulation.all.forEach((n,i)=>Object.assign(n,v.camera.world({x:v.camera.width*(.35+i*.2),y:v.camera.height*.5})));v.draw({positionsChanged:true});});
   const before = await snapshot();
   await map.focus(); await page.keyboard.press('ArrowRight');
   await expect(map).toHaveAttribute('data-selected', /Synthetic/);
-  expect((await snapshot()).camera).toEqual(before.camera);
+  for(const key of ['yaw','pitch','roll','distance'])expect((await snapshot()).camera[key]).toBe(before.camera[key]);
+  expect(await map.evaluate(el=>{const v=el.graphView,p=v.projected.get(v.selected);return Math.hypot(p.x-v.camera.width/2,p.y-v.camera.height/2);})).toBeLessThan(.01);
   const selectedBefore = await map.getAttribute('data-selected'), positionedBefore = await snapshot();
   await graphControl(panel, 'Refresh');
   await expect(map).toHaveAttribute('data-node-count', '3');

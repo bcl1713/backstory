@@ -73,7 +73,7 @@ without duplicating tests. No additional findings. The restoration issue was
 subsequently fixed and regression tested. Real-device smoothness, GPU memory
 profiling/context recovery and the exact-merge release gate were not verified.
 
-## Final build inputs (SHA-256)
+## Initial focused build inputs (SHA-256)
 
 ```text
 76567949eafb65fa7b3e5d1747206af681a3963efeed8d5aef58ede69ff524f5  static/src/graph-camera.js
@@ -82,3 +82,26 @@ e1ec9cba26c698916ca266c3a2f26f1d4b3746c9d582c35b242f9afa5ae08d83  static/src/gra
 c872d835e761bdedb6b54f7dd3f0da83ff4b81185d57be959f4cd0137b37f616  static/graph-controller.js
 78cd6804a093266efe8790fd73cb40880ed6b1026a69cd53a8f2c96d11a13e10  package-lock.json
 ```
+
+## Integration for the requested dev publication
+
+Integrated current dev `329e4b0abf43990c3ae5a926fb85039584a897eb`, which adds
+the physics worker and cached rendering. Kept its worker suspension/resumption,
+fallback status, label cache and published-position invalidation. Resolved only
+overlapping constructor, topology and tick changes; rebuilt the generated graph
+bundle. Existing queue/controller gate code is byte-identical to this source.
+
+The three affected formatter files (continuity, frame work, renderer) passed on
+the integrated tree. New quiet-refresh, idle-interaction and reduced-motion
+Chromium scenarios passed with the actual worker (12.9-second four-case run;
+three passed and the existing drag scenario exposed an obsolete no-recenter
+assertion). Updated that assertion to verify selected centering while retaining
+zoom/orientation; the corrected drag scenario then passed separately (4.5 seconds),
+including real spring tug, pointer cancellation and phone touch cancellation.
+Logs/artifacts: `/tmp/graph-continuity-worker-browser.log` and
+`/tmp/backstory-graph-continuity-worker/reports/browser-artifacts/`.
+The affected-only rerun is retained in `/tmp/graph-continuity-worker-drag.log`.
+
+The requested merge/publication must use a fresh exact proposed-merge candidate
+and full release receipt; initial focused evidence is not transferred as that
+receipt. Publication will consume the landed candidate receipt without retesting.

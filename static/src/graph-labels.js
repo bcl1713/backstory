@@ -4,9 +4,8 @@ export const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.
 const PAD = 4, HEIGHT = 20, CELL = 48;
 
 export function layoutLabels({ nodes, projected, width, height, selected, focused, current,
-  measure, maximum = 48, previous = new Map(), edges = [], hintMode = false }) {
+  measure, maximum = 48, previous = new Map(), edges = [], neighbors = outboundDestinations(edges,selected), hintMode = false }) {
   if (width < 40 || height < 28 || maximum <= 0) return [];
-  const neighbors = outboundDestinations(edges,selected);
   const priority = path => path === selected ? 5 : path === focused ? 4 : neighbors.has(path) ? 3 : path === current ? 2 : hintMode ? 1 : 0;
   const onScreen = p => p?.visible && p.x >= 0 && p.x <= width && p.y >= 0 && p.y <= height;
   // Spatial lookup includes *all* displayed marks, even nodes without a label.

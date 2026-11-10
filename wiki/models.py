@@ -69,3 +69,17 @@ class RemovalOperation(models.Model):
     reason_code = models.CharField(max_length=64, default='')
     index_state = models.CharField(max_length=16, default='not_started')
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class MovePreviewJob(models.Model):
+    """Short-lived metadata; a full reviewed plan is always a MoveOperation."""
+    import uuid
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    source = models.CharField(max_length=4096)
+    destination = models.CharField(max_length=4096)
+    context = models.JSONField()
+    state = models.CharField(max_length=32, default='queued', db_index=True)
+    reason_code = models.CharField(max_length=64, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    settled_at = models.DateTimeField(null=True)

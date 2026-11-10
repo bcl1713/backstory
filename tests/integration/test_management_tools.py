@@ -24,8 +24,14 @@ def invoke(name, payload=None, *, method='post', user=None, content_type='applic
     return getattr(importlib.import_module('wiki.management_tools'), name)(request)
 
 
-def preview():
-    return invoke('preview_move_tool', {'source': 'From.md', 'destination': 'To.md'})
+def preview(source='From.md', destination='To.md'):
+    """Explicitly finish fixture preparation where a test needs a full review."""
+    from wiki.move_previews import run_pending_move_preview
+    queued = invoke('preview_move_tool', {'source': source, 'destination': destination})
+    assert queued.status_code == 202
+    operation_id = json.loads(queued.content)['operation_id']
+    assert run_pending_move_preview()
+    return invoke('get_move', {'operation_id': operation_id}, method='get')
 
 
 def commit(review, **extra):
@@ -41,7 +47,14 @@ def revision(path='From.md', original=b'old\n'):
 def test_preview_requires_review_before_domain_move_and_hides_private_inventory(reader, wiki):
     (wiki / 'From.md').write_bytes(b'\xef\xbb\xbf# From\r\n')
     (wiki / 'Home.md').write_text('[[From]]\n')
-    response = preview()
+    queued = invoke('preview_move_tool', {'source': 'From.md', 'destination': 'To.md'})
+    assert queued.status_code == 202
+    pending = json.loads(queued.content)
+    assert pending['state'] == 'preparing' and pending['next_action'] == 'get_move'
+    assert 'review_token' not in pending and 'inventory' not in pending
+    from wiki.move_previews import run_pending_move_preview
+    assert run_pending_move_preview()
+    response = invoke('get_move', {'operation_id': pending['operation_id']}, method='get')
     assert response.status_code == 200
     data = json.loads(response.content)
     assert data['state'] == 'preview' and data['kind'] == 'note'
@@ -59,6 +72,64 @@ def test_preview_requires_review_before_domain_move_and_hides_private_inventory(
     assert '[[To]]' in (wiki / 'Home.md').read_text()
     from wiki.models import SavedRevision
     assert SavedRevision.objects.filter(path='Home.md').count() == 1
+
+
+def test_status_handle_survives_worker_publication_during_lookup(reader, wiki, monkeypatch):
+    from wiki.models import MovePreviewJob
+    from wiki.move_previews import run_pending_move_preview
+    (wiki / 'From.md').write_text('original')
+    queued = json.loads(invoke('preview_move_tool', {'source': 'From.md', 'destination': 'To.md'}).content)
+    lookup = MovePreviewJob.objects.get
+    published = False
+    def publish_before_job_lookup(*args, **kwargs):
+        nonlocal published
+        if not published:
+            published = True
+            assert run_pending_move_preview()
+        return lookup(*args, **kwargs)
+    monkeypatch.setattr(MovePreviewJob.objects, 'get', publish_before_job_lookup)
+    response = invoke('get_move', {'operation_id': queued['operation_id']}, method='get')
+    data = json.loads(response.content)
+    assert response.status_code == 200 and data['state'] == 'preview'
+    assert data['operation_id'] == queued['operation_id'] and data['review_token']
+
+
+def test_post_enqueue_observation_failure_retains_inspectable_handle(reader, wiki, monkeypatch):
+    from wiki.contracts import StorageError
+    from wiki.models import MoveOperation, MovePreviewJob
+    module = importlib.import_module('wiki.management_tools')
+    (wiki / 'From.md').write_text('original')
+    monkeypatch.setattr(module.relocations, '_plan', lambda *args: pytest.fail('request must not plan'))
+    def observation_failed(*args):
+        raise StorageError('move_policy_changed', 409)
+    monkeypatch.setattr(module, '_move_data', observation_failed)
+    response = invoke('preview_move_tool', {'source': 'From.md', 'destination': 'To.md'})
+    data = json.loads(response.content)
+    assert response.status_code == 503
+    assert data == {'state': 'uncertain', 'operation_id': str(MovePreviewJob.objects.get().pk),
+                    'reason_code': 'move_preparation_readback_unconfirmed', 'authoritative': False,
+                    'inspect_before_retry': True, 'read_before_retry': True, 'untrusted_content': True}
+    assert not MoveOperation.objects.exists()
+    assert (wiki / 'From.md').read_text() == 'original' and not (wiki / 'To.md').exists()
+
+
+def test_cancel_losing_to_publication_uses_ready_plan_rollback(reader, wiki, monkeypatch):
+    from wiki import move_previews
+    from wiki.models import MoveOperation, MovePreviewJob
+    (wiki / 'From.md').write_text('original')
+    queued = json.loads(invoke('preview_move_tool', {'source': 'From.md', 'destination': 'To.md'}).content)
+    cancel = move_previews.cancel_move_preview
+    def publish_before_cancel(*args, **kwargs):
+        assert move_previews.run_pending_move_preview()
+        return cancel(*args, **kwargs)
+    monkeypatch.setattr(move_previews, 'cancel_move_preview', publish_before_cancel)
+    response = invoke('rollback_move_tool', {'operation_id': queued['operation_id']})
+    data = json.loads(response.content)
+    assert response.status_code == 200 and data['state'] == 'cancelled'
+    assert data['authoritative'] and data['source'] == 'original'
+    assert MoveOperation.objects.get(pk=queued['operation_id']).state == 'cancelled'
+    assert not MovePreviewJob.objects.exists()
+    assert (wiki / 'From.md').read_text() == 'original' and not (wiki / 'To.md').exists()
 
 
 @pytest.mark.parametrize('change', ['source', 'collision', 'witness', 'policy', 'expired', 'token'])
@@ -250,7 +321,7 @@ def test_move_domain_quota_and_index_failure_are_preserved(reader, wiki, setting
 
 def test_empty_folder_move_has_verified_folder_readback(reader, wiki):
     (wiki / 'Folder').mkdir()
-    previewed = invoke('preview_move_tool', {'source': 'Folder', 'destination': 'Archive.md'})
+    previewed = preview('Folder', 'Archive.md')
     data = json.loads(previewed.content)
     assert data['kind'] == 'folder'
     done = json.loads(commit(data).content)

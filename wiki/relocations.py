@@ -236,8 +236,8 @@ def _history_collision(mapping):
             raise StorageError('destination_history_collision', 409)
 
 
-def _plan(source, destination):
-    from .relocation_links import rewrite_links
+def _preflight(source, destination):
+    """Bounded path/identity checks shared by queueing and full planning."""
     validate_path(source, 'content')
     validate_path(destination, 'content')
     if _inside(destination, source) or _inside(source, destination):
@@ -257,6 +257,12 @@ def _plan(source, destination):
         raise StorageError('destination_exists', 409)
     with open_directory(destination.rpartition('/')[0]) as directory:
         destination_parent = [os.fstat(directory).st_dev, os.fstat(directory).st_ino]
+    return source_info, destination_parent
+
+
+def _plan(source, destination):
+    from .relocation_links import rewrite_links
+    source_info, destination_parent = _preflight(source, destination)
     witnesses, notes, inventory = _scan(source)
     if not inventory:
         raise StorageError('not_found', 404)
@@ -318,8 +324,8 @@ def preview_move(actor, source, destination):
             # Bound abandoned previews without deleting recovery journals.
             MoveOperation.objects.filter(state='preview', created_at__lt=timezone.now() - timedelta(hours=1)).delete()
             MoveOperation.objects.filter(state__in=['completed', 'cancelled'], created_at__lt=timezone.now() - timedelta(days=30)).delete()
-            if MoveOperation.objects.filter(state='preview').count() >= 32:
-                raise StorageError('move_preview_capacity', 503)
+            from .move_previews import _capacity
+            _capacity()
             plan = _plan(source, destination)
             operation = MoveOperation(actor=actor, source=source, destination=destination, plan=plan)
             with application_lock('revision-quota'), transaction.atomic():
@@ -327,6 +333,7 @@ def preview_move(actor, source, destination):
                 # matches no row, but UPDATE still prevents a session/index
                 # commit from invalidating our snapshot before INSERT.
                 MoveOperation.objects.filter(pk=operation.pk).update(state=F('state'))
+                _capacity()
                 try:
                     _check_quota(len(json.dumps(plan).encode()))
                 except StorageError as error:
