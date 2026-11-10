@@ -111,6 +111,17 @@ scenarios passed at 390px/320px (5.3 seconds), log
 The first candidate run was gracefully interrupted early for this test correction;
 it produced no usable receipt. A replacement candidate must run its own full gate.
 
+That candidate passed 1,802 Python, 462 formatter, nine Firefox code cases, and
+87 Firefox renderer/profile cases with the two existing Chromium-only skips.
+Its two dense graph cases failed because the added centering assertion used
+renderer-owned projections while Firefox was in the WebGL fallback list. The
+trace identified the absent projection record; the assertion now projects the
+selected physics node through the real camera, which also works in fallback.
+Both affected Firefox cases passed (8.1 seconds) via
+`playwright test --config=playwright.firefox.config.js tests/browser/graph-controls.spec.js --grep 'opening-root BFS'`.
+Log: `/tmp/graph-continuity-firefox.log`. Product code did not change. The failed
+candidate has no passing receipt; the final corrected commit requires a fresh gate.
+
 The requested merge/publication must use a fresh exact proposed-merge candidate
 and full release receipt; initial focused evidence is not transferred as that
 receipt. Publication will consume the landed candidate receipt without retesting.

@@ -292,7 +292,7 @@ for (const width of [1180, 390]) test(`opening-root BFS retains dense links and 
   const after = await map(page).evaluate(el => ({ camera: el.graphView.snapshot().camera, positions: el.graphView.simulation.all.map(n => [n.path,n.x,n.y,n.z]) }));
   expect(after.positions).toEqual(before.positions);
   for(const key of ['yaw','pitch','roll','distance'])expect(after.camera[key]).toBe(before.camera[key]);
-  expect(await map(page).evaluate(el=>{const v=el.graphView,p=v.projected.get(v.selected);return Math.hypot(p.x-v.camera.width/2,p.y-v.camera.height/2);})).toBeLessThan(.01);
+  expect(await map(page).evaluate(el=>{const v=el.graphView,p=v.camera.screen(v.simulation.nodes.get(v.selected));return Math.hypot(p.x-v.camera.width/2,p.y-v.camera.height/2);})).toBeLessThan(.01);
   expect(await map(page).evaluate(el => el.graphView.data.edges.length)).toBe(237);
   expect(await map(page).evaluate(el => el.graphView.paused)).toBe(true);
   await closeGraphLayer(panel(page)); await panel(page).locator('[data-graph-filter-options]').evaluate(el => { el.open = false; });
