@@ -102,6 +102,15 @@ Logs/artifacts: `/tmp/graph-continuity-worker-browser.log` and
 `/tmp/backstory-graph-continuity-worker/reports/browser-artifacts/`.
 The affected-only rerun is retained in `/tmp/graph-continuity-worker-drag.log`.
 
+Audited the remaining camera-equality assertions before landing. The direct
+mobile opening cases also encoded the old no-recenter rule; they now assert
+selected centering with preserved zoom/orientation. Both real-touch Chromium
+scenarios passed at 390px/320px (5.3 seconds), log
+`/tmp/graph-continuity-phone.log`, artifacts under
+`/tmp/backstory-graph-continuity-phone/reports/browser-artifacts/`.
+The first candidate run was gracefully interrupted early for this test correction;
+it produced no usable receipt. A replacement candidate must run its own full gate.
+
 The requested merge/publication must use a fresh exact proposed-merge candidate
 and full release receipt; initial focused evidence is not transferred as that
 receipt. Publication will consume the landed candidate receipt without retesting.

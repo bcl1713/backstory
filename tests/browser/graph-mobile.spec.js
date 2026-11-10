@@ -126,7 +126,9 @@ for (const width of [390,320]) test(`selected graph note opens directly by touch
   await expect(map).toHaveAttribute('data-selected','Other.md');
   await expect(map).toHaveAttribute('data-root','Slice.md');
   expect(await map.boundingBox()).toEqual(bounds);
-  expect(await map.evaluate(el=>el.graphView.snapshot().camera)).toEqual(camera);
+  const centered=await map.evaluate(el=>el.graphView.snapshot().camera);
+  for(const key of ['yaw','pitch','roll','distance'])expect(centered[key]).toBe(camera[key]);
+  expect(await map.evaluate(el=>{const v=el.graphView,p=v.projected.get(v.selected);return Math.hypot(p.x-v.camera.width/2,p.y-v.camera.height/2);})).toBeLessThan(.01);
   await expect(graph.locator('[data-graph-overlay]:visible')).toHaveCount(0);
   const open=graph.getByRole('link',{name:'Open selected note: Other',exact:true});
   await expect(open).toHaveText('Open note');await expect(open).toHaveAttribute('href','/notes/Other.md');
