@@ -57,7 +57,7 @@ test('camera-only drawing refreshes arrows and picking without uploading station
  const data={nodes:[{path:'a'},{path:'b'}],edges:[{source:'a',destination:'b'}]};
  const view=Object.assign(Object.create(GraphView.prototype),{
   data,simulation:new GraphPhysics(data.nodes,data.edges,'a'),camera:new GraphCamera(500,400),
-  scene:new THREE.Scene(),batch:createGraphBatches(data.nodes,data.edges),renderCamera:new THREE.PerspectiveCamera(),
+  scene:new THREE.Scene(),batch:createGraphBatches(data.nodes,data.edges),renderCamera:new THREE.PerspectiveCamera(45),
   selected:'a',focused:'a',forced:{matches:false},quality:{bloom(){return 0;}},pixelRatio:1,
   matrix:new THREE.Matrix4(),projected:new Map(),container:{dataset:{}},theme:{background:'#000000'},
   renderer:{setClearColor(){},render(){}},drawLabels(){},drawHints(){},
@@ -65,10 +65,15 @@ test('camera-only drawing refreshes arrows and picking without uploading station
  withFrames(()=>{
   view.draw();const nodes=view.batch.nodes.instanceMatrix.version,edges=view.batch.arrows.geometry.attributes.position.version;
   const before=view.projected.get('b').x;
-  view.camera.orbit(.3,.1,true);view.draw({positionsChanged:false});
+  view.camera.orbit(.3,2.1,true);view.camera.roll=view.camera.targetRoll=.4;view.draw({positionsChanged:false});
   assert.equal(view.batch.nodes.instanceMatrix.version,nodes);
   assert.ok(view.batch.arrows.geometry.attributes.position.version>edges);
   assert.notEqual(view.projected.get('b').x,before);
+  for(const n of view.simulation.all) {
+   const rendered=new THREE.Vector3(n.x,n.y,n.z).project(view.renderCamera),p=view.projected.get(n.path);
+   assert.ok(Math.abs((rendered.x+1)*250-p.x)<1e-8);
+   assert.ok(Math.abs((1-rendered.y)*200-p.y)<1e-8,'rolled/pole-crossing rendered camera agrees with picking');
+  }
   const arrows=view.batch.arrows.geometry.attributes.position.version;
   view.draw({positionsChanged:false});
   assert.equal(view.batch.arrows.geometry.attributes.position.version,arrows,'unchanged draw reuses geometry too');

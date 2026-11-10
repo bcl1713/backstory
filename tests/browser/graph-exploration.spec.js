@@ -33,7 +33,10 @@ for(const width of [1180,390]) test(`cumulative exploration, hints and perspecti
  if(width===390)await page.touchscreen.tap(bounds.x+target.x,bounds.y+target.y);else await page.mouse.click(bounds.x+target.x,bounds.y+target.y);
  await expect(summary).toContainText('6 notes · 7 directed links · Complete');
  const expanded=await map.evaluate(el=>{const v=el.graphView;return {root:v.root,selected:v.selected,focused:v.focused,camera:v.snapshot().camera,positions:v.simulation.all.map(n=>[n.path,n.x,n.y,n.z]),depth:v.simulation.depths.get('Explore E.md'),paused:v.paused};});
- expect(expanded.root).toBe('Explore A.md');expect(expanded.selected).toBe('Explore C.md');expect(expanded.focused).toBe('Explore C.md');expect(expanded.camera).toEqual(original.camera);expect(expanded.positions.slice(0,4)).toEqual(original.positions);expect(expanded.depth).toBe(4);expect(expanded.paused).toBe(true);
+ expect(expanded.root).toBe('Explore A.md');expect(expanded.selected).toBe('Explore C.md');expect(expanded.focused).toBe('Explore C.md');
+ for(const key of ['yaw','pitch','roll','distance'])expect(expanded.camera[key]).toBe(original.camera[key]);
+ expect(await map.evaluate(el=>{const v=el.graphView,p=v.projected.get(v.selected);return Math.hypot(p.x-v.camera.width/2,p.y-v.camera.height/2);})).toBeLessThan(.01);
+ expect(expanded.positions.slice(0,4)).toEqual(original.positions);expect(expanded.depth).toBe(4);expect(expanded.paused).toBe(true);
  await map.evaluate(el=>{el.graphView.actions.onSelect('Explore B.md',true);el.graphView.actions.onSelect('Explore X.md',true);});
  expect(graphRequests).toBe(selectionRequests);
  await expect(summary).toContainText('6 notes · 7 directed links · Complete');

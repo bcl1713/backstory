@@ -18,6 +18,8 @@ for(const width of [1180,390])test(`1050-node coherent motion, responsive input 
  await closeGraphLayer(panel); await panel.locator('[data-graph-filter-options]').evaluate(el=>el.open=false);await map.scrollIntoViewIfNeeded();
  const metrics=await map.evaluate(async el=>{
   const v=el.graphView;v.setPaused(true);v.camera.snap();
+  // Isolate solver-publication redraws from the separately tested idle camera.
+  const idleAfter=v.idleAfter;v.idleAfter=Infinity;
   const metrics={animationFrames:0,completedSteps:0,draws:0,partialSlices:0,partialPositionChanges:0,solverMs:0,maxSolverMs:0};
   const advance=v.simulation.advance,draw=v.draw;
   v.simulation.advance=function(dt){
@@ -30,7 +32,7 @@ for(const width of [1180,390])test(`1050-node coherent motion, responsive input 
   };
   v.draw=function(options){metrics.draws++;return draw.call(this,options);};v.setPaused(false);
   await new Promise(resolve=>{let count=0;const next=()=>++count>=120?resolve():requestAnimationFrame(next);requestAnimationFrame(next);});
-  v.simulation.advance=advance;v.draw=draw;v.setPaused(true);
+  v.simulation.advance=advance;v.draw=draw;v.setPaused(true);v.idleAfter=idleAfter;
   metrics.meanSolverMs=metrics.solverMs/Math.max(1,metrics.animationFrames);return metrics;
  });
  expect(metrics.completedSteps).toBeGreaterThan(0);expect(metrics.partialPositionChanges).toBe(0);
