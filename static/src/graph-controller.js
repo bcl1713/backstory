@@ -69,7 +69,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   let page = null, selected = currentPath || null, focused = currentPath || null;
   let listMode = preferredList, graphicsAvailable = true, trail = [], activeParams = null;
   let pendingPositions = null, suspendedSelection = null;
-  let view = null, loadingPaused = false, loadingError = false, loadingReason = '';
+  let view = null, loadingPaused = false, loadingError = false, loadingReason = '', quietRefresh = false;
   let storage; try { storage = window.localStorage; } catch { /* Preferences remain page-local. */ }
   let forces = loadForces(storage);
   const cancelAutomatic = () => { clearTimeout(refreshTimer); refreshTimer = null; };
@@ -77,7 +77,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   const filterKey = params => JSON.stringify(['folder', 'tag', 'query'].map(key => params?.[key] || ''));
   const scheduleRefresh = () => {
     cancelAutomatic();
-    if (!closed && !document.hidden) refreshTimer = setTimeout(() => { refreshTimer = null; void load(); }, 15000);
+    if (!closed && !document.hidden) refreshTimer = setTimeout(() => { refreshTimer = null; void load({quiet:true}); }, 15000);
   };
   if (indexDisclosure) listen(indexDisclosure, 'toggle', () => { if (indexDisclosure.open) void refreshIndexProgress(); else stopIndexProgress(); });
 
@@ -159,7 +159,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   }
   function controls() {
     const global = wholeWiki(), depth = Number(activeParams?.depth || input('depth').value), filters = ['query', 'folder', 'tag'].filter(name => (activeParams?.[name] || '').trim());
-    find('[data-graph-cancel]').hidden = loadingPaused || loadingError || !(request);
+    find('[data-graph-cancel]').hidden = loadingPaused || loadingError || quietRefresh || !(request);
     find('[data-graph-resume]').hidden = !loadingPaused || loadingError;
     find('[data-graph-restart]').hidden = !loadingError;
     find('[data-graph-depth-controls]').hidden = global;
@@ -172,7 +172,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     selectionStatus(snapshot.nodes.get(selected));
     find('[data-graph-scope]').textContent = `${global ? 'Whole wiki' : `Local · ${depth} hop${depth === 1 ? '' : 's'} · ${activeParams?.path || input('path').value}`}${filters.length ? ` · Filtered by ${filters.map(name => `${name}: ${activeParams[name]}`).join(', ')}` : ''}`;
     const state = loadingError ? 'Partial — loading stopped' : loadingPaused ? 'Loading paused · Partial' :
-      request ? 'Loading…' : snapshot.complete ? 'Complete' :
+      request && !quietRefresh ? 'Loading…' : snapshot.complete ? 'Complete' :
       page?.limiting_reasons?.includes('index_updating') || page?.freshness?.state === 'partial' ?
         'Loaded available results · Index updating' : 'Loaded available results · Incomplete evidence';
     find('[data-graph-summary]').textContent = !page ? '' :
@@ -283,7 +283,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     for (const disclosure of details.querySelectorAll('details')) disclosure.open = expanded.has(disclosure.dataset.graphDisclosure);
     if (focusedKey) [...details.querySelectorAll('[data-graph-detail-focus]')].find(el=>el.dataset.graphDetailFocus === focusedKey)?.focus({preventScroll:true});
   }
-  function renderExploration({ fit = false } = {}) {
+  function renderExploration({ fit = false, restorePresentation = false } = {}) {
     page = snapshot.explore(activeParams.path || null, activeParams.depth);
     if (!page) return;
     if (!page.nodes.some(node => node.path === selected)) selected = page.nodes.some(node => node.path === activeParams.path) ? activeParams.path : null;
@@ -291,13 +291,13 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     let mapFailure = false;
     try {
       view?.setGraph(page, currentPath, activeParams.path || null);
-      view?.setSelection(selected, focused);
+      view?.setSelection(selected, focused, {center:!restorePresentation});
     } catch { mapFailure = true; unavailable(); }
     if (fit && page.nodes.length && !mapFailure && !view?.cameraControlled) view?.fit();
     renderList(); showDetails(selected); presentation(); controls();
     if (layers.active === 'find') renderFind();
     find('[data-graph-diagnostics]').textContent = `Index ${page.freshness.state} · relation epoch ${page.relation_epoch} · observed ${page.observed_at}. ${page.limiting_reasons.join(', ')} Indexed saved content, not a disk snapshot. Hops refer to loaded edges; unsaved edits are excluded.`;
-    if (!view?.hints?.active) say(mapFailure ? 'Map resource limit reached. All loaded records remain available in the connection list.' : '');
+    if (!view?.hints?.active && (!quietRefresh || mapFailure)) say(mapFailure ? 'Map resource limit reached. All loaded records remain available in the connection list.' : '');
   }
   function select(path, takeFocus) {
     if (!page?.nodes.some(node => node.path === path)) return;
@@ -309,14 +309,16 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     if (!snapshot.data || filterKey(params) !== filterKey(activeParams)) { void load({fit,params}); return; }
     activeParams = params; renderExploration({fit});
   }
-  async function load({ fit = false, params = parameters() } = {}) {
+  async function load({ fit = false, params = parameters(), quiet = false } = {}) {
     if (closed || document.hidden) return;
     cancelAutomatic(); const ticket = ++sequence;
     request?.abort(); const controller = new AbortController(); request = controller;
     loadingPaused = false; loadingError = false; loadingReason = '';
     if (activeParams && filterKey(params) !== filterKey(activeParams)) clearEvidence();
     activeParams = params;
-    say(page ? 'Updating connections…' : 'Loading connections…'); controls();
+    quietRefresh = quiet && !!page;
+    if (!quietRefresh) say(page ? 'Updating connections…' : 'Loading connections…');
+    controls();
     try {
       const query = new URLSearchParams();
       for (const key of ['folder','tag','query']) if (params[key]?.trim()) query.set(key,params[key]);
@@ -324,6 +326,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
       if (closed || document.hidden || controller.signal.aborted || ticket !== sequence) return;
       const hadScope = snapshot.scope !== null;
       const sameScope = snapshot.accept(data);
+      const restorePresentation = sameScope && !!pendingPositions;
       const restoreNavigationFocus = sameScope && suspendedSelection?.navigationFocus;
       if (!sameScope && hadScope) {
         pendingPositions = suspendedSelection = null; selected = focused = null;
@@ -335,7 +338,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
       }
       pendingPositions = suspendedSelection = null;
       // Depth/root may have changed locally while the transport was in flight.
-      activeParams = parameters(); renderExploration({fit});
+      activeParams = parameters(); renderExploration({fit,restorePresentation});
       if (restoreNavigationFocus && !listMode) map.focus({preventScroll:true});
     } catch (error) {
       if (!closed && ticket === sequence && !controller.signal.aborted) {
@@ -347,7 +350,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
           'Unable to load connections. Restart loading to try again.');
       }
     } finally {
-      if (ticket === sequence) { request = null; controls(); scheduleRefresh(); }
+      if (ticket === sequence) { request = null; quietRefresh = false; controls(); scheduleRefresh(); }
     }
   }
   function center(path) {
@@ -398,6 +401,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   const pans = { left: [-80, 0], right: [80, 0], up: [0, -80], down: [0, 80] };
   for (const button of root.querySelectorAll('[data-graph-pan]')) listen(button, 'click', () => view?.pan(...pans[button.dataset.graphPan]));
   listen(find('[data-graph-pause]'), 'click', () => view?.setPaused(!view.paused));
+  for (const name of ['pointerdown','keydown','input']) listen(panel, name, () => view?.interact(), {capture:true});
   listen(find('[data-graph-bloom]'), 'input', event => {
     view?.setBloom(event.target.value);
     const label = ['Off', 'Default', 'High'][Number(event.target.value) / 2];

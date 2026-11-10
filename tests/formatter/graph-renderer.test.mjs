@@ -33,7 +33,7 @@ test('directed spring context stays quiet across root changes, appended shortcut
         }
       }
     });
-    assert.equal(view.batch.edges.geometry.attributes.position.count, data.edges.length * 2);
+    assert.equal(view.batch.edges.geometry.drawRange.count, data.edges.length * 2);
     assert.equal(view.simulation.active, false, 'settled/paused physics retains eligibility');
   };
   view.setGraph(data, 'a'); inspect(['a:b', 'a:c', 'b:d', 'c:d']);
@@ -50,7 +50,7 @@ test('directed spring context stays quiet across root changes, appended shortcut
   assert.deepEqual([...view.batch.edgeHalos.geometry.attributes.color.array.slice(4 * 6 * 4, 5 * 6 * 4)], quietHalo,
     'raising Default to High cannot brighten a non-spring halo');
   view.forced.matches = true; view.applyColors(0);
-  assert.ok([...view.batch.edges.geometry.attributes.color.array].filter((_, i) => i % 4 === 3).every(a => a === 1), 'forced colors keeps every directed link legible');
+  assert.ok([...view.batch.edges.geometry.attributes.color.array.slice(0,data.edges.length*8)].filter((_, i) => i % 4 === 3).every(a => a === 1), 'forced colors keeps every directed link legible');
   view.batch.dispose();
 });
 

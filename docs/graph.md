@@ -20,8 +20,9 @@ outer hop level, adds that node's configured outgoing neighborhood to the graph.
 Previously explored nodes and all eligible directed links stay loaded. Selection
 changes emphasis, while directed BFS hops and equal shortest-parent springs stay
 rooted at the opening note. New shorter paths update those depths and springs.
-Selection never refits, recenters or reseeds the view. Surviving positions,
-orientation, zoom, focus, pause and reduced motion remain intact.
+Selection eases the camera center onto the selected note without changing zoom,
+orientation or the opening root. The camera follows that note as layout moves.
+Surviving positions, focus, pause and reduced motion remain intact.
 
 The enhanced graph loads one compact snapshot of the entire authorized, eligible
 indexed graph, including isolated notes, into browser memory. Outgoing adjacency
@@ -39,7 +40,9 @@ exact-tag and literal path/title/name filters apply at the bulk endpoint before
 transfer; active filters are shown beside the local/whole-wiki scope.
 
 A visible graph revalidates its snapshot every **15 seconds**, on Refresh, and on
-return from a hidden tab. The existing index worker's filesystem notifications and
+return from a hidden tab. Periodic revalidation leaves the accepted map and status
+visible without a loading announcement; initial/manual loading and failures still
+show feedback. The existing index worker's filesystem notifications and
 polling recovery maintain external edits, creation, deletion, renames, aliases and
 resolution changes. The graph endpoint never reparses note bodies. Index-worker
 lag and incomplete resolution remain explicitly partial; a transported snapshot
@@ -48,7 +51,10 @@ external changes finish indexing within 15 seconds.
 
 Same-scope reconciliation recomputes all explored neighborhoods against the new
 snapshot, removes revoked/deleted evidence and preserves surviving positions,
-camera, selection, focus, pause and reduced motion. Authorization/storage/policy
+camera, selection, focus, pause and reduced motion. Scene batches and spare GPU
+buffer capacity are reused as nodes/links are added or removed; capacity grows
+only when necessary. Surviving node drags continue through updates.
+Authorization/storage/policy
 scope changes clear prior private data. Failed revalidation also clears it rather
 than showing potentially revoked evidence as last-known-good. Hidden tabs,
 page navigation and close clear snapshot contents and abort pending work; stale
@@ -88,6 +94,13 @@ instanced nodes, shared line/arrow buffers and batched soft halos. No CDN or
 external rendering service is used. Labels use a bounded canvas overlay; there
 is no permanent DOM or draw call per node/edge. Hint mode temporarily mounts named
 keyboard target buttons for visible nodes. All loaded nodes remain in the scene/list.
+
+The idle camera slowly rotates yaw, pitch and roll at different rates (all below
+one degree per second), centered on the selection. Interaction suspends ambient
+rotation for three seconds, then it ramps back in over two seconds. Hint mode
+suspends ambient rotation. Pan/point-anchored zoom temporarily control the center;
+selection tracking resumes when idle. Pause motion and reduced motion disable
+ambient rotation. Fit frames all nodes around the selected center.
 
 Drag the background to orbit around a stable focus; Shift-drag or two-finger drag
 pans. Pinch/the wheel zooms. Drag a node to stretch its real link springs and tug
