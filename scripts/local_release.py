@@ -2,7 +2,7 @@
 """Publish an already-tested commit locally. Never deploys or creates credentials.
 
 Needs preconfigured GitHub CLI and GHCR Docker authentication plus a local
-multi-platform buildx builder. Publication is explicit via --publish.
+AMD64 buildx builder. Publication is explicit via --publish.
 """
 import argparse
 import fcntl
@@ -68,8 +68,8 @@ def existing_image(version, tag, sha):
         data = json.loads(output)
         digest = validate_digest(data.get('manifest', {}).get('digest'))
         images = data.get('image', {})
-        if set(images) != {'linux/amd64', 'linux/arm64'}:
-            raise ValueError('Existing version image must contain both release platforms.')
+        if set(images) != {'linux/amd64'}:
+            raise ValueError('Existing version image must contain only the AMD64 release platform.')
         expected = {'org.opencontainers.image.source': 'https://github.com/' + REPOSITORY,
                     'org.opencontainers.image.revision': sha,
                     'org.opencontainers.image.version': version}
@@ -99,7 +99,7 @@ def write_assets(directory, version, tag, digest, sha, channel):
         for name in files))
     (directory / 'release-notes.md').write_text(
         f'Deploy Backstory with the attached Portainer or Compose assets.\n\n'
-        f'Image: `{IMAGE}:{version}` (linux/amd64 and linux/arm64)\n\n'
+        f'Image: `{IMAGE}:{version}` (linux/amd64)\n\n'
         f'Digest: `{IMAGE}@{digest}`\n\nTested source: `{sha}`\n\n'
         f'Release channel: `{channel}`. The full correctness suite ran locally. '
         'Publication does not redeploy a server.\n\n'
@@ -134,7 +134,7 @@ def publish(receipt_path, channel, assets):
     metadata = assets / 'build-metadata.json'
     # A tar from the validated commit excludes untracked files and concurrent edits.
     context = subprocess.check_output(['git', 'archive', '--format=tar', sha], cwd=ROOT)
-    build = ['docker', 'buildx', 'build', '--platform', 'linux/amd64,linux/arm64', '--push',
+    build = ['docker', 'buildx', 'build', '--platform', 'linux/amd64', '--push',
              '--metadata-file', str(metadata), '--build-arg', 'BACKSTORY_VERSION=' + version,
              '--build-arg', 'BACKSTORY_REVISION=' + sha,
              '--label', 'org.opencontainers.image.source=https://github.com/' + REPOSITORY,

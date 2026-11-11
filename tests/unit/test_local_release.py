@@ -101,7 +101,8 @@ def test_release_builds_immutable_source_and_keeps_dev_publication_scoped(releas
     assert builds[0][1]['input'] == b'IMMUTABLE GIT ARCHIVE'
     assert builds[0][0][-1] == '-'
     assert '--platform' in builds[0][0]
-    assert 'linux/amd64,linux/arm64' in builds[0][0]
+    assert builds[0][0][builds[0][0].index('--platform') + 1] == 'linux/amd64'
+    assert '(linux/amd64)' in (assets / 'release-notes.md').read_text()
     promote = next(args for args in commands if args[:4] == ['docker', 'buildx', 'imagetools', 'create'])
     assert promote[-3:] == ['--tag', 'ghcr.io/bcl1713/backstory:dev', 'ghcr.io/bcl1713/backstory@sha256:' + 'c' * 64]
     publish = commands[-1]
@@ -147,7 +148,7 @@ def registry_metadata(digest='c', revision='a' * 40):
                                 'org.opencontainers.image.source': 'https://github.com/bcl1713/backstory',
                                 'org.opencontainers.image.revision': revision,
                                 'org.opencontainers.image.version': '1.2.3-dev.1.gabc'}}}
-                  for platform in ('linux/amd64', 'linux/arm64')},
+        for platform in ('linux/amd64',)},
     })
 
 
@@ -172,7 +173,7 @@ def test_retry_after_github_failure_reuses_pushed_digest_without_rebuilding(rele
     assert 'sha256:' + 'c' * 64 in (recovered / 'release-notes.md').read_text()
 
 
-@pytest.mark.parametrize('problem', ['different-digests', 'wrong-source', 'missing-platform', 'partial-tags', 'registry-error'])
+@pytest.mark.parametrize('problem', ['different-digests', 'wrong-source', 'multiarch', 'partial-tags', 'registry-error'])
 def test_existing_image_conflicts_or_lookup_errors_block_all_publication(release_fixture, monkeypatch, problem):
     m, receipt, assets, commands, builds = release_fixture
     original = m.command
@@ -185,8 +186,8 @@ def test_existing_image_conflicts_or_lookup_errors_block_all_publication(release
             data = json.loads(registry_metadata(
                 digest='d' if problem == 'different-digests' and args[4].endswith(':v1.2.3-dev.1.gabc') else 'c',
                 revision='b' * 40 if problem == 'wrong-source' else 'a' * 40))
-            if problem == 'missing-platform':
-                del data['image']['linux/arm64']
+            if problem == 'multiarch':
+                data['image']['linux/arm64'] = json.loads(registry_metadata())['image']['linux/amd64']
             return json.dumps(data)
         return original(args, **kwargs)
     monkeypatch.setattr(m, 'command', command)

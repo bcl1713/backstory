@@ -67,7 +67,7 @@ release.
 
 ## Published artifacts
 
-Both channels publish linux/amd64 and linux/arm64 images built locally from an
+Both channels publish linux/amd64 images built locally from an
 immutable archive of the exact tested commit. Releases retain version/source OCI
 labels, the image digest, the Portainer manifest, a version-pinned environment
 example, deployment guide and checksums.
@@ -110,7 +110,8 @@ verify the source and relevant runtime inputs are unchanged, and retry with the
 same receipt and a fresh assets directory. The automatic publisher does this
 without rerunning tests. Published
 releases are not silently modified. Retries reuse matching existing version image
-digests after verifying source/version labels and both platforms. Incomplete or
+digests after verifying source/version labels and the AMD64 platform. Existing
+multi-platform immutable tags are rejected and never overwritten. Incomplete or
 conflicting version tags and registry lookup failures block publication; follow
 the runbook to investigate without overwriting an image. Never move/delete published version tags.
 No retry may re-enable or invoke GitHub-hosted workflows.

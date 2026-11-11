@@ -102,7 +102,7 @@ class Publisher:
                 self.save()
                 return 'superseded'
             # The source runner independently validates provenance, every gate,
-            # origin, current branch, image digest and both release platforms.
+            # origin, current branch, image digest and the AMD64 release platform.
             run_process([sys.executable, 'scripts/local_release.py', '--receipt', str(receipt_path),
                          '--channel', CHANNELS[branch], '--assets', str(job / 'release-assets'), '--publish'],
                         cwd=source, stdout=log, stderr=subprocess.STDOUT, timeout=7200)
