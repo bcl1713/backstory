@@ -185,7 +185,7 @@ for Compose and Docker integration checks.
 Existing `gh` authentication needs repository/release and `write:packages`
 access. Service startup passes that existing token through stdin to GHCR login
 in its private Docker configuration; it never prints or creates a token. Create
-a dedicated multiarch builder using those same selectors before enabling it:
+a dedicated AMD64 builder using those same selectors before enabling it:
 
 ```sh
 export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/docker.sock"
@@ -249,7 +249,7 @@ python3 scripts/local_release.py --receipt /path/to/receipt.json \
 Use `--channel stable` only for the tested current `main` commit. The script
 validates the exact-commit receipt and current runtime provenance, clean checkout, expected repository and
 current remote branch. It builds an immutable Git archive of that commit locally,
-publishes multi-platform version tags, then checks branch freshness again before
+publishes AMD64-only version tags, then checks branch freshness again before
 moving channel aliases. Dev updates only `:dev`; stable updates minor, major and
 `:latest`. Version selection and GitHub release assets follow the prior policy.
 No GitHub-hosted build runs. These low-level scripts do not register a runner,
@@ -261,8 +261,9 @@ coordinate one publisher across all of them. Partial image/release publication i
 operations are not atomic. Fix the cause and retry with a fresh assets directory
 and the same valid receipt only if source is unchanged. Never move/delete a
 published version tag to recover. A retry reuses the registry digest only when
-both full version tags agree and both architectures carry the tested source and
-version labels; it never rebuilds or overwrites existing version images. Registry
+both full version tags agree and the linux/amd64 image carries the tested source
+and version labels; it never rebuilds or overwrites existing version images.
+Legacy multi-platform immutable tags are rejected. Registry
 lookup errors, conflicting metadata or a single partially pushed tag stop
 publication. For a single missing tag, inspect the existing digest and source
 before restoring only the missing tag from that digest; conflicting tags require

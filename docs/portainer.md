@@ -1,7 +1,7 @@
 # Deploy the published image with Portainer
 
 Backstory v1.0.0 runs from `ghcr.io/bcl1713/backstory:1.0.0` on
-**linux/amd64 or linux/arm64**. This guide uses Docker Standalone, an existing
+**linux/amd64**. This guide uses Docker Standalone, an existing
 wiki folder, and either an existing Cloudflare Tunnel connector or Nginx Proxy
 Manager (NPM) for HTTPS remote access. You need no repository checkout, Git,
 host Python/Node, or local image build. Swarm is not covered.
