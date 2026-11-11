@@ -172,7 +172,7 @@ def test_publication_failure_retains_failure_and_never_partial_plan(actor, wiki,
     from wiki.move_previews import run_pending_move_preview
     job = queued(actor, wiki)
     if failure == 'quota':
-        settings.BACKSTORY_REVISION_QUOTA_BYTES = len(json.dumps(job.context).encode()) + 512
+        settings.BACKSTORY_REVISION_QUOTA_BYTES = 1
     elif failure == 'insert':
         monkeypatch.setattr(MoveOperation, 'save', lambda *args, **kwargs: (_ for _ in ()).throw(DatabaseError('private database detail')))
     else:

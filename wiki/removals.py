@@ -4,11 +4,13 @@ The shared application flock serializes cooperating writers. External filesystem
 writers do not participate: final descriptor and byte checks narrow that race;
 they cannot make unlink a filesystem compare-and-swap.
 """
+import ctypes
 from datetime import timedelta
 import json
 import os
 import secrets
 import stat
+import sys
 import uuid
 
 from django.conf import settings
@@ -44,37 +46,133 @@ def _identity(info):
     return [info.st_dev, info.st_ino]
 
 
+class _FileHandle(ctypes.Structure):
+    _fields_ = [('handle_bytes', ctypes.c_uint), ('handle_type', ctypes.c_int),
+                ('f_handle', ctypes.c_ubyte * 128)]
+
+
+def _generation(directory, name=''):
+    """Linux FILEID_INO32_GEN only: opaque inode+generation, stable on mutation.
+
+    Mount IDs deliberately bind this mount lifetime. No timestamp/inode fallback,
+    privileged open_by_handle_at, or claim about unsupported export formats.
+    """
+    try:
+        if not sys.platform.startswith('linux'):
+            raise StorageError('removal_generation_unavailable', 503)
+        call = ctypes.CDLL(None, use_errno=True).name_to_handle_at
+        call.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.POINTER(_FileHandle),
+                         ctypes.POINTER(ctypes.c_int), ctypes.c_int]
+        call.restype = ctypes.c_int
+        handle = _FileHandle()
+        handle.handle_bytes = 128
+        mount = ctypes.c_int()
+        result = call(directory, os.fsencode(name), ctypes.byref(handle),
+                      ctypes.byref(mount), 0 if name else 0x1000)  # AT_EMPTY_PATH
+        if result != 0 or mount.value <= 0 or handle.handle_type != 1 or handle.handle_bytes != 8:
+            raise StorageError('removal_generation_unavailable', 503)
+        raw = bytes(handle.f_handle[:8])
+        info = os.stat(name, dir_fd=directory, follow_symlinks=False) if name else os.fstat(directory)
+        if (int.from_bytes(raw[:4], sys.byteorder) != info.st_ino
+                or int.from_bytes(raw[4:], sys.byteorder) == 0):
+            raise StorageError('removal_generation_unavailable', 503)
+        return {'version': 1, 'provider': 'linux-fileid-ino32-gen',
+                'mount': mount.value, 'type': handle.handle_type,
+                'handle': raw.hex()}
+    except (OSError, AttributeError, TypeError, ValueError):
+        raise StorageError('removal_generation_unavailable', 503) from None
+
+
 def _context(parent, directory):
     with open_directory() as root, open_directory(parent) as fresh:
         if _identity(os.fstat(directory)) != _identity(os.fstat(fresh)):
             raise StorageError('removal_parent_changed', 409)
+        generation = _generation(directory)
+        if generation != _generation(fresh):
+            raise StorageError('removal_parent_changed', 409)
         marker = os.stat(settings.BACKSTORY_IDENTITY_PATH, dir_fd=root, follow_symlinks=False)
-        return {'root': _identity(os.fstat(root)), 'marker': _fingerprint(marker),
-                'parent': _identity(os.fstat(fresh)), 'policy': policy_version()}
+        return {'root': _identity(os.fstat(root)), 'root_generation': _generation(root),
+                'marker': _fingerprint(marker), 'parent': [*_identity(os.fstat(fresh)), generation],
+                'policy': policy_version()}
 
 
-def _verify_context(operation, directory, *, allow_parent_restore=False):
+def _same_context(plan, current):
+    return (all(plan.get(key) == current[key] for key in ['root', 'marker', 'policy'])
+            and ('root_generation' not in plan or plan['root_generation'] == current['root_generation']))
+
+
+def _legacy_root(operation, current):
+    # The unchanged direct-child marker cannot have moved into a new root without
+    # changing its kernel ctime. This proves root ancestry, not arbitrary parents.
+    marker = operation.plan.get('marker', [])
+    return (not operation.path.rpartition('/')[0]
+            and '/' not in settings.BACKSTORY_IDENTITY_PATH
+            and len(marker) == 6 and stat.S_ISREG(marker[2])
+            and operation.plan.get('parent', [])[:2] == current['root'])
+
+
+def _verify_context(operation, directory, *, allow_parent_restore=False, adopt=False):
     require_ready()
     current = _context(operation.path.rpartition('/')[0], directory)
-    if any(operation.plan[key] != current[key] for key in ['root', 'marker', 'policy']):
+    if not _same_context(operation.plan, current):
         raise StorageError('removal_context_changed', 409)
-    if operation.plan['parent'] != current['parent']:
-        if not allow_parent_restore or not _restored_parent(operation, current):
-            raise StorageError('removal_context_changed', 409)
+    expected = operation.plan.get('adopted_parent', operation.plan['parent'])
+    if expected == current['parent']:
+        return
+    legacy = len(expected) in {2, 3} and (len(expected) == 2 or not isinstance(expected[2], dict))
+    proof = None
+    if legacy and _legacy_root(operation, current):
+        proof = 'unchanged-root-marker'
+    elif allow_parent_restore:
+        proof = _restored_parent(operation, expected, current)
+    if not proof:
+        raise StorageError('removal_context_changed', 409)
+    if adopt:
+        # Keep original parent/root provenance. This write must succeed before
+        # child intent/staging, so a process interruption cannot lose adoption.
+        adopted = {**operation.plan, 'adopted_parent': current['parent'], 'parent_proof': proof}
+        growth = max(0, len(json.dumps(adopted).encode()) - len(json.dumps(operation.plan).encode()))
+        with application_lock('revision-quota'), transaction.atomic():
+            # Serialize with other quota writers and acquire DB write intent
+            # before measuring capacity. Keep the recovery allowance reserved.
+            RemovalOperation.objects.filter(pk=operation.pk).update(state=F('state'))
+            _check_quota(growth)
+            operation.plan = adopted
+            operation.save(update_fields=['plan'])
 
 
-def _restored_parent(operation, current):
-    # A separately restored empty parent has a new inode. Only a completed
-    # same-actor journal linking that exact old/new inode authorizes adoption.
+def _restored_parent(operation, expected, current):
     parent = operation.path.rpartition('/')[0]
-    if not parent:
-        return False
+    if not parent or len(expected) != 3 or not isinstance(expected[2], dict):
+        return None
     candidates = RemovalOperation.objects.filter(actor_id=operation.actor_id,
         path=parent, kind='folder', state='restored').only('plan')
-    return any(candidate.plan['identity'][:2] == operation.plan['parent']
-        and candidate.plan.get('restore_identity') == current['parent']
-        and all(candidate.plan[key] == current[key] for key in ['root', 'marker', 'policy'])
-        for candidate in candidates)
+    # Traverse exact generation edges only; ordering and inode reuse cannot
+    # manufacture an edge. At most the retained journal capacity is examined.
+    edges = []
+    for candidate in candidates:
+        plan = candidate.plan
+        if (plan.get('root_generation') == current['root_generation']
+                and _same_context(plan, current)
+                and plan.get('original_generation') and plan.get('restore_generation')):
+            old = [*plan.get('identity', [])[:2], plan['original_generation']]
+            new = [*plan.get('restore_identity', []), plan['restore_generation']]
+            edges.append((old, new, str(candidate.pk)))
+    pending = [(expected, [])]
+    seen = []
+    while pending:
+        generation, chain = pending.pop()
+        if generation in seen:
+            continue
+        seen.append(generation)
+        for old, new, journal in edges:
+            if old != generation:
+                continue
+            proof = [*chain, journal]
+            if new == current['parent']:
+                return proof
+            pending.append((new, proof))
+    return None
 
 
 def _info(name, directory):
@@ -102,6 +200,8 @@ def _exact_original(operation, directory):
             raise StorageError('removal_target_changed', 412)
     else:
         _empty(operation.path)
+    if 'original_generation' in operation.plan and _generation(directory, name) != operation.plan['original_generation']:
+        raise StorageError('removal_target_changed', 412)
     # Recheck the name after reading bytes/enumerating, before any mutation.
     latest = _info(name, directory)
     if latest is None or _fingerprint(latest) != operation.plan['identity']:
@@ -186,7 +286,7 @@ def preview_removal(actor, path, kind, revision=None):
                         raise PathDenied()
                     _empty(path)
                     original = b''
-                plan = {**context, 'identity': _fingerprint(info), 'mode': stat.S_IMODE(info.st_mode) & 0o777}
+                plan = {**context, 'original_generation': _generation(directory, name), 'identity': _fingerprint(info), 'mode': stat.S_IMODE(info.st_mode) & 0o777}
                 operation = RemovalOperation(actor=actor, path=path, kind=kind,
                     base_revision=revision, original=original, plan=plan)
                 _verify_context(operation, directory)
@@ -266,9 +366,15 @@ def commit_removal(actor, operation_id):
         return _inspect(operation)
 
 
+def _owned_generation(operation, directory, name):
+    return ('restore_generation' in operation.plan
+            and _generation(directory, name) == operation.plan['restore_generation'])
+
+
 def _verify_restored(operation, directory, *, allow_stage=False):
     info = _info(operation.path.rpartition('/')[2], directory)
-    if info is None or _identity(info) != operation.plan.get('restore_identity'):
+    if (info is None or _identity(info) != operation.plan.get('restore_identity')
+            or not _owned_generation(operation, directory, operation.path.rpartition('/')[2])):
         raise StorageError('removal_restore_collision', 409)
     if operation.kind == 'note':
         stage = _info(operation.plan.get('temporary', ''), directory) if allow_stage and operation.plan.get('temporary') else None
@@ -288,7 +394,8 @@ def _restore_stage(operation, directory):
     if temporary:
         info = _info(temporary, directory)
         if info is not None:
-            if _identity(info) != operation.plan.get('restore_identity'):
+            if (_identity(info) != operation.plan.get('restore_identity')
+                    or not _owned_generation(operation, directory, temporary)):
                 raise StorageError('removal_stage_changed', 409)
             if operation.kind == 'note' and not operation.plan.get('stage_ready'):
                 _write_stage(operation, directory, temporary)
@@ -300,6 +407,7 @@ def _restore_stage(operation, directory):
     if operation.kind == 'folder':
         os.mkdir(temporary, mode=0o700, dir_fd=directory)
         operation.plan['restore_identity'] = _identity(os.stat(temporary, dir_fd=directory, follow_symlinks=False))
+        operation.plan['restore_generation'] = _generation(directory, temporary)
         operation.plan['stage_ready'] = True
         operation.save(update_fields=['plan'])
     else:
@@ -307,6 +415,7 @@ def _restore_stage(operation, directory):
                              0o600, dir_fd=directory)
         try:
             operation.plan['restore_identity'] = _identity(os.fstat(descriptor))
+            operation.plan['restore_generation'] = _generation(descriptor)
             operation.save(update_fields=['plan'])
         finally:
             os.close(descriptor)
@@ -319,6 +428,7 @@ def _write_stage(operation, directory, temporary):
     with os.fdopen(descriptor, 'wb') as stream:
         info = os.fstat(stream.fileno())
         if (_identity(info) != operation.plan['restore_identity']
+                or not _owned_generation(operation, descriptor, '')
                 or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1):
             raise StorageError('removal_stage_changed', 409)
         # Only a journal-owned unpublished stage may be completed after failure.
@@ -332,13 +442,15 @@ def _write_stage(operation, directory, temporary):
 
 def _verify_stage(operation, directory, temporary):
     info = _info(temporary, directory)
-    if info is None or _identity(info) != operation.plan.get('restore_identity'):
+    if (info is None or _identity(info) != operation.plan.get('restore_identity')
+            or not _owned_generation(operation, directory, temporary)):
         raise StorageError('removal_stage_changed', 409)
     if operation.kind == 'folder':
         if not stat.S_ISDIR(info.st_mode):
             raise StorageError('removal_stage_changed', 409)
         with open_directory('/'.join(filter(None, [operation.path.rpartition('/')[0], temporary]))) as staged:
-            if _identity(os.fstat(staged)) != operation.plan['restore_identity']:
+            if (_identity(os.fstat(staged)) != operation.plan['restore_identity']
+                    or not _owned_generation(operation, staged, '')):
                 raise StorageError('removal_stage_changed', 409)
             os.fchmod(staged, operation.plan['mode'])
             os.fsync(staged)
@@ -350,7 +462,8 @@ def _verify_stage(operation, directory, temporary):
             raise StorageError('removal_stage_changed', 409)
         descriptor = os.open(temporary, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=directory)
         with os.fdopen(descriptor, 'rb') as staged:
-            if _identity(os.fstat(staged.fileno())) != operation.plan['restore_identity']:
+            if (_identity(os.fstat(staged.fileno())) != operation.plan['restore_identity']
+                    or not _owned_generation(operation, staged.fileno(), '')):
                 raise StorageError('removal_stage_changed', 409)
             if staged.read(len(operation.original) + 1) != bytes(operation.original):
                 raise StorageError('removal_stage_changed', 409)
@@ -364,7 +477,8 @@ def _cleanup_stage(operation, directory):
         return
     info = _info(temporary, directory)
     if info is not None:
-        if _identity(info) != operation.plan.get('restore_identity'):
+        if (_identity(info) != operation.plan.get('restore_identity')
+                    or not _owned_generation(operation, directory, temporary)):
             raise StorageError('removal_stage_changed', 409)
         (os.rmdir if operation.kind == 'folder' else os.unlink)(temporary, dir_fd=directory)
 
@@ -384,7 +498,7 @@ def restore_removal(actor, operation_id):
             raise StorageError('removal_recovery_required', 409)
         parent, _, name = operation.path.rpartition('/')
         with open_directory(parent) as directory:
-            _verify_context(operation, directory, allow_parent_restore=True)
+            _verify_context(operation, directory, allow_parent_restore=True, adopt=True)
             info = _info(name, directory)
             if info is not None:
                 if operation.state in _RECOVERING and not operation.plan.get('restore_identity'):
