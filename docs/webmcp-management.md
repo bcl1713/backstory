@@ -147,11 +147,34 @@ To undo note-and-folder cleanup, restore the parent folder first, then the note.
 A changed parent inode is accepted only through a completed same-actor folder
 restoration journal proving the exact old and new identities and unchanged
 storage marker/root/policy. An unrelated replacement folder is not adopted.
+Generation witnesses must survive ordinary child creation, unlink and publication;
+ctime and device/inode alone are insufficient. New journals bind versioned Linux
+export handles (mount ID, FILEID_INO32_GEN type 1, eight-byte inode/generation payload) for root,
+parent, original target and restored stage. Unsupported providers fail before
+mutation; support must be established on each deployment filesystem, not inferred
+from a development host. Mount changes invalidate the witness. Other handle formats, missing libc support,
+zero generations, malformed lengths and inode/payload mismatches fail clearly
+with `removal_generation_unavailable`; no timestamp fallback is used.
+
+Legacy recovery refuses only when the exact parent generation cannot be
+corroborated, preserving the journal and recoverable bytes. Unchanged root-parent
+records remain supported when the original direct-child identity marker's full
+immutable fingerprint and root identity remain unchanged: moving that marker to
+a recreated root would change its ctime. Nested legacy parents without generation
+proof are refused; timestamps or inode matches alone do not establish history.
+No operator rebind or blanket legacy refusal is authorized. Completed same-actor
+old/new generation adoption must be durably recorded before child staging, while
+retaining the original context and proof journal.
+
 If a parent was separately relocated, deliberately restore its original path
 through the relocation workflow first; removal journals do not silently retarget.
 
 Removal previews/recovery material, history/drafts and move journals share
 `BACKSTORY_REVISION_QUOTA_BYTES`. At most 1,024 removal journals can be retained.
+Parent adoption reserves the additional serialized plan bytes under the shared
+quota lock before saving proof or staging a child. The existing 1,024-byte
+recovery allowance remains reserved; proof chains do not consume it. Insufficient
+capacity refuses adoption without changing journals, recovery bytes or wiki entries.
 Removal bytes/journals are **not** automatically pruned, including cancelled or
 restored previews. Cleanup removes wiki fixture entries, not audit/history
 residue or retained recovery material. Quota/capacity exhaustion fails closed;
