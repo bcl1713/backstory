@@ -70,6 +70,42 @@ test('selection centers smoothly, follows published motion, and retains zoom and
   v.batch.dispose();
 });
 
+test('selected camera continuously follows motion while retaining its camera offset', () => {
+  const v=view(); v.setGraph(data(['a','b']),'a','a'); v.setSelection('b','b');
+  v.pan(80,20);
+  const node=v.simulation.nodes.get('b');
+  const offset=()=>['x','y','z'].map(axis=>v.camera['target'+axis.toUpperCase()]-node[axis]);
+  const before=offset();
+  Object.assign(node,{x:node.x+25,y:node.y-11,z:node.z+7});
+  v.trackSelection();
+  offset().forEach((value,index)=>assert.ok(Math.abs(value-before[index])<1e-9));
+  ['x','y','z'].map(axis=>v.camera[axis]-node[axis]).forEach((value,index)=>assert.ok(Math.abs(value-before[index])<1e-9));
+  v.camera.orbit(.4,.2,true); v.zoom(1.2); v.trackSelection();
+  const controlled=offset();
+  Object.assign(node,{x:node.x-8,y:node.y+13,z:node.z-4});
+  v.trackSelection();
+  offset().forEach((value,index)=>assert.ok(Math.abs(value-controlled[index])<1e-9));
+  v.pointers.set(1,{x:100,y:100});
+  const duringPointer=offset();
+  Object.assign(node,{x:node.x+6,y:node.y-9,z:node.z+3});
+  v.trackSelection();
+  offset().forEach((value,index)=>assert.ok(Math.abs(value-duringPointer[index])<1e-9));
+  v.pointers.clear();
+  v.setSelection(null,null);
+  const camera={...v.camera}; Object.assign(node,{x:node.x+100,y:node.y+100,z:node.z+100});v.trackSelection();
+  assert.deepEqual({...v.camera},camera);
+  v.batch.dispose();
+});
+
+test('removing a selected node clears its camera tracking identity', () => {
+  const v=view(); v.setGraph(data(['a','b']),'a','a'); v.setSelection('b','b');
+  v.setGraph(data(['a']),'a','a');
+  assert.equal(v.selected,null);
+  assert.equal(v.focused,null);
+  assert.equal(v.trackedSelection,null);
+  v.batch.dispose();
+});
+
 test('restoring suspended selection preserves a paused manual camera center', () => {
   const v=view();v.setGraph(data(['a','b']),'a','a');v.setSelection('b','b');
   v.pan(80,20);

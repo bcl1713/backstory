@@ -163,6 +163,8 @@ export class GraphView {
     // Revalidated positions can be restored before their adjacency is rebuilt.
     // Install that adjacency before a changed root computes its BFS.
     this.simulation.setRoot(root);
+    if (this.selected && !this.simulation.nodes.has(this.selected)) { this.selected = null; this.trackedSelection = null; }
+    if (this.focused && !this.simulation.nodes.has(this.focused)) this.focused = null;
     if (!this.loaded && data.nodes.length) {
       // Every layout starts from its stable seed and advances cooperatively.
       // Installation never spends multiple synchronous warmup steps on input.
@@ -177,10 +179,13 @@ export class GraphView {
     this.setSelection(this.selected, this.focused); this.wake();
   }
   setSelection(selected, focused, { center = true } = {}) {
-    const changed = selected !== this.selected;
+    if (selected && !this.simulation.nodes?.has(selected)) selected = null;
+    if (focused && !this.simulation.nodes?.has(focused)) focused = null;
+    const selectionChanged = selected !== this.selected;
     this.selected = selected; this.focused = focused;
-    if (changed) {
-      this.trackedSelection = null; this.panOverride = !center;
+    if (selectionChanged) {
+      const node = this.simulation.nodes?.get(selected);
+      this.trackedSelection = !center && node ? {path:node.path,x:node.x,y:node.y,z:node.z} : null;
       if (center) this.trackSelection();
     }
     this.simulation.setSelection(selected);
@@ -209,21 +214,23 @@ export class GraphView {
   interact() { this.idleAfter = performance.now() + 3000; this.wake(); }
   trackSelection() {
     const node = this.simulation.nodes?.get(this.selected);
-    if (!node || this.panOverride || this.pointers?.size) return;
+    if (!node) { this.trackedSelection = null; return; }
     const previous = this.trackedSelection;
     for (const axis of ['x','y','z']) {
       const key = 'target' + axis.toUpperCase();
-      if (previous?.path === node.path) this.camera[axis] += node[axis] - previous[axis];
-      this.camera[key] = node[axis];
+      if (previous?.path === node.path) {
+        const delta = node[axis] - previous[axis];
+        this.camera[axis] += delta; this.camera[key] += delta;
+      } else this.camera[key] = node[axis];
     }
     this.trackedSelection = {path:node.path,x:node.x,y:node.y,z:node.z};
     if (this.paused) this.camera.snap();
   }
-  fit() { if (!this.simulation.nodes.size) return; this.interact(); this.cameraControlled = true; this.camera.fit(this.simulation.nodes, this.paused, this.simulation.nodes.get(this.selected)); this.panOverride = false; this.trackedSelection = null; this.trackSelection(); this.draw(); this.wake(); }
+  fit() { if (!this.simulation.nodes.size) return; this.interact(); this.cameraControlled = true; this.camera.fit(this.simulation.nodes, this.paused, this.simulation.nodes.get(this.selected)); this.trackedSelection = null; this.trackSelection(); this.draw(); this.wake(); }
   resetOrientation() { this.interact(); this.cameraControlled = true; this.camera.resetOrientation(this.paused); this.draw(); this.wake(); }
   orbit(dx, dy) { this.interact(); this.cameraControlled = true; this.camera.orbit(dx, dy, this.paused); this.draw(); this.wake(); }
-  zoom(factor, point) { this.interact(); this.cameraControlled = true; this.camera.zoom(factor, point, this.paused); this.panOverride = true; this.trackedSelection = null; this.draw(); this.wake(); }
-  pan(dx, dy) { this.interact(); this.cameraControlled = true; this.camera.pan(dx, dy, this.paused); this.panOverride = true; this.trackedSelection = null; this.draw(); this.wake(); }
+  zoom(factor, point) { this.interact(); this.cameraControlled = true; this.camera.zoom(factor, point, this.paused); this.draw(); this.wake(); }
+  pan(dx, dy) { this.interact(); this.cameraControlled = true; this.camera.pan(dx, dy, this.paused); this.draw(); this.wake(); }
   refreshShortcuts() {
     const key = JSON.stringify([this.selected,this.data.nodes.map(n=>[n.path,n.title]),this.data.edges.map(e=>[e.source,e.destination])]);
     if (key === this.shortcutKey) return;
@@ -337,7 +344,7 @@ export class GraphView {
     const point = this.point(event); this.pointers.set(event.pointerId, point);
     if (this.pointers.size > 1) {
       const next = this.gestureState(), previous = this.gesture;
-      if (previous) { this.panOverride = true; this.trackedSelection = null; this.camera.pan(previous.x - next.x, previous.y - next.y, true); this.camera.zoom(next.distance / previous.distance, next, true); }
+      if (previous) { this.camera.pan(previous.x - next.x, previous.y - next.y, true); this.camera.zoom(next.distance / previous.distance, next, true); }
       this.gesture = next; this.draw(); return;
     }
     const drag = this.drag; if (!drag) return;
@@ -345,12 +352,12 @@ export class GraphView {
     if (!drag.moved) return;
     if (drag.path) {
       const world = this.camera.world(point, this.simulation.nodes.get(drag.path)); this.simulation.pin(drag.path, world.x, world.y, world.z); this.container.dataset.pinned = 'true';
-    } else if (drag.pan) { this.panOverride = true; this.trackedSelection = null; this.camera.pan(drag.previous.x - point.x, drag.previous.y - point.y, true); }
+    } else if (drag.pan) { this.camera.pan(drag.previous.x - point.x, drag.previous.y - point.y, true); }
     else this.camera.orbit((drag.previous.x - point.x) * .006, (point.y - drag.previous.y) * .006, true);
     drag.previous = point; this.draw(); this.wake();
   }
   release(event, cancelled) {
-    if (event || this.pointers.size) { this.interact(); this.trackedSelection = null; }
+    if (event || this.pointers.size) this.interact();
     if (!event) {
       for (const id of this.pointers.keys()) if (this.container.hasPointerCapture(id)) this.container.releasePointerCapture(id);
       this.pointers.clear();
@@ -523,7 +530,6 @@ export class GraphView {
     this.simulation.advance(elapsed);
     const positionsChanged = this.simulation.positionVersion !== version || this.drawnPositionVersion != null && this.drawnPositionVersion !== this.simulation.positionVersion;
     const idle = this.loaded && this.data.nodes.length && !this.reduced?.matches && !this.pointers?.size && !this.hints?.active && time >= this.idleAfter;
-    if (idle) this.panOverride = false;
     if (!this.hints?.active) this.trackSelection();
     if (idle) this.camera.idleOrbit(elapsed, Math.min(1, (time - this.idleAfter) / 2000));
     const moving = this.camera.tick(elapsed);
