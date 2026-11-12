@@ -211,7 +211,7 @@ async function heldMotion(map,path,info,label) {
   return samples;
 }
 
-for(const gesture of ['orbit','pan','zoom'])test(`selected-node focus follows live motion through camera controls without recentering: ${gesture}`,async({page},info)=>{
+for(const gesture of ['orbit','pan','zoom'])test(`selected node remains the camera target through live camera controls: ${gesture}`,async({page},info)=>{
   await page.emulateMedia({reducedMotion:'no-preference'});
   await page.route('**/tools/graph/snapshot/**',route=>route.fulfill({json:fixture()}));
   const {panel,map}=await open(page);
@@ -236,14 +236,16 @@ for(const gesture of ['orbit','pan','zoom'])test(`selected-node focus follows li
       expect(controlled.angles[0]-before.angles[0]).toBeCloseTo(-.216,6);
       expect(controlled.angles[1]-before.angles[1]).toBeCloseTo(.144,6);
       expect(controlled.radius).toBeCloseTo(before.targetRadius,6);
+      expect(Math.hypot(...controlled.offset)).toBeLessThan(1e-6);
     }else if(gesture==='pan') {
-      expect(controlled.drag.pan).toBe(true);expect(controlled.drag.moved).toBe(true);
-      expect(Math.hypot(...controlled.offset)).toBeGreaterThan(1);
-      expect(controlled.angles).toEqual(before.angles);
+      expect(controlled.drag.pan).toBe(false);expect(controlled.drag.moved).toBe(true);
+      expect(Math.hypot(...controlled.offset)).toBeLessThan(1e-6);
+      expect(controlled.angles[0]-before.angles[0]).toBeCloseTo(-.216,6);
+      expect(controlled.angles[1]-before.angles[1]).toBeCloseTo(.144,6);
       expect(controlled.radius).toBeCloseTo(before.targetRadius,6);
     }else {
       expect(controlled.targetRadius).toBeCloseTo(before.targetRadius/1.12,6);
-      expect(Math.hypot(...controlled.offset)).toBeGreaterThan(1);
+      expect(Math.hypot(...controlled.offset)).toBeLessThan(1e-6);
       expect(controlled.angles).toEqual(before.angles);
     }
     // Both before and after a second real input, hold through solver publications.
@@ -261,11 +263,12 @@ for(const gesture of ['orbit','pan','zoom'])test(`selected-node focus follows li
         sample.offset.forEach((x,i)=>expect(Math.abs(x-reference.offset[i]),'target offset must travel with the selected node').toBeLessThan(1e-6));
         expect(sample.targetRadius).toBeCloseTo(reference.targetRadius,6);
         expect(sample.angles).toEqual(reference.angles);
-        // Existing camera easing may finish; it must not recenter, overshoot or
-        // alter the user radius. Target and actual center are checked separately.
+        // Selected target stays hard centered while radius easing completes.
         expect(sample.error).toBeLessThanOrEqual(error+1e-6);error=sample.error;
         expect(sample.radius).toBeLessThanOrEqual(radius+1e-6);
         expect(sample.radius).toBeGreaterThanOrEqual(reference.targetRadius-1e-6);radius=sample.radius;
+        expect(Math.abs(sample.projection.x-sample.width/2)).toBeLessThan(.1);
+        expect(Math.abs(sample.projection.y-sample.height/2)).toBeLessThan(.1);
       }
       if(gesture!=='zoom')expect(samples.at(-1).radius).toBeCloseTo(reference.radius,6);
     }
@@ -278,6 +281,8 @@ for(const gesture of ['orbit','pan','zoom'])test(`selected-node focus follows li
   const released=await map.evaluate(focusSample,'B.md');
   await map.focus();await page.keyboard.press('+');
   await expect.poll(()=>map.evaluate(el=>el.graphView.camera.targetDistance)).toBeCloseTo(released.targetRadius/1.25,6);
+  const afterKeyboardZoom=await map.evaluate(focusSample,'B.md');
+  expect(Math.hypot(...afterKeyboardZoom.offset)).toBeLessThan(1e-6);
   await expect(map).toHaveAttribute('data-selected','B.md');
   await page.screenshot({path:info.outputPath(`selected-node-camera-focus-${gesture}.png`)});
 });

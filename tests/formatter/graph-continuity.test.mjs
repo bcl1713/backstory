@@ -11,9 +11,28 @@ function view() {
   return Object.assign(Object.create(GraphView.prototype), {
     data:data([]), simulation:new GraphPhysics(), camera:new GraphCamera(800,600),
     scene:new THREE.Scene(), selected:null, focused:null, paused:true,
-    container:{dataset:{},setAttribute(){}}, pointers:new Map(), reduced:{matches:false},
+    container:{dataset:{},setAttribute(){},focus(){},setPointerCapture(){},hasPointerCapture(){return true;},releasePointerCapture(){}},
+    canvas:{getBoundingClientRect(){return {left:0,top:0};}}, pointers:new Map(), reduced:{matches:false},
+    projected:new Map(), matrix:new THREE.Matrix4(),
     release(){}, draw(){}, wake(){},
   });
+}
+function renderable(v) {
+  globalThis.document={hidden:false}; globalThis.requestAnimationFrame=()=>1;
+  v.container.hidden=false; v.destroyed=false; v.unavailable=false;
+  v.renderer={setClearColor(){},render(){v.rendered.push(v.projected.get('b'));}};
+  v.renderCamera=new THREE.PerspectiveCamera(45,800/600,1,1000000);
+  v.quality={sample:()=>false,bloom:()=>0,level:0}; v.forced={matches:false};
+  v.theme={background:0}; v.themeDirty=false; v.pixelRatio=1; v.intensity=0;
+  v.applyColors=()=>{v.themeDirty=false;};
+  v.drawLabels=()=>{}; v.drawHints=()=>{}; v.rendered=[];
+  v.draw=options=>GraphView.prototype.draw.call(v,options);
+  return v;
+}
+function startTicks(v) {
+  v.loaded=true; v.paused=false; v.idleAfter=0; v.lastTime=0;
+  v.reduced={matches:false}; v.hints={active:false}; v.actions={};
+  v.simulation.reheat();
 }
 
 test('roll rotates projection and picking on the same invertible camera plane', () => {
@@ -70,30 +89,123 @@ test('selection centers smoothly, follows published motion, and retains zoom and
   v.batch.dispose();
 });
 
-test('selected camera continuously follows motion while retaining its camera offset', () => {
+test('selected camera follows layout while the legacy pan API orbits instead of translating focus', () => {
   const v=view(); v.setGraph(data(['a','b']),'a','a'); v.setSelection('b','b');
-  v.pan(80,20);
   const node=v.simulation.nodes.get('b');
-  const offset=()=>['x','y','z'].map(axis=>v.camera['target'+axis.toUpperCase()]-node[axis]);
-  const before=offset();
+  const angles={yaw:v.camera.yaw,pitch:v.camera.pitch};
+  const center={x:v.camera.x,y:v.camera.y,z:v.camera.z};
+  v.pan(40,20);
+  assert.equal(v.camera.yaw,angles.yaw+.24); assert.equal(v.camera.pitch,angles.pitch-.12);
+  for(const axis of ['x','y','z']) assert.equal(v.camera['target'+axis.toUpperCase()],node[axis]);
+  assert.deepEqual({x:v.camera.x,y:v.camera.y,z:v.camera.z},center);
   Object.assign(node,{x:node.x+25,y:node.y-11,z:node.z+7});
   v.trackSelection();
-  offset().forEach((value,index)=>assert.ok(Math.abs(value-before[index])<1e-9));
-  ['x','y','z'].map(axis=>v.camera[axis]-node[axis]).forEach((value,index)=>assert.ok(Math.abs(value-before[index])<1e-9));
-  v.camera.orbit(.4,.2,true); v.zoom(1.2); v.trackSelection();
-  const controlled=offset();
+  const moved=v.camera.screen(node);
+  assert.ok(Math.abs(moved.x-400)<1e-8 && Math.abs(moved.y-300)<1e-8);
+  v.camera.orbit(.4,.2,true); v.zoom(1.2,{x:720,y:90}); v.trackSelection();
   Object.assign(node,{x:node.x-8,y:node.y+13,z:node.z-4});
   v.trackSelection();
-  offset().forEach((value,index)=>assert.ok(Math.abs(value-controlled[index])<1e-9));
-  v.pointers.set(1,{x:100,y:100});
-  const duringPointer=offset();
-  Object.assign(node,{x:node.x+6,y:node.y-9,z:node.z+3});
-  v.trackSelection();
-  offset().forEach((value,index)=>assert.ok(Math.abs(value-duringPointer[index])<1e-9));
-  v.pointers.clear();
   v.setSelection(null,null);
   const camera={...v.camera}; Object.assign(node,{x:node.x+100,y:node.y+100,z:node.z+100});v.trackSelection();
   assert.deepEqual({...v.camera},camera);
+  v.batch.dispose();
+});
+
+test('selected background, node-hit, modifier, right and middle drags always orbit without pinning', () => {
+  const v=renderable(view()); v.setGraph(data(['a','b']),'a','a'); v.setSelection('b','b');
+  const node=v.simulation.nodes.get('b');
+  const cases=[
+    {button:0,x:400,y:300}, // Starts on the selected node.
+    {button:0,shiftKey:true,x:700,y:500},
+    {button:0,ctrlKey:true,x:700,y:500},
+    {button:1,x:700,y:500},
+    {button:2,x:700,y:500},
+  ];
+  let pointerId=1;
+  for(const scenario of cases) {
+    let prevented=false;
+    const target={closest:()=>null};
+    const down={...scenario,pointerId, pointerType:'mouse',clientX:scenario.x,clientY:scenario.y,target,preventDefault(){prevented=true;}};
+    const picked=v.pick({x:scenario.x,y:scenario.y});
+    v.pointerDown(down);
+    assert.ok(v.drag,`pointer ${pointerId} starts a selected camera gesture; active pointers=${v.pointers.size}`);
+    assert.equal(v.drag.path,picked,'pointer-down retains click selection identity');
+    const before={yaw:v.camera.yaw,pitch:v.camera.pitch,node:[node.x,node.y,node.z]};
+    v.pointerMove({...down,clientX:scenario.x+40,clientY:scenario.y+25});
+    assert.ok(Math.abs(v.camera.yaw-(before.yaw-.24))<1e-10,'horizontal drag orbits');
+    assert.ok(Math.abs(v.camera.pitch-(before.pitch+.15))<1e-10,'vertical drag orbits');
+    assert.deepEqual([node.x,node.y,node.z],before.node,'layout node remains free');
+    assert.equal(node.pinned,false);
+    const rendered=v.rendered.at(-1);
+    assert.ok(Math.abs(rendered.x-400)<1e-8 && Math.abs(rendered.y-300)<1e-8,'selected target stays centered on every draw');
+    if(scenario.button!==0 || scenario.ctrlKey) assert.equal(prevented,true,'selected non-primary/modifier gesture suppresses browser default');
+    GraphView.prototype.release.call(v,{pointerId},false); pointerId++;
+  }
+  v.batch.dispose();
+});
+
+test('clicking another node while one is selected changes the orbit target', () => {
+  const v=renderable(view()); v.setGraph(data(['a','b']),'a','a'); v.setSelection('b','b');
+  const point=v.projected.get('a');
+  assert.ok(point?.visible);
+  assert.equal(v.pick(point),'a','the other node is hittable at its projected point');
+  v.actions={onSelect:path=>v.setSelection(path,path)};
+  const target={closest:()=>null};
+  v.pointerDown({button:0,pointerId:10,pointerType:'mouse',clientX:point.x,clientY:point.y,target});
+  GraphView.prototype.release.call(v,{pointerId:10},false);
+  assert.equal(v.selected,'a');
+  const p=v.projected.get('a');
+  assert.ok(Math.abs(p.x-400)<1e-8 && Math.abs(p.y-300)<1e-8,'selection change immediately centers the new orbit target');
+  v.batch.dispose();
+});
+
+test('selected two-finger centroid movement orbits and pinch changes zoom about the selected target', () => {
+  const v=renderable(view()); v.setGraph(data(['a','b']),'a','a'); v.setSelection('b','b');
+  const node=v.simulation.nodes.get('b'), before={yaw:v.camera.yaw,pitch:v.camera.pitch,distance:v.camera.distance,position:[node.x,node.y,node.z]};
+  const target={closest:()=>null};
+  v.pointerDown({button:0,pointerId:1,pointerType:'touch',clientX:300,clientY:300,target});
+  v.pointerDown({button:0,pointerId:2,pointerType:'touch',clientX:500,clientY:300,target});
+  assert.equal(v.drag,null,'pinch gesture has no node-drag state');
+  v.pointerMove({pointerId:2,pointerType:'touch',clientX:510,clientY:330,target});
+  assert.ok(Math.abs(v.camera.yaw-(before.yaw-.03))<1e-10,'centroid horizontal movement orbits');
+  assert.ok(Math.abs(v.camera.pitch-(before.pitch+.09))<1e-10,'centroid vertical movement orbits');
+  assert.ok(v.camera.distance<before.distance,'pinch zoom changes radius');
+  assert.deepEqual([node.x,node.y,node.z],before.position);
+  assert.equal(node.pinned,false);
+  const rendered=v.rendered.at(-1);
+  assert.ok(Math.abs(rendered.x-400)<1e-8 && Math.abs(rendered.y-300)<1e-8);
+  v.batch.dispose();
+});
+
+test('pan remains a camera translation when no node is selected', () => {
+  const v=renderable(view()); v.setGraph(data(['a','b']),'a','a');
+  const before={x:v.camera.x,y:v.camera.y,z:v.camera.z,yaw:v.camera.yaw,pitch:v.camera.pitch};
+  v.pan(40,20);
+  assert.notDeepEqual([v.camera.x,v.camera.y,v.camera.z],[before.x,before.y,before.z]);
+  assert.equal(v.camera.yaw,before.yaw); assert.equal(v.camera.pitch,before.pitch);
+  v.batch.dispose();
+});
+
+test('active selected focus stays centered on every draw through layout, orbit and off-center zoom', () => {
+  const v=renderable(view()); v.setGraph(data(['a','b']),'a','a'); v.setSelection('b','b');
+  v.camera.orbit(.3,.2,true); v.camera.distance=v.camera.targetDistance=700;
+  startTicks(v);
+  const node=v.simulation.nodes.get('b'), start={x:node.x,y:node.y,z:node.z};
+  const renderedAtStart=v.rendered.length;
+  for(let frame=1;frame<=20;frame++) { v.simulation.step(); v.tick(frame*16); }
+  assert.equal(v.rendered.length-renderedAtStart,20,'each update must reach GraphView.draw and the renderer');
+  v.rendered.slice(renderedAtStart).forEach((p,frame)=>{
+    assert.ok(Math.abs(p.x-400)<1e-8,`render ${frame} x`);
+    assert.ok(Math.abs(p.y-300)<1e-8,`render ${frame} y`);
+  });
+  assert.ok(Math.hypot(node.x-start.x,node.y-start.y,node.z-start.z)>1,'layout motion remains free');
+  assert.ok(v.camera.yaw>.3,'idle orbit continues');
+  const radius=v.camera.targetDistance, previousFrames=v.rendered.length;
+  v.zoom(1.2,{x:120,y:510});
+  assert.equal(v.rendered.length,previousFrames+1,'focused zoom must draw immediately');
+  assert.ok(Math.abs(v.rendered.at(-1).x-400)<1e-8 && Math.abs(v.rendered.at(-1).y-300)<1e-8,'focused zoom keeps the selected node centered on its immediate draw');
+  assert.ok(Math.abs(v.camera.targetDistance-radius/1.2)<1e-8,'focused zoom changes radius about the selected target');
+  for(const axis of ['x','y','z']) assert.ok(Math.abs(v.camera['target'+axis.toUpperCase()]-node[axis])<1e-8,'focused zoom keeps the target at the selected node');
   v.batch.dispose();
 });
 
