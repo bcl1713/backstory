@@ -34,7 +34,7 @@
     "katex": "0.19.1",
     "markdownlint-cli2": "0.24.0",
     "mermaid": "12.2.0",
-    "minimatch": "10.2.6",
+    "minimatch": "11.0.1",
     "prettier": "3.9.10",
     "smol-toml": "1.9.1",
     "three": "0.183.2",
@@ -42,5 +42,13 @@
     "vega-interpreter": "2.3.2",
     "vega-lite": "6.5.0",
     "yaml": "2.9.1"
+  },
+  "overrides": {
+    "markdownlint": {
+      "micromark-extension-math": {
+        "katex": "0.18.2"
+      },
+      "re2js": "2.8.7"
+    }
   }
 }
