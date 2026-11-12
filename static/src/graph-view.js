@@ -109,6 +109,7 @@ export class GraphView {
     listen(container, 'pointermove', event => this.pointerMove(event));
     listen(container, 'pointerup', event => this.release(event, false));
     for (const name of ['pointercancel', 'lostpointercapture']) listen(container, name, event => this.release(event, true));
+    listen(container, 'contextmenu', event => { if (this.selected) event.preventDefault(); });
     listen(container, 'wheel', event => { if (event.ctrlKey || event.metaKey || event.altKey) return; event.preventDefault(); this.zoom(event.deltaY < 0 ? 1.12 : 1 / 1.12, this.point(event)); }, { passive: false });
     listen(document, 'visibilitychange', () => { if (document.hidden) { this.release(null, true); this.stop(); } else this.wake(); });
     listen(this.reduced, 'change', () => { this.paused = this.reduced.matches; if (this.paused) { this.simulation.pause(); this.camera.snap(); this.stop(); } else this.simulation.reheat(); this.actions.onPause?.(this.paused); this.draw(); this.wake(); });
@@ -176,7 +177,7 @@ export class GraphView {
     if (this.batch) this.batch.update(data.nodes.length, data.edges.length);
     else { this.batch = createGraphBatches(data.nodes, data.edges); this.batch.update(data.nodes.length, data.edges.length); this.scene.add(this.batch.group); }
     this.container.dataset.nodeCount = String(data.nodes.length); this.container.dataset.edgeCount = String(data.edges.length);
-    this.setSelection(this.selected, this.focused); this.wake();
+    this.setSelection(this.selected, this.focused, {center:false}); this.wake();
   }
   setSelection(selected, focused, { center = true } = {}) {
     if (selected && !this.simulation.nodes?.has(selected)) selected = null;
@@ -226,11 +227,26 @@ export class GraphView {
     this.trackedSelection = {path:node.path,x:node.x,y:node.y,z:node.z};
     if (this.paused) this.camera.snap();
   }
+  centerSelectedCamera() {
+    const node = this.simulation.nodes?.get(this.selected);
+    if (!node) return;
+    for (const axis of ['x','y','z']) this.camera[axis] = this.camera['target'+axis.toUpperCase()] = node[axis];
+    this.trackedSelection = {path:node.path,x:node.x,y:node.y,z:node.z};
+  }
   fit() { if (!this.simulation.nodes.size) return; this.interact(); this.cameraControlled = true; this.camera.fit(this.simulation.nodes, this.paused, this.simulation.nodes.get(this.selected)); this.trackedSelection = null; this.trackSelection(); this.draw(); this.wake(); }
   resetOrientation() { this.interact(); this.cameraControlled = true; this.camera.resetOrientation(this.paused); this.draw(); this.wake(); }
   orbit(dx, dy) { this.interact(); this.cameraControlled = true; this.camera.orbit(dx, dy, this.paused); this.draw(); this.wake(); }
-  zoom(factor, point) { this.interact(); this.cameraControlled = true; this.camera.zoom(factor, point, this.paused); this.draw(); this.wake(); }
-  pan(dx, dy) { this.interact(); this.cameraControlled = true; this.camera.pan(dx, dy, this.paused); this.draw(); this.wake(); }
+  zoom(factor, point) {
+    this.interact(); this.cameraControlled = true;
+    const anchor = this.selected ? {x:this.camera.width/2,y:this.camera.height/2} : point;
+    this.camera.zoom(factor, anchor, this.paused); this.draw(); this.wake();
+  }
+  pan(dx, dy) {
+    this.interact(); this.cameraControlled = true;
+    if (this.selected) this.camera.orbit(dx * .006, -dy * .006, this.paused);
+    else this.camera.pan(dx, dy, this.paused);
+    this.draw(); this.wake();
+  }
   refreshShortcuts() {
     const key = JSON.stringify([this.selected,this.data.nodes.map(n=>[n.path,n.title]),this.data.edges.map(e=>[e.source,e.destination])]);
     if (key === this.shortcutKey) return;
@@ -330,12 +346,14 @@ export class GraphView {
     this.interact();
     this.cameraControlled = true;
     if (event.target.closest?.('.graph-hints')) return;
-    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || this.unavailable) return;
+    const selectedControl = !!this.selected;
+    if (this.unavailable || selectedControl && ![0,1,2].includes(event.button) || !selectedControl && (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey)) return;
+    if (selectedControl && (event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.pointerType === 'pen')) event.preventDefault?.();
     this.cancelHints();
     const point = this.point(event); this.pointers.set(event.pointerId, point);
     this.container.focus({ preventScroll: true }); this.container.setPointerCapture(event.pointerId);
-    if (this.pointers.size > 1) { if (this.drag?.path) this.simulation.unpin(this.drag.path); this.drag = null; this.gesture = this.gestureState(); return; }
-    this.drag = { pointer: event.pointerId, path: this.pick(point), start: point, previous: point, moved: false, pan: event.shiftKey || event.pointerType === 'pen' };
+    if (this.pointers.size > 1) { if (this.drag?.pinned) this.simulation.unpin(this.drag.path); this.drag = null; this.gesture = this.gestureState(); return; }
+    this.drag = { pointer: event.pointerId, path: this.pick(point), pinned: false, start: point, previous: point, moved: false, pan: !selectedControl && (event.shiftKey || event.pointerType === 'pen') };
   }
   gestureState() { const [a, b] = [...this.pointers.values()]; return a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) } : null; }
   pointerMove(event) {
@@ -344,15 +362,24 @@ export class GraphView {
     const point = this.point(event); this.pointers.set(event.pointerId, point);
     if (this.pointers.size > 1) {
       const next = this.gestureState(), previous = this.gesture;
-      if (previous) { this.camera.pan(previous.x - next.x, previous.y - next.y, true); this.camera.zoom(next.distance / previous.distance, next, true); }
+      if (previous) {
+        if (this.selected) {
+          this.camera.orbit((previous.x - next.x) * .006, (next.y - previous.y) * .006, true);
+          this.camera.zoom(next.distance / previous.distance, {x:this.camera.width/2,y:this.camera.height/2}, true);
+        } else {
+          this.camera.pan(previous.x - next.x, previous.y - next.y, true);
+          this.camera.zoom(next.distance / previous.distance, next, true);
+        }
+      }
       this.gesture = next; this.draw(); return;
     }
     const drag = this.drag; if (!drag) return;
     if (Math.hypot(point.x - drag.start.x, point.y - drag.start.y) > 5) drag.moved = true;
     if (!drag.moved) return;
-    if (drag.path) {
-      const world = this.camera.world(point, this.simulation.nodes.get(drag.path)); this.simulation.pin(drag.path, world.x, world.y, world.z); this.container.dataset.pinned = 'true';
-    } else if (drag.pan) { this.camera.pan(drag.previous.x - point.x, drag.previous.y - point.y, true); }
+    if (this.selected) this.camera.orbit((drag.previous.x - point.x) * .006, (point.y - drag.previous.y) * .006, true);
+    else if (drag.path) {
+      const world = this.camera.world(point, this.simulation.nodes.get(drag.path)); this.simulation.pin(drag.path, world.x, world.y, world.z); drag.pinned = true; this.container.dataset.pinned = 'true';
+    } else if (drag.pan) this.camera.pan(drag.previous.x - point.x, drag.previous.y - point.y, true);
     else this.camera.orbit((drag.previous.x - point.x) * .006, (point.y - drag.previous.y) * .006, true);
     drag.previous = point; this.draw(); this.wake();
   }
@@ -364,7 +391,7 @@ export class GraphView {
     } else { this.pointers.delete(event.pointerId); if (this.container.hasPointerCapture(event.pointerId)) this.container.releasePointerCapture(event.pointerId); }
     const drag = this.drag;
     if (drag && (!event || drag.pointer === event.pointerId)) {
-      this.drag = null; if (drag.path) this.simulation.unpin(drag.path);
+      this.drag = null; if (drag.pinned) this.simulation.unpin(drag.path);
       if (!cancelled && !drag.moved && drag.path) this.actions.onSelect?.(drag.path, true);
     }
     this.gesture = null; this.container.dataset.pinned = 'false';
@@ -397,6 +424,7 @@ export class GraphView {
   }
   draw({ positionsChanged = false } = {}) {
     if (this.destroyed || this.unavailable || !this.renderer || !this.batch || document.hidden || this.container.hidden) return;
+    if (this.selected) this.centerSelectedCamera();
     const batch = this.batch, camera = this.camera, basis = camera.basis(), eye = camera.eye(basis);
     const fields = ['x', 'y', 'z', 'yaw', 'pitch', 'roll', 'distance', 'width', 'height'];
     const previousCamera = this.drawnCamera;
