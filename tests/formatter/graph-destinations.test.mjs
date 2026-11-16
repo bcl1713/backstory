@@ -32,7 +32,7 @@ test('one-hop node and directed connection get a distinct semantic color without
  const data={nodes,edges};
  const view=Object.assign(Object.create(GraphView.prototype),{
   data,simulation:new GraphPhysics(nodes,edges,'selected'),camera:new GraphCamera(),scene:new THREE.Scene(),
-  selected:'selected',focused:'selected',paused:true,loaded:true,forced:{matches:false},color:new THREE.Color(),
+  selected:'selected',focused:'selected',paused:true,loaded:true,forced:{matches:false},color:new THREE.Color(),activityTimes:new Map(),
   theme:{node:'#0000ff',destination:'#00ff00',highlight:'#ff0000',focus:'#ffff00',edge:'#888888',bloom:'#0000ff'},
   container:{dataset:{},setAttribute(){}},release(){},draw(){},wake(){},
  });

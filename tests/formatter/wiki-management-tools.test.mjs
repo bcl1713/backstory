@@ -23,7 +23,9 @@ test('management mutations inspect affected paths, guard drafts, serialize inspe
     }
     throw new Error('synthetic lost acknowledgement');
   };
-  const source = (await readFile(new URL('../../static/src/wiki-tools.js', import.meta.url), 'utf8')).replace("import { ensureWikiTimezone } from './wiki-timezone.js';", 'const ensureWikiTimezone = async () => {};');
+  const source = (await readFile(new URL('../../static/src/wiki-tools.js', import.meta.url), 'utf8'))
+    .replace("import { ensureWikiTimezone } from './wiki-timezone.js';", 'const ensureWikiTimezone = async () => {};')
+    .replace("import { publishNoteActivity } from './note-activity.js';", 'const publishNoteActivity = () => {};');
   await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
   const args = { operation_id: id, review_token: 'review' };
   const rejected = JSON.parse(await registered.commit_move.execute(args));
@@ -73,7 +75,9 @@ test('move preparation retains its handle without automatic inspection and accep
     requests.push({ url, method: options.method });
     return { ok: true, status: options.method === 'POST' && url.includes('/preview/') ? 202 : 200, url: 'http://synthetic.test' + url, headers: { get: () => 'application/json' }, json: async () => ({ ...payload, untrusted_content: true }) };
   };
-  const source = (await readFile(new URL('../../static/src/wiki-tools.js', import.meta.url), 'utf8')).replace("import { ensureWikiTimezone } from './wiki-timezone.js';", 'const ensureWikiTimezone = async () => {};');
+  const source = (await readFile(new URL('../../static/src/wiki-tools.js', import.meta.url), 'utf8'))
+    .replace("import { ensureWikiTimezone } from './wiki-timezone.js';", 'const ensureWikiTimezone = async () => {};')
+    .replace("import { publishNoteActivity } from './note-activity.js';", 'const publishNoteActivity = () => {};');
   await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64') + '#preparation');
   const args = { source: 'From.md', destination: 'To.md' };
   assert.equal(JSON.parse(await registered.preview_move.execute(args)).operation_id, id);

@@ -12,7 +12,7 @@ test('directed spring context stays quiet across root changes, appended shortcut
       ['b', 'a'], ['unreachable', 'inbound'], ['inbound', 'a']].map(([source, destination]) => ({ source, destination })) };
   const view = Object.assign(Object.create(renderer.GraphView.prototype), {
     data, simulation: new GraphPhysics(data.nodes, data.edges, 'a'), camera: new GraphCamera(),
-    scene: new THREE.Scene(), selected: 'a', focused: 'b', paused: true, loaded: true,
+    scene: new THREE.Scene(), selected: 'a', focused: 'b', paused: true, loaded: true, activityTimes: new Map(),
     forced: { matches: false }, color: new THREE.Color(),
     theme: { node: '#8ab4f8', highlight: '#c5a5ff', focus: '#f4c95d', edge: '#8a919d', bloom: '#8ab4f8' },
     container: { dataset: {}, setAttribute() {} }, release() {}, wake() {},
@@ -90,7 +90,7 @@ test('paused view refreshes spring roots and appended shortcuts without moving c
   const view = Object.assign(Object.create(renderer.GraphView.prototype), {
     data, simulation: new GraphPhysics(data.nodes, data.edges, 'a'), camera: new GraphCamera(),
     scene: new THREE.Scene(), selected: 'a', focused: 'b', paused: true, loaded: true,
-    container: { dataset: {}, setAttribute() {} }, release() {}, draw() {}, wake() {},
+    container: { dataset: {}, setAttribute() {} }, release() {}, draw() {}, wake() {}, activityTimes: new Map(),
   });
   const position = view.simulation.all.map(n => [n.x, n.y, n.z]);
   const camera = { ...view.camera };
@@ -115,7 +115,7 @@ test('empty checkpoints do not consume first fit and metadata leaves batches and
   let fits=0, releases=0;
   const view=Object.assign(Object.create(renderer.GraphView.prototype), {
     data:{nodes:[],edges:[]}, simulation:new GraphPhysics(), camera:new GraphCamera(),
-    scene:new THREE.Scene(), selected:null, focused:null, paused:true,
+    scene:new THREE.Scene(), selected:null, focused:null, paused:true, activityTimes:new Map(),
     container:{dataset:{},setAttribute(){}}, release(){releases++;}, draw(){},wake(){},
   });
   view.camera.fit=()=>fits++;
@@ -134,7 +134,7 @@ test('camera control before first data suppresses automatic fit', () => {
   let fits=0;
   const view=Object.assign(Object.create(renderer.GraphView.prototype), {
     data:{nodes:[],edges:[]}, simulation:new GraphPhysics(), camera:new GraphCamera(),
-    scene:new THREE.Scene(), selected:null, focused:null, paused:true,
+    scene:new THREE.Scene(), selected:null, focused:null, paused:true, activityTimes:new Map(),
     container:{dataset:{},setAttribute(){}}, release(){},draw(){},wake(){},
   });
   view.camera.fit=()=>fits++;
@@ -145,7 +145,7 @@ test('camera control before first data suppresses automatic fit', () => {
 
 test('restored coordinates acquire current adjacency before a changed root computes BFS',()=>{
   const view=Object.assign(Object.create(renderer.GraphView.prototype),{
-    data:{nodes:[],edges:[]},simulation:new GraphPhysics(),camera:new GraphCamera(),
+    data:{nodes:[],edges:[]},simulation:new GraphPhysics(),camera:new GraphCamera(),activityTimes:new Map(),
     scene:new THREE.Scene(),selected:null,focused:null,paused:true,loaded:true,
     container:{dataset:{},setAttribute(){}},release(){},draw(){},wake(){},
   });

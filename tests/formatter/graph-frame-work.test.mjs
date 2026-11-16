@@ -5,7 +5,7 @@ import {GraphView} from '../../static/src/graph-view.js';
 function frameView({publish=false,moving=false,themeDirty=false}={}) {
  let draws=0, elapsed;
  const view=Object.assign(Object.create(GraphView.prototype),{
-  frame:1,destroyed:false,unavailable:false,paused:false,lastTime:0,themeDirty,
+  frame:1,destroyed:false,unavailable:false,paused:false,lastTime:0,themeDirty,activityTimes:new Map(),
   container:{hidden:false},data:{nodes:Array.from({length:1050},()=>({}))},
   simulation:{active:true,positionVersion:3,advance(value){elapsed=value;if(publish)this.positionVersion++;}},
   camera:{tick(){return moving;}},quality:{sample(){return false;}},
@@ -41,7 +41,7 @@ test('installing an ordinary graph never runs synchronous solver warmup steps',a
  let warmups=0;
  const simulation=new GraphPhysics();simulation.step=()=>warmups++;
  const view=Object.assign(Object.create(GraphView.prototype),{
-  data:{nodes:[],edges:[]},simulation,camera:new GraphCamera(),scene:new THREE.Scene(),
+  data:{nodes:[],edges:[]},simulation,camera:new GraphCamera(),scene:new THREE.Scene(),activityTimes:new Map(),
   selected:null,focused:null,paused:true,
   container:{dataset:{},setAttribute(){}},release(){},draw(){},wake(){},
  });
@@ -58,7 +58,7 @@ test('camera-only drawing refreshes arrows and picking without uploading station
  const view=Object.assign(Object.create(GraphView.prototype),{
   data,simulation:new GraphPhysics(data.nodes,data.edges,'a'),camera:new GraphCamera(500,400),
   scene:new THREE.Scene(),batch:createGraphBatches(data.nodes,data.edges),renderCamera:new THREE.PerspectiveCamera(45),
-  selected:'a',focused:'a',forced:{matches:false},quality:{bloom(){return 0;}},pixelRatio:1,
+  selected:'a',focused:'a',forced:{matches:false},quality:{bloom(){return 0;}},pixelRatio:1,activityTimes:new Map(),
   matrix:new THREE.Matrix4(),projected:new Map(),container:{dataset:{}},theme:{background:'#000000'},
   renderer:{setClearColor(){},render(){}},drawLabels(){},drawHints(){},
  });
