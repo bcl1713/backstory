@@ -4,11 +4,18 @@
 <div data-graph-list hidden><h2>Connections</h2><nav data-graph-notes-navigation aria-label="Loaded notes" hidden></nav><ul data-graph-nodes></ul><h2>Directed links</h2><nav data-graph-links-navigation aria-label="Loaded links" hidden></nav><ul data-graph-edges></ul></div>
 </div>
 <nav class="graph-actions" aria-label="Graph actions">
+<button type="button" data-graph-present aria-keyshortcuts="p">Present graph</button>
 <button type="button" data-graph-toggle="find" aria-controls="graph-find-layer" aria-expanded="false" title="Find a note (/)">Find</button>
 <button type="button" data-graph-toggle="controls" aria-controls="graph-controls-layer" aria-expanded="false" title="Graph controls (o)">Controls</button>
 <button type="button" data-graph-toggle="evidence" aria-controls="graph-evidence-layer" aria-expanded="false" title="Selected note and evidence (e)">Evidence</button>
 <button type="button" data-graph-list-toggle aria-pressed="false" hidden>Connection list</button>
 </nav>
+<section class="graph-presentation-tools" data-graph-presentation-tools hidden aria-label="Presentation controls">
+<button type="button" data-graph-presentation-exit>Exit presentation</button>
+<button type="button" data-graph-wake aria-pressed="false">Keep screen awake</button>
+<button type="button" data-graph-presentation-hide>Hide controls</button>
+<p data-graph-presentation-status role="status" aria-live="polite"></p>
+</section>
 <div class="graph-status-layer"><div class="graph-selection-row"><p data-graph-selection></p><a data-graph-open-selected hidden>Open note</a></div><p data-graph-scope></p><p class="graph-caption" data-graph-summary role="status" aria-live="polite"></p><p class="graph-caption" data-graph-physics-status role="status" aria-live="polite"></p><p data-graph-status role="status" aria-live="polite" aria-atomic="true"></p></div>
 <section class="graph-overlay" data-graph-overlay="find" id="graph-find-layer" aria-labelledby="graph-find-title" hidden>
 <div class="graph-overlay-header"><h2 id="graph-find-title">Find a note</h2><button type="button" data-graph-dismiss>Close find</button></div>
@@ -69,7 +76,7 @@
 </section>
 <section class="graph-overlay" data-graph-overlay="help" id="graph-help-layer" aria-labelledby="graph-help-title" hidden>
 <div class="graph-overlay-header"><h2 id="graph-help-title">Graph help</h2><button type="button" data-graph-dismiss>Close help</button></div>
-<p data-graph-help>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space expands selection; one-hop labels show f + code shortcuts; f shows all visible node hints (type a code, Backspace edits, Escape cancels); / opens Find; o opens controls; e opens evidence; +/− zoom; ? toggles help. Escape dismisses the active layer first, then closes the graph. Tab leaves the map. Drag a node to tug its links; drag the background to orbit. Shift-drag or two fingers pans; pinch or the wheel zooms. Scroll within an open sheet to read its content. Fit and Reset orientation recover your view. [ and ] decrease/increase local depth from the same opening root (1–8 hops, with resource limits reported). Selecting any node adds its outgoing neighborhood without moving the view or changing the opening root. Every selected hop scope and All notes load automatically; Pause loading and Resume are separate from Pause motion. Active filters narrow either scope. Bloom describes this displayed graph only.</p>
+<p data-graph-help>Graph map only: arrows or h/j/k/l focus and inspect a node; Enter opens; Space expands selection; one-hop labels show f + code shortcuts; f shows all visible node hints (type a code, Backspace edits, Escape cancels); / opens Find; o opens controls; e opens evidence; p starts graph-only presentation; +/− zoom; ? toggles help. Escape dismisses the active layer first, then exits presentation or closes the graph. During presentation, c or a double-tap on the map opens temporary exit and wake-lock controls. Tab leaves the map. Drag a node to tug its links; drag the background to orbit. Shift-drag or two fingers pans; pinch or the wheel zooms. Scroll within an open sheet to read its content. Fit and Reset orientation recover your view. [ and ] decrease/increase local depth from the same opening root (1–8 hops, with resource limits reported). Selecting any node adds its outgoing neighborhood without moving the view or changing the opening root. Every selected hop scope and All notes load automatically; Pause loading and Resume are separate from Pause motion. Active filters narrow either scope. Bloom describes this displayed graph only.</p>
 
 </section>
 </div>

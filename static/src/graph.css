@@ -1,5 +1,20 @@
 /* The canvas owns the viewport. Layers never participate in its layout. */
 .graph-panel { --graph-node: var(--link); --graph-destination: var(--heading-4); --graph-edge: var(--muted); --graph-highlight: var(--heading-3); --graph-bloom: var(--link); font-family: var(--note-font); color: var(--foreground); min-width: 0; }
+.graph-presentation-tools[hidden] { display: none !important; }
+.graph-presentation-tools { position: fixed; z-index: 10000; right: max(.75rem, env(safe-area-inset-right)); bottom: max(.75rem, env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; max-width: min(36rem, calc(100vw - 1.5rem)); padding: .5rem; border: 1px solid var(--border); border-radius: .5rem; background: var(--background); color: var(--foreground); box-shadow: 0 2px 12px #0008; }
+.graph-presentation-tools p { flex-basis: 100%; margin: 0; }
+.graph-panel.graph-presenting { position: fixed !important; z-index: 2147483646; inset: 0; width: 100vw; height: 100dvh; min-height: 0; background: var(--background); }
+.graph-panel.graph-presenting .graph-workspace { position: absolute; inset: 0; }
+.graph-panel.graph-presenting .graph-map { position: absolute; inset: 0; width: 100%; height: 100%; }
+.graph-panel.graph-presenting .graph-actions, .graph-panel.graph-presenting .graph-status-layer,
+.graph-panel.graph-presenting .graph-overlay { display: none !important; }
+body.graph-presentation .skip-link, body.graph-presentation #site-navigation,
+body.graph-presentation #main > *:not([data-graph-page]), body.graph-presentation [data-quick-open] { display: none !important; }
+body.graph-presentation [data-graph-page] { position: fixed; z-index: 2147483645; inset: 0; width: 100vw; height: 100dvh; margin: 0; padding: 0; background: var(--background); }
+body.graph-presentation [data-graph-page] > .graph-header, body.graph-presentation [data-graph-server-list] { display: none !important; }
+body.graph-presentation [data-graph-dialog][open] { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; border-radius: 0; background: var(--background); }
+body.graph-presentation [data-graph-dialog][open] > .graph-header { display: none !important; }
+:fullscreen.graph-panel { width: 100vw; height: 100dvh; background: var(--background); }
 [data-graph-dialog] { width: 100%; max-width: none; height: 100svh; max-height: none; margin: 0; box-sizing: border-box; overflow: hidden; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); border: 0; background: var(--background); color: var(--foreground); }
 [data-graph-dialog][open], [data-graph-page].graph-enhanced { display: flex; flex-direction: column; }
 [data-graph-dialog]::backdrop { background: var(--background); }

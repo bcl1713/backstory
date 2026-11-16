@@ -18,7 +18,9 @@ test('overlapping cross-path saves are explicitly not started, never queued', as
     posts++;
     return new Promise(resolve => { release = () => resolve({ ok: true, status: 200, url: 'http://synthetic.test/tools/save/', headers: { get: () => 'application/json' }, json: async () => ({ state: 'saved', path: 'a.md', source: 'saved', revision: '"' + 'b'.repeat(64) + '"', authoritative: true, untrusted_content: true }) }); });
   };
-  const source = (await readFile(new URL('../../static/src/wiki-tools.js', import.meta.url), 'utf8')).replace("import { ensureWikiTimezone } from './wiki-timezone.js';", 'const ensureWikiTimezone = async () => { globalThis.timezoneCalls++; };');
+  const source = (await readFile(new URL('../../static/src/wiki-tools.js', import.meta.url), 'utf8'))
+    .replace("import { ensureWikiTimezone } from './wiki-timezone.js';", 'const ensureWikiTimezone = async () => { globalThis.timezoneCalls++; };')
+    .replace("import { publishNoteActivity } from './note-activity.js';", 'const publishNoteActivity = () => {};');
   await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
   const args = { path: 'a.md', source: 'saved', revision: '"' + 'a'.repeat(64) + '"' };
   const pending = registered.save_note.execute(args);

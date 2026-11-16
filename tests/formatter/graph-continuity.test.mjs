@@ -9,7 +9,7 @@ const data = paths => ({ nodes: paths.map(path => ({path,title:path})),
   edges: paths.slice(1).map(destination => ({source:paths[0],destination})) });
 function view() {
   return Object.assign(Object.create(GraphView.prototype), {
-    data:data([]), simulation:new GraphPhysics(), camera:new GraphCamera(800,600),
+    data:data([]), simulation:new GraphPhysics(), camera:new GraphCamera(800,600), activityTimes:new Map(),
     scene:new THREE.Scene(), selected:null, focused:null, paused:true,
     container:{dataset:{},setAttribute(){},focus(){},setPointerCapture(){},hasPointerCapture(){return true;},releasePointerCapture(){}},
     canvas:{getBoundingClientRect(){return {left:0,top:0};}}, pointers:new Map(), reduced:{matches:false},

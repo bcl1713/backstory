@@ -3,6 +3,8 @@ import { GraphView } from './graph-view.js';
 import { GraphSnapshot } from './graph-snapshot.js';
 import { indexProgress } from './graph-index-status.js';
 import { DEFAULT_FORCES, loadForces, saveForces } from './graph-preferences.js';
+import { createPresentation } from './graph-presentation.js';
+import { createNoteActivity, NOTE_ACTIVITY_CHANNEL } from './note-activity.js';
 
 let preferredList = false;
 const linkTo = path => '/notes/' + path.split('/').map(encodeURIComponent).join('/');
@@ -71,6 +73,63 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
   let listMode = preferredList, graphicsAvailable = true, trail = [], activeParams = null;
   let pendingPositions = null, suspendedSelection = null;
   let view = null, loadingPaused = false, loadingError = false, loadingReason = '', quietRefresh = false;
+  let activityChannel = null;
+  try { if ('BroadcastChannel' in window) activityChannel = new BroadcastChannel(NOTE_ACTIVITY_CHANNEL); } catch {}
+  const activity = createNoteActivity({ channel: activityChannel });
+  const activityTimes = new Map();
+  let wasPresenting = false;
+  let presentationToolsTimer;
+  const presentationMode = createPresentation({ graph: panel, onState: state => {
+    const active = state.mode !== 'closed';
+    panel.classList.toggle('graph-presenting', active);
+    document.body.classList.toggle('graph-presentation', active);
+    const tools = find('[data-graph-presentation-tools]'); tools.hidden = !active || !tools.hasAttribute('data-open');
+    const wake = find('[data-graph-wake]');
+    wake.setAttribute('aria-pressed', String(state.wantsWake));
+    wake.textContent = state.wantsWake ? 'Stop keeping screen awake' : 'Keep screen awake';
+    find('[data-graph-presentation-status]').textContent = `${state.mode === 'fullscreen' ? 'Browser fullscreen active.' : active ? 'Fullscreen unavailable or exited; graph-only view active.' : ''}${state.wake === 'active' ? ' Screen wake lock active.' : state.wake === 'denied' ? ' Screen wake lock was denied.' : state.wake === 'unsupported' ? ' Screen wake lock is not supported.' : state.wake === 'suspended' ? ' Screen wake lock suspended while hidden.' : state.wake === 'released' ? ' Screen wake lock was released.' : ''}`;
+    if (active) wasPresenting = true;
+    else if (wasPresenting) { wasPresenting = false; find('[data-graph-present]').focus({ preventScroll: true }); }
+  } });
+  const hidePresentationTools = (restoreFocus = false) => {
+    clearTimeout(presentationToolsTimer); delete find('[data-graph-presentation-tools]').dataset.open;
+    find('[data-graph-presentation-tools]').hidden = true;
+    if (restoreFocus && panel.classList.contains('graph-presenting')) map.focus({ preventScroll: true });
+  };
+  const showPresentationTools = () => {
+    const tools = find('[data-graph-presentation-tools]'); tools.dataset.open = ''; tools.hidden = false;
+    clearTimeout(presentationToolsTimer); presentationToolsTimer = setTimeout(() => hidePresentationTools(true), 12000);
+  };
+  listen(find('[data-graph-present]'), 'click', () => { showPresentationTools(); void presentationMode.enter(); });
+  listen(find('[data-graph-presentation-exit]'), 'click', () => void presentationMode.exit());
+  listen(find('[data-graph-wake]'), 'click', () => { showPresentationTools(); void presentationMode.toggleWake(); });
+  listen(find('[data-graph-presentation-hide]'), 'click', () => hidePresentationTools(true));
+  listen(document, 'fullscreenchange', () => presentationMode.fullscreenChanged());
+  listen(document, 'visibilitychange', () => void presentationMode.visibilityChanged(document.hidden));
+  listen(panel, 'dblclick', event => { if (panel.classList.contains('graph-presenting') && event.target.closest('[data-graph-map]')) {
+    showPresentationTools(); find('[data-graph-presentation-exit]').focus({ preventScroll: true });
+  } });
+  listen(document, 'keydown', event => {
+    if (event.isComposing || event.ctrlKey || event.altKey || event.metaKey) return;
+    if (!panel.classList.contains('graph-presenting') && event.target === map && event.key.toLowerCase() === 'p') {
+      event.preventDefault(); showPresentationTools(); void presentationMode.enter(); return;
+    }
+    if (!panel.classList.contains('graph-presenting')) return;
+    if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); void presentationMode.exit(); }
+    else if (event.key.toLowerCase() === 'c') { showPresentationTools(); find('[data-graph-presentation-exit]').focus({ preventScroll: true }); }
+  }, { capture: true });
+  activityChannel?.addEventListener('message', event => {
+    const message = activity.parse(event.data);
+    if (!message || closed || !page?.nodes.some(node => node.path === message.path)) return;
+    activityTimes.set(message.path, performance.now());
+    view?.setActivity(activityTimes);
+  });
+  listen(window, 'backstory:note-activity', event => {
+    const message = activity.parse(event.detail);
+    if (!message || closed || !page?.nodes.some(node => node.path === message.path)) return;
+    activityTimes.set(message.path, performance.now());
+    view?.setActivity(activityTimes);
+  });
   let storage; try { storage = window.localStorage; } catch { /* Preferences remain page-local. */ }
   let forces = loadForces(storage);
   const cancelAutomatic = () => { clearTimeout(refreshTimer); refreshTimer = null; };
@@ -297,6 +356,9 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     let mapFailure = false;
     try {
       view?.setGraph(page, currentPath, activeParams.path || null);
+      const visiblePaths = new Set(page.nodes.map(node => node.path));
+      for (const path of activityTimes.keys()) if (!visiblePaths.has(path)) activityTimes.delete(path);
+      view?.setActivity(activityTimes);
       view?.setSelection(selected, focused, {center:!restorePresentation});
     } catch { mapFailure = true; unavailable(); }
     if (fit && page.nodes.length && !mapFailure && !view?.cameraControlled) view?.fit();
@@ -459,7 +521,7 @@ export function mountGraph(root, { currentPath = '', onClose = () => {} } = {}) 
     focusSearch,
     dismissLayer: () => layers.close(),
     focusNavigation() { if (listMode) find('[data-graph-list-toggle]').focus({ preventScroll: true }); else map.focus({ preventScroll: true }); },
-    destroy() { closed = true; stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); layers.destroy(); life.abort(); view?.destroy(); pendingPositions = suspendedSelection = null; snapshot.clear(); page = null; selected = focused = null;
+    destroy() { closed = true; clearTimeout(presentationToolsTimer); void presentationMode.exit(); activityChannel?.close(); activityTimes.clear(); stopIndexProgress(); sequence++; cancelAutomatic(); request?.abort(); layers.destroy(); life.abort(); view?.destroy(); pendingPositions = suspendedSelection = null; snapshot.clear(); page = null; selected = focused = null;
       find('[data-graph-nodes]').replaceChildren(); find('[data-graph-edges]').replaceChildren();
       for (const kind of ['notes', 'links']) {
         const navigation = find(`[data-graph-${kind}-navigation]`); navigation.replaceChildren(); navigation.hidden = true;
