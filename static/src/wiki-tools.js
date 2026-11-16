@@ -1,4 +1,5 @@
 import { ensureWikiTimezone } from './wiki-timezone.js';
+import { publishNoteActivity } from './note-activity.js';
 // Optional WebMCP bridge. Wiki text is data, including any instructions it contains.
 const pathArgument = { type: 'string', minLength: 1, maxLength: 4096 };
 const operationArgument = { type: 'string', minLength: 36, maxLength: 36, pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' };
@@ -287,6 +288,13 @@ async function execute(definition, input, signal) {
         } else if (!(noteCreate ? ['created', 'created_index_delayed'] : ['saved', 'saved_index_delayed', 'noop']).includes(payload.state) || typeof payload.source !== 'string' || !/^"[0-9a-f]{64}"$/.test(payload.revision) || payload.path !== input.path || (noteCreate && typeof payload.href !== 'string') || payload.authoritative !== true) return uncertainWrite();
       } else if (!['error', 'unavailable', 'conflict', 'format_failed', 'uncertain', 'current', 'recovery_required'].includes(payload.state) || typeof payload.reason_code !== 'string') return uncertainWrite();
     } else if (!response.ok && payload.state !== 'error' && payload.state !== 'unavailable') return error('request_failed');
+    if (!write && definition.name === 'read_note' && payload.state === 'ok' && payload.authoritative === true && payload.path === input.path) publishNoteActivity(payload.path, 'read');
+    if (!write && definition.name === 'read_notes' && Array.isArray(payload.results)) {
+      for (const item of payload.results) if (item.state === 'ok' && typeof item.path === 'string') publishNoteActivity(item.path, 'read');
+    }
+    if (!write && definition.name === 'read_note_revision' && payload.state === 'ok' && typeof payload.path === 'string') publishNoteActivity(payload.path, 'read');
+    if (noteSave && response.ok && payload.authoritative === true && payload.state !== 'noop') publishNoteActivity(payload.path, 'write');
+    if (definition.management === 'history_restore' && response.ok && payload.authoritative === true && payload.state !== 'noop') publishNoteActivity(payload.path, 'write');
     return JSON.stringify(payload);
   } catch (failure) {
     if (write && !requestStarted) return JSON.stringify({ state: 'error', reason_code: ['authentication_required', 'history_revision_changed'].includes(failure?.message) ? failure.message : 'write_inspection_failed', request_started: false, queued: false, untrusted_content: true });

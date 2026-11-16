@@ -3,6 +3,7 @@ import { mergeSources } from './source-merge.js';
 import { installNoteSync, readNoteSnapshot } from './note-sync.js';
 import { createIdleAutosave } from './idle-autosave.js';
 import { blockFormattingChanges } from './block-format.js';
+import { publishNoteActivity } from './note-activity.js';
 
 // These guards retain the in-memory draft; no browser persistence is used.
 export function installDraftGuards(isDirty, onLinkedNote = () => {}) {
@@ -47,6 +48,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
   const find = selector => document.querySelector(selector);
   const parse = id => JSON.parse(find(id).textContent);
   let path = parse('#note-path');
+  if (!isNew && path) publishNoteActivity(path, 'read');
   mountLinkDiscovery(() => path);
   const folder = parse('#note-folder');
   const linkFragment = parse('#link-fragment') || '';
@@ -358,6 +360,7 @@ export function mountNoteActions({ editor, initialSource, isNew, bom }) {
         return;
       }
       if (!['noop', 'saved', 'saved_index_delayed', 'saved_source', 'saved_source_index_delayed'].includes(result.state) || typeof result.source !== 'string' || typeof result.revision !== 'string') throw new Error('unconfirmed response');
+      if (result.state !== 'noop') publishNoteActivity(requestedPath, 'write');
       const current = editor.getSource();
       const sameDraft = draftVersion === submittedVersion && current === submitted;
       const merged = sameDraft ? result.source : mergeSources(submitted, current, result.source);

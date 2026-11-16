@@ -5,6 +5,7 @@ import { layoutLabels } from './graph-labels.js';
 import { GraphHints, hintAssignments, outboundDestinations } from './graph-hints.js';
 import { nodeRadius, connectionGeometry, createConnectionGeometry } from './graph-geometry.js';
 import { hopTiers, emission, nearestNode, AdaptiveQuality, BLOOM_DEFAULT, BLOOM_HIGH } from './graph-layout.js';
+import { activityPulse } from './note-activity.js';
 
 function geometry(count, color = false, alpha = false) {
   const result = new THREE.BufferGeometry();
@@ -72,7 +73,7 @@ export class GraphView {
       this.container.dataset.physics = mode; this.actions.onPhysicsStatus?.(mode);
     } }); this.camera = new GraphCamera(); this.quality = new AdaptiveQuality();
     this.data = { nodes: [], edges: [] }; this.selected = this.focused = null;
-    this.frame = null; this.destroyed = false; this.intensity = BLOOM_DEFAULT; this.pointers = new Map(); this.projected = new Map();
+    this.frame = null; this.destroyed = false; this.intensity = BLOOM_DEFAULT; this.pointers = new Map(); this.projected = new Map(); this.activityTimes = new Map(); this.nodeIndex = new Map();
     this.reduced = matchMedia('(prefers-reduced-motion: reduce)'); this.forced = matchMedia('(forced-colors: active)');
     this.paused = this.reduced.matches; this.idleAfter = performance.now() + 3000;
     if (this.paused) this.simulation.suspend();
@@ -85,7 +86,7 @@ export class GraphView {
     this.hintLayer.hidden = true;
     container.replaceChildren(this.canvas, this.labels, this.hintLayer); container.graphView = this;
     this.scene = new THREE.Scene(); this.renderCamera = new THREE.PerspectiveCamera(45, 1, 1, 1000000);
-    this.matrix = new THREE.Matrix4(); this.color = new THREE.Color();
+    this.matrix = new THREE.Matrix4(); this.color = new THREE.Color(); this.activityColor = new THREE.Color();
     const listen = (el, name, fn, options = {}) => el.addEventListener(name, fn, { ...options, signal: this.life.signal });
     // Register before WebGLRenderer so our state is paused throughout recovery.
     listen(this.canvas, 'webglcontextlost', event => { event.preventDefault(); this.unavailable = true; this.release(null, true); this.stop(); this.container.dataset.renderer = 'lost'; this.actions.onUnavailable?.('The 3D map lost its graphics context. Your loaded notes remain available in the list.'); });
@@ -154,6 +155,8 @@ export class GraphView {
     this.data = data; this.current = current; this.root = root;
     if (!changed) { this.refreshShortcuts(); this.simulation.setRoot(root); if (this.paused) this.simulation.pause(); this.themeDirty = true; this.draw(); return; }
     this.topology = topology;
+    this.nodeIndex = new Map(data.nodes.map((node, index) => [node.path, index]));
+    this.activityTimes = new Map([...this.activityTimes].filter(([path]) => this.nodeIndex.has(path)));
     if ((this.drag?.path && !data.nodes.some(node => node.path === this.drag.path)) || !data.nodes.length) this.release(null, true);
     // Drop derived identities immediately, including when a hidden map cannot draw.
     this.projected?.clear(); this.pickGrid?.clear();
@@ -207,6 +210,7 @@ export class GraphView {
     this.draw(); this.wake();
   }
   setBloom(value) { this.intensity = Math.min(BLOOM_HIGH, Math.max(0, Number(value) || 0)); this.container.dataset.bloom = String(this.intensity); this.themeDirty = true; this.draw(); }
+  setActivity(times) { this.activityTimes = new Map([...times].filter(([path]) => this.nodeIndex.has(path))); this.activityDirty = true; this.draw(); if (!this.paused) this.wake(); }
   setPaused(value) {
     this.paused = !!value || this.reduced.matches; this.release(null, true);
     if (this.paused) { this.simulation.pause(); this.camera.snap(); this.stop(); } else { this.simulation.reheat(); this.wake(); }
@@ -402,7 +406,8 @@ export class GraphView {
     this.data.nodes.forEach((node, i) => {
       const highlighted = node.path === this.selected, focused = node.path === this.focused, destination = this.destinations?.has(node.path);
       const accent = this.theme.destination || this.theme.focus;
-      batch.nodes.setColorAt(i, this.color.set(highlighted ? this.theme.highlight : destination ? accent : focused ? this.theme.focus : this.theme.node));
+      this.color.set(highlighted ? this.theme.highlight : destination ? accent : focused ? this.theme.focus : this.theme.node);
+      batch.nodes.setColorAt(i, this.color);
       this.color.set(highlighted ? this.theme.highlight : destination ? accent : this.theme.bloom).multiplyScalar(emission(this.tiers.nodes.get(node.path), bloom));
       this.color.toArray(batch.halos.geometry.attributes.color.array, i * 3);
     });
@@ -422,6 +427,32 @@ export class GraphView {
     for (const o of [batch.halos, batch.edges, batch.arrows, batch.edgeHalos]) o.geometry.attributes.color.needsUpdate = true;
     this.themeDirty = false;
   }
+  applyActivityColors(now = performance.now()) {
+    if (!this.activityTimes.size || !this.batch) return;
+    if (this.paused || this.reduced.matches || this.forced.matches) {
+      this.activityTimes.clear(); this.applyColors(this.quality.bloom(this.intensity, this.forced.matches)); return;
+    }
+    let expired = false;
+    for (const [path, started] of this.activityTimes) if (!activityPulse(now, started)) { this.activityTimes.delete(path); expired = true; }
+    const bloom = this.quality.bloom(this.intensity, this.forced.matches);
+    if (expired) this.applyColors(bloom);
+    for (const [path, started] of this.activityTimes) {
+      const pulse = activityPulse(now, started);
+      const index = this.nodeIndex.get(path);
+      if (!pulse || index === undefined) continue;
+      const highlighted = path === this.selected;
+      const destination = this.destinations?.has(path), focused = path === this.focused;
+      const accent = this.theme.destination || this.theme.focus;
+      this.color.set(highlighted ? this.theme.highlight : destination ? accent : focused ? this.theme.focus : this.theme.node);
+      if (!highlighted && !destination) this.color.lerp(this.activityColor.set(this.theme.highlight), pulse * .4);
+      this.batch.nodes.setColorAt(index, this.color);
+      const amount = Math.min(BLOOM_HIGH, emission(this.tiers.nodes.get(path), bloom) + pulse * .55);
+      this.color.set(highlighted ? this.theme.highlight : destination ? accent : this.theme.bloom).multiplyScalar(amount);
+      this.color.toArray(this.batch.halos.geometry.attributes.color.array, index * 3);
+    }
+    if (this.batch.nodes.instanceColor) this.batch.nodes.instanceColor.needsUpdate = true;
+    this.batch.halos.geometry.attributes.color.needsUpdate = true;
+  }
   draw({ positionsChanged = false } = {}) {
     if (this.destroyed || this.unavailable || !this.renderer || !this.batch || document.hidden || this.container.hidden) return;
     if (this.selected) this.centerSelectedCamera();
@@ -433,8 +464,10 @@ export class GraphView {
     const geometryChanged = worldChanged || cameraChanged;
     this.renderCamera.aspect = camera.width / camera.height; this.renderCamera.position.set(eye.x, eye.y, eye.z); this.renderCamera.up.set(-basis.up.x, -basis.up.y, -basis.up.z); this.renderCamera.lookAt(camera.x, camera.y, camera.z); this.renderCamera.updateProjectionMatrix(); this.renderCamera.updateMatrixWorld();
     const bloom = this.quality.bloom(this.intensity, this.forced.matches);
-    batch.halos.visible = batch.edgeHalos.visible = bloom > 0; batch.halos.material.uniforms.viewportHeight.value = camera.height * this.pixelRatio;
+    batch.halos.visible = bloom > 0 || this.activityTimes.size > 0; batch.edgeHalos.visible = bloom > 0; batch.halos.material.uniforms.viewportHeight.value = camera.height * this.pixelRatio;
     if (this.themeDirty) this.applyColors(bloom);
+    if (this.activityDirty || this.activityTimes.size) this.applyActivityColors();
+    this.activityDirty = false;
     this.renderer.setClearColor(this.theme.background);
     if (geometryChanged) {
       // Reuse projected records and picking buckets instead of allocating one
@@ -557,12 +590,18 @@ export class GraphView {
     const version = this.simulation.positionVersion;
     this.simulation.advance(elapsed);
     const positionsChanged = this.simulation.positionVersion !== version || this.drawnPositionVersion != null && this.drawnPositionVersion !== this.simulation.positionVersion;
+    let activityActive = false, activityExpired = false;
+    for (const [path, started] of this.activityTimes) {
+      if (time - started >= 1800) { this.activityTimes.delete(path); activityExpired = true; }
+      else activityActive = true;
+    }
+    if (activityExpired) this.themeDirty = true;
     const idle = this.loaded && this.data.nodes.length && !this.reduced?.matches && !this.pointers?.size && !this.hints?.active && time >= this.idleAfter;
     if (!this.hints?.active) this.trackSelection();
     if (idle) this.camera.idleOrbit(elapsed, Math.min(1, (time - this.idleAfter) / 2000));
     const moving = this.camera.tick(elapsed);
-    if (positionsChanged || moving || idle || this.themeDirty) this.draw({ positionsChanged });
-    if (this.simulation.active || moving || this.loaded && this.data.nodes.length) this.frame = requestAnimationFrame(next => this.tick(next));
+    if (positionsChanged || moving || idle || this.themeDirty || activityActive) this.draw({ positionsChanged });
+    if (this.simulation.active || moving || this.loaded && this.data.nodes.length || activityActive) this.frame = requestAnimationFrame(next => this.tick(next));
     else if (this.simulation.limitReached) this.actions.onLimit?.();
   }
   stop() { if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; this.simulation.suspend?.(); this.simulation.cancelPending?.(); }
