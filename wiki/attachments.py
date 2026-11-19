@@ -146,9 +146,11 @@ def serve_attachment(request, path):
             descriptor = None  # Ownership transferred to response.close().
         response["Content-Length"] = str(length)
         response["Accept-Ranges"] = "bytes"
-        response["Content-Disposition"] = content_disposition_header(not inline, name)
+        from .file_uploads import original_name
+        original = original_name(path)
+        response["Content-Disposition"] = content_disposition_header(not inline, original or name)
         response["X-Content-Type-Options"] = "nosniff"
-        response["Cache-Control"] = "no-store"
+        response["Cache-Control"] = "private, no-store" if original else "no-store"
         if status == 206:
             response["Content-Range"] = f"bytes {start}-{end}/{size}"
         return response

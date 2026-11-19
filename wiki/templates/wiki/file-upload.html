@@ -1,0 +1,11 @@
+<dialog data-file-upload-dialog aria-labelledby="file-upload-title" class="image-upload-dialog">
+<h2 id="file-upload-title">Upload file</h2>
+<p>Any file, including empty files; up to 8 MiB. Exact bytes stay in root assets even if you do not insert a link. Uploading never saves a note.</p>
+<label for="file-upload-input">File to upload</label><input id="file-upload-input" type="file">
+<progress aria-label="File upload progress" max="100" value="0" hidden></progress>
+<p role="status" aria-live="polite" aria-atomic="true"></p>
+<label for="file-upload-markdown">Attachment Markdown</label><textarea id="file-upload-markdown" readonly rows="3"></textarea>
+<p data-file-upload-identity hidden>Asset identity: <code data-file-upload-path></code></p>
+<p><a data-file-upload-download hidden>Download uploaded file</a></p>
+<div class="editor-controls"><button type="button" data-file-upload-send>Upload</button><button type="button" data-file-upload-inspect hidden>Inspect upload status</button><button type="button" data-file-upload-copy disabled>Copy link</button><button type="button" data-file-upload-insert disabled>Insert into draft</button><button type="button" data-file-upload-close>Close</button></div>
+</dialog>

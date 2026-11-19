@@ -125,6 +125,8 @@ def source(request, path):
 def preview(request, path):
     try:
         authorize_content(request, path)
+        if path.startswith('assets/file-') and path.endswith('.attachment'):
+            raise StorageError('path_denied', 404)
         require_ready()
         if request.method == "GET":
             snapshot = read_note(path)

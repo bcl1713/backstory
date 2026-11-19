@@ -1,7 +1,10 @@
 from django.urls import path
-from . import tool_views, image_uploads, graph_views, removal_tools, management_tools
+from . import tool_views, image_uploads, file_uploads, graph_views, removal_tools, management_tools
 
 urlpatterns = [
+    path('files/', file_uploads.upload_file, name='tool-files'),
+    path('files/encoded/', file_uploads.upload_encoded, name='tool-files-encoded'),
+    path('files/inspect/', file_uploads.inspect_upload, name='tool-files-inspect'),
     path('moves/preview/', management_tools.preview_move_tool, name='tool-move-preview'),
     path('moves/get/', management_tools.get_move, name='tool-move-get'),
     path('moves/commit/', management_tools.commit_move_tool, name='tool-move-commit'),

@@ -109,6 +109,8 @@ def require_ready():
 
 def read_note(path: str) -> NoteSnapshot:
     validate_path(path, "content")
+    if path.startswith('assets/file-') and path.endswith('.attachment'):
+        raise PathDenied()
     require_ready()
     raw = read_regular(path, purpose="content", max_bytes=settings.BACKSTORY_NOTE_MAX_BYTES, too_large_code="note_too_large")
     bom = raw.startswith(b"\xef\xbb\xbf")

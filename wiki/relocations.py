@@ -51,8 +51,8 @@ def assert_writes_available():
 
 
 @contextmanager
-def wiki_write_lock():
-    with application_lock('wiki-write'):
+def wiki_write_lock(*, blocking=True):
+    with application_lock('wiki-write', blocking=blocking):
         assert_writes_available()
         yield
 

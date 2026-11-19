@@ -15,10 +15,10 @@ for(const width of [360,390,1180])test(`persistent upload button preserves modal
  const now=new Date('2026-11-01T12:00:00Z');await page.clock.install({time:now});await page.clock.pauseAt(new Date(now.getTime()+1000));
  await page.goto('/notes/ToolbarUpload.md');await settleEditorWithClock(page);
  const toolbar=page.locator('.persistent-actions'),trigger=toolbar.getByRole('button',{name:'Upload image',exact:true});
- await expect(trigger).toBeVisible();await expect(toolbar.locator('button')).toHaveText(['Menu','Save','Upload image']);
+ await expect(trigger).toBeVisible();await expect(toolbar.locator('button')).toHaveText(['Menu','Save','Upload image','Upload file']);
  await expect(page.getByRole('navigation',{name:'Main',exact:true})).toBeHidden();
  const boxes=await toolbar.locator('button').evaluateAll(buttons=>buttons.map(button=>{const b=button.getBoundingClientRect();return{x:b.x,y:b.y,right:b.right,height:b.height};}));
- expect(boxes.every(b=>b.x>=0&&b.right<=width&&b.height>=44)).toBe(true);expect(new Set(boxes.map(b=>b.y)).size).toBe(1);
+ expect(boxes.every(b=>b.x>=0&&b.right<=width&&b.height>=44)).toBe(true);expect(new Set(boxes.slice(0,3).map(b=>b.y)).size).toBe(1);expect(new Set(boxes.map(b=>b.y)).size).toBeLessThanOrEqual(width<600?2:1);
  await host(page).evaluate((el,value)=>el.markdownEditor.setSource(value),draft);await page.clock.runFor(64);
  await page.screenshot({path:`${runtime}/reports/image-upload-toolbar-${width}.png`});
  const dialog=page.getByRole('dialog',{name:'Upload image'});
