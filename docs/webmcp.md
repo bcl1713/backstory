@@ -266,6 +266,12 @@ retry a write or interpret a client error as proof that nothing changed.
 
 ## Raster image uploads
 
+Arbitrary bytes now use the consequential `upload_file` tool and read-only
+`inspect_upload`, backed by the same service as the ordinary Upload file UI.
+See [file uploads](file-uploads.md) for the strict 256 KiB decoded base64 transport,
+unknown actual-host argument limit, retained inspection identity and separately
+OPEN postdeployment host acceptance. These tools never edit/save a note.
+
 The authenticated [image upload dialog and raw-body API](image-uploads.md) write
 validated raster images into the existing assets directory. Uploads are explicit,
 never overwrite existing files and never save or silently edit a note. This binary

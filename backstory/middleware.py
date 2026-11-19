@@ -22,7 +22,8 @@ class ResponsePolicyMiddleware:
             response = self.get_response(request)
         response["X-Content-Type-Options"] = "nosniff"
         response["X-Frame-Options"] = "DENY"
-        response["Cache-Control"] = "no-store"
+        if response.get('Cache-Control') != 'private, no-store':
+            response["Cache-Control"] = "no-store"
         response["Content-Security-Policy"] = f"default-src 'self'; script-src 'self'; style-src 'self' 'nonce-{request.csp_style_nonce}'; img-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
         response["Referrer-Policy"] = "same-origin"
         from .renderers import successful_mermaid_shell, renderer_origin

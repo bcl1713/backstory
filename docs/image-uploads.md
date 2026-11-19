@@ -60,3 +60,8 @@ An unconfirmed publication returns HTTP 409, `state: uncertain`,
 `authoritative: false`, `reason_code: image_upload_unconfirmed` and
 `inspect_before_retry: true`. Other failures carry sanitized reason codes.
 No image contents or private filenames belong in public issue reports.
+
+## Arbitrary attachments
+
+For exact bytes of any file type, use [Upload file](file-uploads.md). Upload image
+remains the validated raster/inline path described above.

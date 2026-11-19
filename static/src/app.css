@@ -99,6 +99,7 @@ button:disabled { opacity: .6; cursor: wait; }
 .persistent-actions { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .5rem; background: var(--background); border-bottom: 1px solid var(--border); }
 .persistent-actions button, .persistent-actions p { margin: 0; }
 .persistent-actions p { flex: 1 1 10rem; }
+[data-file-upload-dialog] { overflow-wrap: anywhere; }
 input, select, button { min-height: 44px; box-sizing: border-box; }
 select { max-width: 100%; }
 input[type=checkbox] { display: inline-block; min-height: auto; }

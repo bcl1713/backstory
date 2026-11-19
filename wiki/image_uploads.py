@@ -92,17 +92,9 @@ def _matches(directory, name, data):
 
 
 def _quota(directory, additional):
-    count = size = 0
-    with os.scandir(directory) as entries:
-        for index, entry in enumerate(entries):
-            if index >= MAX_ENTRIES:
-                raise StorageError('image_storage_scan_limit', 413)
-            if _MANAGED.fullmatch(entry.name):
-                info = entry.stat(follow_symlinks=False)
-                count += 1
-                size += info.st_size
-    if count >= MAX_FILES or size + additional > MAX_STORAGE_BYTES:
-        raise StorageError('image_storage_full', 413)
+    from .file_uploads import _quota as managed_quota
+    managed_quota(directory, additional, max_files=MAX_FILES,
+                  max_bytes=MAX_STORAGE_BYTES, max_entries=MAX_ENTRIES)
 
 
 def _publish(path, data):

@@ -1,4 +1,5 @@
 import { mountQuickOpen } from './quick-open.js';
+import { mountFileUpload } from './file-upload.js';
 import { mountFileTree } from './file-tree.js';
 import { mountGraphLauncher } from './graph-launcher.js';
 
@@ -7,6 +8,7 @@ import { mountThemes } from './themes.js';
 import { ensureWikiTimezone } from './wiki-timezone.js';
 
 mountQuickOpen();
+if (!document.querySelector('[data-markdown-editor]')) mountFileUpload();
 mountThemes();
 // Keep the explicit settings form's displayed compare-and-set value stable.
 if (!document.querySelector('[data-wiki-timezone-settings]')) {

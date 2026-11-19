@@ -1,11 +1,12 @@
 import { mountImageUpload } from './image-upload.js';
+import { mountFileUpload } from './file-upload.js';
 import { createLinkFollower, activateLink } from './follow-link.js';
 import { initialVimEnabled, rememberVimEnabled, shouldFocusEditor } from './editor-preferences.js';
 import { isVimToggleShortcut } from './editor-shortcuts.js';
 import { ChangeSet, Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
 import { EditorView, keymap, drawSelection } from '@codemirror/view';
 import { forceParsing, syntaxTreeAvailable } from '@codemirror/language';
-import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, isolateHistory, invertedEffects, undo, redo } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { mountNoteActions } from './navigation.js';
 import { installHeadingNavigation } from './heading-navigation.js';
@@ -247,6 +248,22 @@ function attachNoteEditor() {
     if (api) api.view.dispatch({ changes: { from: 0, to: api.view.state.doc.length, insert: fallback.value }, annotations: Transaction.userEvent.of('input') });
     else changed(fallback.value.replaceAll('\n', fallbackNewline));
   });
+  // The enhanced editor remains the source/history owner while its plain
+  // textarea is visible. Avoid a separate stale native textarea undo stack.
+  fallback.addEventListener('beforeinput', event => {
+    if (api && ['historyUndo', 'historyRedo'].includes(event.inputType)) {
+      event.preventDefault();
+      (event.inputType === 'historyUndo' ? undo : redo)(api.view);
+    }
+  });
+  fallback.addEventListener('keydown', event => {
+    if (!api || !(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const key = event.key.toLowerCase();
+    if (key === 'z' || key === 'y') {
+      event.preventDefault();
+      (key === 'y' || event.shiftKey ? redo : undo)(api.view);
+    }
+  });
   const editor = {
     getSource: () => api ? api.getSource() : fallbackSource,
     setSource: value => { if (api) api.setSource(value); else { fallback.value = value; changed(value); } },
@@ -264,11 +281,25 @@ function attachNoteEditor() {
     setBlockExitHandler: handler => { onBlockExit = handler; },
     blockIsInactive: (block, changes) => Boolean(api && !parent.hidden && blockIsInactive(api.view.state, block, changes)),
     focus: () => api && !parent.hidden ? api.focus() : fallback.focus(),
+    captureSelection: () => api && !parent.hidden ? { from: api.view.state.selection.main.from, to: api.view.state.selection.main.to, enhanced: true } : { from: fallback.selectionStart, to: fallback.selectionEnd, enhanced: false },
+    insertAttachment: (text, selection) => {
+      if (api) {
+        api.view.dispatch({ changes: { from: selection.from, to: selection.to, insert: text }, selection: { anchor: selection.from + text.length }, annotations: [Transaction.userEvent.of('input'), isolateHistory.of('full')] });
+        if (!selection.enhanced) fallback.setSelectionRange(selection.from + text.length, selection.from + text.length);
+      } else {
+        fallback.focus(); fallback.setSelectionRange(selection.from, selection.to);
+        if (!document.execCommand('insertText', false, text)) {
+          fallback.setRangeText(text, selection.from, selection.to, 'end');
+          fallback.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
+    },
     showFallback,
   };
   onChange = mountNoteActions({ editor, initialSource, isNew: parent.dataset.isNew === 'true', bom: parent.dataset.bom === 'true' });
   if (source !== initialSource) onChange(source);
   mountImageUpload({ editor, getPath: () => JSON.parse(document.querySelector('#note-path').textContent) });
+  mountFileUpload({ editor, getPath: () => JSON.parse(document.querySelector('#note-path').textContent), getFolder: () => JSON.parse(document.querySelector('#note-folder').textContent) });
   const reveal = () => {
     stage?.dispatchEvent(new Event('editor-ready'));
     // Independent of the small network-failure guard successfully loading.

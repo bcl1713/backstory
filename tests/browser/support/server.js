@@ -27,7 +27,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const result = spawnSync(python, args, { env, stdio: 'inherit' });
     if (result.status !== 0) process.exit(result.status || 1);
   }
-  const start = () => spawn(python, ['tests/browser/support/runserver.py', new URL(browserOrigin).host, '--noreload', '--nostatic'], { env, stdio: 'inherit' });
+  const start = () => spawn(python, process.env.BACKSTORY_BROWSER_GUNICORN === '1'
+    ? ['-m', 'gunicorn', 'backstory.wsgi:application', '--logger-class', 'backstory.logging.SafeGunicornLogger', '--no-control-socket', '--bind', new URL(browserOrigin).host, '--workers', '1', '--threads', '4', '--access-logfile', '/dev/null']
+    : ['tests/browser/support/runserver.py', new URL(browserOrigin).host, '--noreload', '--nostatic'], { env, stdio: 'inherit' });
   let server = start();
   writeFileSync(`${runtime}/server.pid`, String(process.pid));
   let restarting = false;
