@@ -15,10 +15,30 @@ def actor(django_user_model):
     return django_user_model.objects.create_user(username='removal-owner')
 
 
-def preview(actor, wiki, *, raw=b'\xef\xbb\xbf# Exact\r\n', path='note.md'):
+def retained_preview(actor, path, kind='note', revision=None):
+    """Build an unmarked pre-v2 journal with real original generation witnesses."""
+    import stat
+    from wiki import removals
+    from wiki.models import RemovalOperation
+    from wiki.storage import open_directory, read_note
+    with open_directory(path.rpartition('/')[0]) as directory:
+        info = os.stat(path.rpartition('/')[2], dir_fd=directory, follow_symlinks=False)
+        snapshot = read_note(path) if kind == 'note' else None
+        operation = RemovalOperation.objects.create(actor=actor, path=path, kind=kind,
+            base_revision=revision or (snapshot.revision if snapshot else None),
+            original=snapshot.raw_bytes if snapshot else b'',
+            plan={**removals._context(path.rpartition('/')[0], directory),
+                  'original_generation': removals._generation(directory, path.rpartition('/')[2]),
+                  'identity': removals._fingerprint(info), 'mode': stat.S_IMODE(info.st_mode) & 0o777})
+    return removals.get_removal(actor, str(operation.pk))
+
+
+def preview(actor, wiki, *, raw=b'\xef\xbb\xbf# Exact\r\n', path='note.md', legacy=False):
     from wiki.removals import preview_removal
     from wiki.storage import read_note
     (wiki / path).write_bytes(raw)
+    if legacy:
+        return retained_preview(actor, path)
     return preview_removal(actor, path, 'note', read_note(path).revision)
 
 
@@ -267,10 +287,10 @@ def test_restored_parent_is_accepted_only_with_matching_actor_owned_removal_proo
     from wiki import removals
     from wiki.contracts import StorageError
     (wiki / 'Folder').mkdir()
-    note = preview(actor, wiki, path='Folder/note.md')
+    note = preview(actor, wiki, path='Folder/note.md', legacy=True)
     removals.commit_removal(actor, note['operation_id'])
     owner = actor if folder_owner == 'same' else django_user_model.objects.create_user(username='folder-owner')
-    folder = removals.preview_removal(owner, 'Folder', 'folder')
+    folder = retained_preview(owner, 'Folder', 'folder')
     # Pin the removed inode so the positive case cannot accidentally exercise
     # immediate inode reuse instead of genuine parent replacement.
     descriptor = os.open(wiki / 'Folder', os.O_RDONLY | os.O_DIRECTORY)
@@ -300,9 +320,9 @@ def test_historical_parent_proof_cannot_authorize_unrelated_reused_inode(actor, 
     from wiki.contracts import StorageError
     parent = wiki / 'Folder'
     parent.mkdir()
-    note = preview(actor, wiki, path='Folder/note.md')
+    note = preview(actor, wiki, path='Folder/note.md', legacy=True)
     assert removals.commit_removal(actor, note['operation_id'])['state'] == 'removed'
-    folder = removals.preview_removal(actor, 'Folder', 'folder')
+    folder = retained_preview(actor, 'Folder', 'folder')
     assert removals.commit_removal(actor, folder['operation_id'])['state'] == 'removed'
     assert removals.restore_removal(actor, folder['operation_id'])['state'] == 'restored'
     restored = parent.stat()
@@ -329,7 +349,7 @@ def test_unjournaled_parent_replacement_with_reused_inode_is_not_adopted(actor, 
     from wiki.contracts import StorageError
     parent = wiki / 'Folder'
     parent.mkdir()
-    note = preview(actor, wiki, path='Folder/note.md')
+    note = preview(actor, wiki, path='Folder/note.md', legacy=True)
     assert removals.commit_removal(actor, note['operation_id'])['state'] == 'removed'
     original = parent.stat()
     parent.rmdir()
@@ -352,7 +372,7 @@ def test_unjournaled_parent_replacement_with_reused_inode_is_not_adopted(actor, 
 def test_legacy_two_field_parent_journal_restores_under_unchanged_parent(actor, wiki, state):
     from wiki import removals
     from wiki.models import RemovalOperation
-    plan = preview(actor, wiki)
+    plan = preview(actor, wiki, legacy=True)
     assert removals.commit_removal(actor, plan['operation_id'])['state'] == 'removed'
     operation = RemovalOperation.objects.get(pk=plan['operation_id'])
     operation.plan['parent'] = operation.plan['parent'][:2]
@@ -502,7 +522,7 @@ def test_uncorroborated_nested_legacy_retains_journal_and_bytes(actor, wiki, sta
     from wiki.models import RemovalOperation
     from wiki.contracts import StorageError
     (wiki / 'Folder').mkdir()
-    plan = preview(actor, wiki, path='Folder/note.md')
+    plan = preview(actor, wiki, path='Folder/note.md', legacy=True)
     assert removals.commit_removal(actor, plan['operation_id'])['state'] == 'removed'
     operation = RemovalOperation.objects.get(pk=plan['operation_id'])
     operation.plan['parent'] = operation.plan['parent'][:2]
@@ -524,7 +544,7 @@ def test_unavailable_generation_provider_preserves_all_material(actor, wiki, mon
     from wiki import removals
     from wiki.models import RemovalOperation
     from wiki.contracts import StorageError
-    plan = preview(actor, wiki)
+    plan = preview(actor, wiki, legacy=True)
     if action == 'restore':
         assert removals.commit_removal(actor, plan['operation_id'])['state'] == 'removed'
     operation = RemovalOperation.objects.get(pk=plan['operation_id'])
@@ -552,7 +572,7 @@ def test_sibling_namespace_changes_do_not_invalidate_generation(actor, wiki):
 
 
 @pytest.mark.parametrize('failure,role', [('syscall', 'parent'), ('format', 'target')])
-def test_preview_reports_safe_provider_failure_and_preserves_material(reader, wiki, monkeypatch, failure, role):
+def test_legacy_commit_reports_safe_provider_failure_and_preserves_material(reader, wiki, monkeypatch, django_user_model, failure, role):
     """A syscall refusal and an incompatible target handle need different next steps."""
     import ctypes
     import errno
@@ -564,6 +584,10 @@ def test_preview_reports_safe_provider_failure_and_preserves_material(reader, wi
     target = wiki / 'note.md'
     target.write_bytes(raw)
     revision = read_note('note.md').revision
+    actor = django_user_model.objects.get(username='synthetic-reader')
+    plan = retained_preview(actor, 'note.md', revision=revision)
+    operation = RemovalOperation.objects.get(pk=plan['operation_id'])
+    retained = operation.plan.copy()
     before = target.stat()
     real_load = ctypes.CDLL
 
@@ -584,9 +608,7 @@ def test_preview_reports_safe_provider_failure_and_preserves_material(reader, wi
         return library
 
     monkeypatch.setattr(ctypes, 'CDLL', load)
-    response = reader.post('/tools/removals/preview/', {
-        'path': 'note.md', 'kind': 'note', 'revision': revision,
-    }, content_type='application/json')
+    response = reader.post('/tools/removals/commit/', {'operation_id': plan['operation_id']}, content_type='application/json')
     assert response.status_code == 503
     body = response.json()
     assert body['state'] == 'unavailable' and body['reason_code'] == 'removal_generation_unavailable'
@@ -596,7 +618,10 @@ def test_preview_reports_safe_provider_failure_and_preserves_material(reader, wi
     after = target.stat()
     assert (after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) == (
         before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
-    assert not RemovalOperation.objects.exists() and not SavedRevision.objects.exists()
+    operation.refresh_from_db()
+    assert operation.plan == retained and operation.state == 'preview'
+    assert bytes(operation.original) == raw and RemovalOperation.objects.count() == 1
+    assert not SavedRevision.objects.exists()
     assert not IndexJob.objects.exists() and not list(wiki.glob('.backstory-tmp-*'))
     diagnostic = body['identity_diagnostic']
     assert diagnostic['provider'] == 'linux-fileid-ino32-gen' and diagnostic['role'] == role
@@ -616,7 +641,7 @@ def test_malformed_provider_success_refuses_before_staging(actor, wiki, monkeypa
     from wiki import removals
     from wiki.models import RemovalOperation
     from wiki.contracts import StorageError
-    plan = preview(actor, wiki)
+    plan = preview(actor, wiki, legacy=True)
     assert removals.commit_removal(actor, plan['operation_id'])['state'] == 'removed'
     operation = RemovalOperation.objects.get(pk=plan['operation_id'])
     retained = operation.plan.copy()
@@ -652,10 +677,10 @@ def test_malformed_provider_success_refuses_before_staging(actor, wiki, monkeypa
 def test_multiple_completed_parent_generations_form_exact_chain(actor, wiki):
     from wiki import removals
     (wiki / 'Folder').mkdir()
-    note = preview(actor, wiki, path='Folder/note.md')
+    note = preview(actor, wiki, path='Folder/note.md', legacy=True)
     assert removals.commit_removal(actor, note['operation_id'])['state'] == 'removed'
     for _ in range(2):
-        folder = removals.preview_removal(actor, 'Folder', 'folder')
+        folder = retained_preview(actor, 'Folder', 'folder')
         assert removals.commit_removal(actor, folder['operation_id'])['state'] == 'removed'
         assert removals.restore_removal(actor, folder['operation_id'])['state'] == 'restored'
     assert removals.restore_removal(actor, note['operation_id'])['state'] == 'restored'
@@ -666,10 +691,10 @@ def test_parent_adoption_is_durable_before_child_stage(actor, wiki, monkeypatch)
     from wiki import removals
     from wiki.models import RemovalOperation
     (wiki / 'Folder').mkdir()
-    note = preview(actor, wiki, path='Folder/note.md')
+    note = preview(actor, wiki, path='Folder/note.md', legacy=True)
     assert removals.commit_removal(actor, note['operation_id'])['state'] == 'removed'
     original = RemovalOperation.objects.get(pk=note['operation_id']).plan.copy()
-    folder = removals.preview_removal(actor, 'Folder', 'folder')
+    folder = retained_preview(actor, 'Folder', 'folder')
     assert removals.commit_removal(actor, folder['operation_id'])['state'] == 'removed'
     assert removals.restore_removal(actor, folder['operation_id'])['state'] == 'restored'
     def interrupt(operation, directory):
@@ -725,11 +750,11 @@ def test_parent_proof_growth_reserves_quota_before_adoption_and_child_stage(acto
     from wiki.revisions import _check_quota, _record_charge
     parent = wiki / 'Folder'
     parent.mkdir()
-    note = preview(actor, wiki, path='Folder/note.md')
+    note = preview(actor, wiki, path='Folder/note.md', legacy=True)
     assert removals.commit_removal(actor, note['operation_id'])['state'] == 'removed'
     chain = []
     for _ in range(chain_length):
-        folder = removals.preview_removal(actor, 'Folder', 'folder')
+        folder = retained_preview(actor, 'Folder', 'folder')
         assert removals.commit_removal(actor, folder['operation_id'])['state'] == 'removed'
         assert removals.restore_removal(actor, folder['operation_id'])['state'] == 'restored'
         chain.append(folder['operation_id'])

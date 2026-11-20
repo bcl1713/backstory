@@ -33,7 +33,7 @@ def test_status_is_private_read_only_and_reports_unknown_build(reader, wiki):
     assert str(wiki) not in response.content.decode()
 
 
-def test_removal_capability_declares_identity_requirement_without_probing(reader, wiki, monkeypatch):
+def test_removal_capability_declares_new_trash_and_legacy_contract_without_probing(reader, wiki, monkeypatch):
     from wiki import removals
     from wiki.models import RemovalOperation
     from indexing.models import IndexJob
@@ -45,11 +45,11 @@ def test_removal_capability_declares_identity_requirement_without_probing(reader
     response = reader.get('/tools/status/')
     removal = response.json()['capabilities']['recoverable_removal']
     assert removal['notes'] is True and removal['empty_folders'] is True
-    assert removal['identity_requirement'] == {
-        'provider': 'linux-fileid-ino32-gen', 'handle_type': 1, 'handle_bytes': 8,
-        'verification': 'per_entry', 'availability': 'not_probed',
-        'failure_reason_code': 'removal_generation_unavailable',
-    }
+    assert removal['contract'] == 'recoverable-trash-v2'
+    assert removal['linux_export_handles_required'] is False
+    assert removal['persistent_parent_identity_required'] is False
+    assert removal['legacy_recovery'] == 'original_contract'
+    assert 'identity_requirement' not in removal
     assert not RemovalOperation.objects.exists() and not IndexJob.objects.exists()
 
 
