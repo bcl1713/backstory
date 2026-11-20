@@ -33,6 +33,26 @@ def test_status_is_private_read_only_and_reports_unknown_build(reader, wiki):
     assert str(wiki) not in response.content.decode()
 
 
+def test_removal_capability_declares_identity_requirement_without_probing(reader, wiki, monkeypatch):
+    from wiki import removals
+    from wiki.models import RemovalOperation
+    from indexing.models import IndexJob
+
+    def forbidden(*args, **kwargs):
+        pytest.fail('Status must not probe or promise support for arbitrary removal entries')
+
+    monkeypatch.setattr(removals, '_generation', forbidden)
+    response = reader.get('/tools/status/')
+    removal = response.json()['capabilities']['recoverable_removal']
+    assert removal['notes'] is True and removal['empty_folders'] is True
+    assert removal['identity_requirement'] == {
+        'provider': 'linux-fileid-ino32-gen', 'handle_type': 1, 'handle_bytes': 8,
+        'verification': 'per_entry', 'availability': 'not_probed',
+        'failure_reason_code': 'removal_generation_unavailable',
+    }
+    assert not RemovalOperation.objects.exists() and not IndexJob.objects.exists()
+
+
 @pytest.mark.parametrize('version', ['1.4.0', '1.4.0-dev.12.gaaaaaaaaaaaa'])
 def test_status_reports_packaged_release_identity(reader, wiki, package_metadata, version):
     import json

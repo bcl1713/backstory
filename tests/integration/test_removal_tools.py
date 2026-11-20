@@ -551,6 +551,65 @@ def test_sibling_namespace_changes_do_not_invalidate_generation(actor, wiki):
     assert removals.restore_removal(actor, plan['operation_id'])['state'] == 'restored'
 
 
+@pytest.mark.parametrize('failure,role', [('syscall', 'parent'), ('format', 'target')])
+def test_preview_reports_safe_provider_failure_and_preserves_material(reader, wiki, monkeypatch, failure, role):
+    """A syscall refusal and an incompatible target handle need different next steps."""
+    import ctypes
+    import errno
+    from wiki.models import RemovalOperation, SavedRevision
+    from indexing.models import IndexJob
+    from wiki.storage import read_note
+
+    raw = b'\xef\xbb\xbf# Disposable diagnostic\r\n'
+    target = wiki / 'note.md'
+    target.write_bytes(raw)
+    revision = read_note('note.md').revision
+    before = target.stat()
+    real_load = ctypes.CDLL
+
+    def load(*args, **kwargs):
+        library = real_load(*args, **kwargs)
+        real_call = library.name_to_handle_at
+
+        def call(*args):
+            if failure == 'syscall':
+                ctypes.set_errno(errno.EOPNOTSUPP)
+                return -1
+            result = real_call(*args)
+            if args[1] == b'note.md':
+                args[2]._obj.handle_type = 999
+            return result
+
+        library.name_to_handle_at = call
+        return library
+
+    monkeypatch.setattr(ctypes, 'CDLL', load)
+    response = reader.post('/tools/removals/preview/', {
+        'path': 'note.md', 'kind': 'note', 'revision': revision,
+    }, content_type='application/json')
+    assert response.status_code == 503
+    body = response.json()
+    assert body['state'] == 'unavailable' and body['reason_code'] == 'removal_generation_unavailable'
+    assert body['restart'] is False
+    assert 'operation_id' not in body
+    assert target.read_bytes() == raw
+    after = target.stat()
+    assert (after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) == (
+        before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+    assert not RemovalOperation.objects.exists() and not SavedRevision.objects.exists()
+    assert not IndexJob.objects.exists() and not list(wiki.glob('.backstory-tmp-*'))
+    diagnostic = body['identity_diagnostic']
+    assert diagnostic['provider'] == 'linux-fileid-ino32-gen' and diagnostic['role'] == role
+    if failure == 'syscall':
+        assert diagnostic == {'provider': 'linux-fileid-ino32-gen', 'role': 'parent',
+                              'failure': 'syscall_failed', 'errno': errno.EOPNOTSUPP}
+    else:
+        assert diagnostic == {'provider': 'linux-fileid-ino32-gen', 'role': 'target',
+                              'failure': 'handle_format_unaccepted', 'mount_positive': True,
+                              'handle_type': 999, 'handle_bytes': 8}
+    assert all(value not in response.content.decode() for value in [str(wiki), raw.decode('utf-8-sig'), 'handle\"'])
+
+
 @pytest.mark.parametrize('malformation', ['empty', 'wrong_type', 'wrong_length', 'wrong_inode'])
 def test_malformed_provider_success_refuses_before_staging(actor, wiki, monkeypatch, malformation):
     import ctypes
