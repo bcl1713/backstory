@@ -226,6 +226,13 @@ Storage readiness is an observation, not a guarantee that a future write will
 succeed. This tool does not initialize timezone, schedule/rebuild an index, create
 probe files, expose environment variables, or grant additional access.
 
+New recoverable-trash operations use `recoverable-trash-v2`: no specific Linux
+export-handle format or persistent parent identity is required. Exact approval,
+path/actor/root/policy checks and durable no-overwrite recovery still apply.
+Older retained journals keep their original recovery contract. See
+[recoverable removal](webmcp-management.md#recoverably-remove-one-note-or-one-empty-folder)
+for scope and retry behavior.
+
 ## Multiple authoritative reads
 
 `read_notes` posts `{ "paths": ["one.md", "folder/two.md"] }` to

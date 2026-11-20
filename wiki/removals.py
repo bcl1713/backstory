@@ -28,6 +28,13 @@ from .revisions import application_lock, _check_quota, _record_charge
 from .storage import open_directory, read_note, require_ready
 
 _RECOVERING = ['applying', 'restoring', 'recovery_required']
+_TRASH_CONTRACT = 'recoverable-trash-v2'
+
+
+def _path_trash(operation):
+    # Only explicitly new journals use path-based trash semantics. Unmarked
+    # retained journals continue to require their original generation proofs.
+    return operation.plan.get('contract') == _TRASH_CONTRACT
 
 
 def _actor(actor):
@@ -109,17 +116,20 @@ def _generation(directory, name='', *, role='target'):
         raise GenerationUnavailable(role, 'provider_error') from None
 
 
-def _context(parent, directory):
+def _context(parent, directory, *, persistent=True):
     with open_directory() as root, open_directory(parent) as fresh:
         if _identity(os.fstat(directory)) != _identity(os.fstat(fresh)):
             raise StorageError('removal_parent_changed', 409)
+        marker = os.stat(settings.BACKSTORY_IDENTITY_PATH, dir_fd=root, follow_symlinks=False)
+        context = {'root': _identity(os.fstat(root)), 'marker': _fingerprint(marker),
+                   'policy': policy_version()}
+        if not persistent:
+            return context
         generation = _generation(directory, role='parent')
         if generation != _generation(fresh, role='parent'):
             raise StorageError('removal_parent_changed', 409)
-        marker = os.stat(settings.BACKSTORY_IDENTITY_PATH, dir_fd=root, follow_symlinks=False)
-        return {'root': _identity(os.fstat(root)), 'root_generation': _generation(root, role='root'),
-                'marker': _fingerprint(marker), 'parent': [*_identity(os.fstat(fresh)), generation],
-                'policy': policy_version()}
+        return {**context, 'root_generation': _generation(root, role='root'),
+                'parent': [*_identity(os.fstat(fresh)), generation]}
 
 
 def _same_context(plan, current):
@@ -139,9 +149,11 @@ def _legacy_root(operation, current):
 
 def _verify_context(operation, directory, *, allow_parent_restore=False, adopt=False):
     require_ready()
-    current = _context(operation.path.rpartition('/')[0], directory)
+    current = _context(operation.path.rpartition('/')[0], directory, persistent=not _path_trash(operation))
     if not _same_context(operation.plan, current):
         raise StorageError('removal_context_changed', 409)
+    if _path_trash(operation):
+        return
     expected = operation.plan.get('adopted_parent', operation.plan['parent'])
     if expected == current['parent']:
         return
@@ -246,6 +258,8 @@ def _operation(actor, operation_id):
     except (ValueError, TypeError, AttributeError):
         raise StorageError('invalid_removal_request') from None
     _validate(operation.path, operation.kind)
+    if operation.plan.get('contract') not in (None, _TRASH_CONTRACT):
+        raise StorageError('removal_contract_unavailable', 503)
     return operation
 
 
@@ -294,7 +308,7 @@ def preview_removal(actor, path, kind, revision=None):
             require_ready()
             parent, _, name = path.rpartition('/')
             with open_directory(parent) as directory:
-                context = _context(parent, directory)
+                context = _context(parent, directory, persistent=False)
                 info = _info(name, directory)
                 if info is None:
                     raise StorageError('not_found', 404)
@@ -312,7 +326,8 @@ def preview_removal(actor, path, kind, revision=None):
                         raise PathDenied()
                     _empty(path)
                     original = b''
-                plan = {**context, 'original_generation': _generation(directory, name), 'identity': _fingerprint(info), 'mode': stat.S_IMODE(info.st_mode) & 0o777}
+                plan = {**context, 'contract': _TRASH_CONTRACT,
+                        'identity': _fingerprint(info), 'mode': stat.S_IMODE(info.st_mode) & 0o777}
                 operation = RemovalOperation(actor=actor, path=path, kind=kind,
                     base_revision=revision, original=original, plan=plan)
                 _verify_context(operation, directory)
@@ -393,6 +408,11 @@ def commit_removal(actor, operation_id):
 
 
 def _owned_generation(operation, directory, name, *, role='restore_stage'):
+    if _path_trash(operation):
+        # Ordinary journal-owned inode checks for new trash, not a claim of
+        # persistent generation proof. Byte/type/link checks follow at callers.
+        info = _info(name, directory) if name else os.fstat(directory)
+        return info is not None and _identity(info) == operation.plan.get('restore_identity')
     return ('restore_generation' in operation.plan
             and _generation(directory, name, role=role) == operation.plan['restore_generation'])
 
@@ -433,7 +453,8 @@ def _restore_stage(operation, directory):
     if operation.kind == 'folder':
         os.mkdir(temporary, mode=0o700, dir_fd=directory)
         operation.plan['restore_identity'] = _identity(os.stat(temporary, dir_fd=directory, follow_symlinks=False))
-        operation.plan['restore_generation'] = _generation(directory, temporary, role='restore_stage')
+        if not _path_trash(operation):
+            operation.plan['restore_generation'] = _generation(directory, temporary, role='restore_stage')
         operation.plan['stage_ready'] = True
         operation.save(update_fields=['plan'])
     else:
@@ -441,7 +462,8 @@ def _restore_stage(operation, directory):
                              0o600, dir_fd=directory)
         try:
             operation.plan['restore_identity'] = _identity(os.fstat(descriptor))
-            operation.plan['restore_generation'] = _generation(descriptor, role='restore_stage')
+            if not _path_trash(operation):
+                operation.plan['restore_generation'] = _generation(descriptor, role='restore_stage')
             operation.save(update_fields=['plan'])
         finally:
             os.close(descriptor)

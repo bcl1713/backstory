@@ -144,61 +144,42 @@ return `uncertain` with an operation handle even after filesystem publication.
 Never interpret that as safe-to-retry or automatically resume it.
 
 To undo note-and-folder cleanup, restore the parent folder first, then the note.
-A changed parent inode is accepted only through a completed same-actor folder
-restoration journal proving the exact old and new identities and unchanged
-storage marker/root/policy. An unrelated replacement folder is not adopted.
-Generation witnesses must survive ordinary child creation, unlink and publication;
-ctime and device/inode alone are insufficient. New journals bind versioned Linux
-export handles (mount ID, FILEID_INO32_GEN type 1, eight-byte inode/generation payload) for root,
-parent, original target and restored stage. Unsupported providers fail before
-mutation; support must be established on each deployment filesystem, not inferred
-from a development host. Mount changes invalidate the witness. Other handle formats, missing libc support,
-zero generations, malformed lengths and inode/payload mismatches fail clearly
-with `removal_generation_unavailable`; no timestamp fallback is used.
+New previews use the `recoverable-trash-v2` journal contract. They use ordinary
+authorized path operations and do not request Linux export handles or require
+persistent parent-directory identity. A storage provider returning a different
+handle format, including a twelve-byte handle, is not a prerequisite or refusal
+condition for new trash operations. Root identity, the storage marker, policy,
+actor, path/type boundaries and exact approved note fingerprint/bytes remain
+checked. Restoration requires the original parent path to exist; it never
+creates missing parents or follows symlinks to reach them.
 
-`wiki_status.capabilities.recoverable_removal.notes` and `empty_folders` describe
-implemented operation kinds. They do not establish support on the current
-storage. `identity_requirement` names the required provider, handle type and
-length, with `verification: per_entry` and `availability: not_probed`. Status
-does not probe entries or create a disposable target. Linux, a readable note, a
-ready marker, or a filesystem name alone does not prove provider acceptance.
-The root, actual parent, target and any restore stage must each supply an
-accepted witness in the application's mount context at the time of use. A
-supported root does not establish support for nested mounts or future stages.
+Stages record device/inode ownership before writing or publishing. Exact bytes,
+entry type and link checks protect normal retries and restoration. A colliding
+destination is not overwritten or treated as owned merely because bytes match;
+the recovery journal remains available for a later deliberate retry. These
+ordinary checks do not promise persistent identity against arbitrary concurrent
+out-of-band directory or inode replacement. Cooperating writers share the
+application lock; final checks do not make unlink a filesystem compare-and-swap.
 
-A direct provider refusal from preview or pre-mutation commit/restore retains
-HTTP 503 and `removal_generation_unavailable`, and adds `identity_diagnostic`.
-It contains the provider, a role (`root`, `parent`, `target`, `restore_stage` or
-`restored_target`) and a fixed `failure` enum. `syscall_failed` carries numeric
-`errno` (and the required `handle_bytes` on EOVERFLOW); it must not be interpreted
-as an incompatible successful handle. `handle_format_unaccepted` carries
-`mount_positive`, `handle_type` and `handle_bytes`. `identity_unverified` also
-carries `inode_matches` and `generation_nonzero` booleans. Other enums are
-`platform_unavailable`, `libc_unavailable`, `stat_failed` (numeric errno or null)
-and `provider_error`. These observations contain no path, inode number, raw
-handle, note contents or OS exception text. They describe this call, not a
-permanent supported/unsupported storage classification. After mutation intent,
-existing recovery/uncertainty semantics still apply; a provider failure then is
-not a promise that nothing was written. Inspection may report
-`removal_live_unconfirmed` rather than exposing a new direct refusal.
+`wiki_status.capabilities.recoverable_removal` reports the new `contract`,
+`linux_export_handles_required: false`, `persistent_parent_identity_required:
+false` and `legacy_recovery: original_contract`. Status does not probe storage
+or create a disposable target. Readiness is not a promise that future filesystem
+operations will succeed. Normal application permissions and storage capabilities
+still apply; no storage migration or alternate privileged executor is used.
 
-For deployment diagnosis, coordinate one metadata-only observation in the same
-application process/mount namespace, OS identity and syscall/security context as
-the failing preview. On the existing affected disposable target (no new removal
-or queue action), collect only the failing role and the fields above from
-`name_to_handle_at` with the same descriptor-relative flags (AT_EMPTY_PATH for
-an open directory/file descriptor, zero for a named child). If no provider call
-failed, compare root, actual parent and target observations in call order;
-restore-stage observations are needed only for an already authorized restore
-failure. Record whether the observation shares that context and build, and
-whether it was simultaneous with failure. Do not collect raw handles, inode or
-device identifiers, mount paths/sources, note names/content, credentials or
-exception strings. This metadata can distinguish a syscall/security/access
-error from a returned incompatible format or failed identity validation; an
-earlier generic refusal cannot. Do not classify a deployment based on the
-development filesystem or a storage-product name.
+**Retained journals keep their original contract.** Unmarked older records are
+not converted to v2 or silently accepted with weaker evidence. Their Linux
+generation checks remain, including the type-one/eight-byte format for records
+that bind it. Direct legacy commit/restore refusals can still return HTTP 503,
+`removal_generation_unavailable` and source-free `identity_diagnostic` fields
+describing the failing role and syscall/format/validation condition. After
+mutation intent, the existing journal/recovery and uncertain-result rules apply.
+Inspection may report `removal_live_unconfirmed`; it never retries a write.
+Unknown explicit journal contracts fail closed with
+`removal_contract_unavailable`, retaining their bytes and state.
 
-Legacy recovery refuses only when the exact parent generation cannot be
+Legacy recovery refuses when the exact parent generation cannot be
 corroborated, preserving the journal and recoverable bytes. Unchanged root-parent
 records remain supported when the original direct-child identity marker's full
 immutable fingerprint and root identity remain unchanged: moving that marker to
@@ -207,13 +188,16 @@ proof are refused; timestamps or inode matches alone do not establish history.
 No operator rebind or blanket legacy refusal is authorized. Completed same-actor
 old/new generation adoption must be durably recorded before child staging, while
 retaining the original context and proof journal.
+New v2 folder journals do not manufacture generation edges for older child
+journals. If an older child needs such proof after its parent changes, its
+conservative recovery refusal and retained bytes remain in effect.
 
 If a parent was separately relocated, deliberately restore its original path
 through the relocation workflow first; removal journals do not silently retarget.
 
 Removal previews/recovery material, history/drafts and move journals share
 `BACKSTORY_REVISION_QUOTA_BYTES`. At most 1,024 removal journals can be retained.
-Parent adoption reserves the additional serialized plan bytes under the shared
+Legacy parent adoption reserves the additional serialized plan bytes under the shared
 quota lock before saving proof or staging a child. The existing 1,024-byte
 recovery allowance remains reserved; proof chains do not consume it. Insufficient
 capacity refuses adoption without changing journals, recovery bytes or wiki entries.
