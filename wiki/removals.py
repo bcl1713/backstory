@@ -6,6 +6,7 @@ they cannot make unlink a filesystem compare-and-swap.
 """
 import ctypes
 from datetime import timedelta
+import errno
 import json
 import os
 import secrets
@@ -51,7 +52,15 @@ class _FileHandle(ctypes.Structure):
                 ('f_handle', ctypes.c_ubyte * 128)]
 
 
-def _generation(directory, name=''):
+class GenerationUnavailable(StorageError):
+    """Source-free observations from this provider call, never a storage verdict."""
+    def __init__(self, role, failure, **observations):
+        super().__init__('removal_generation_unavailable', 503)
+        self.diagnostic = {'provider': 'linux-fileid-ino32-gen', 'role': role,
+                           'failure': failure, **observations}
+
+
+def _generation(directory, name='', *, role='target'):
     """Linux FILEID_INO32_GEN only: opaque inode+generation, stable on mutation.
 
     Mount IDs deliberately bind this mount lifetime. No timestamp/inode fallback,
@@ -59,39 +68,56 @@ def _generation(directory, name=''):
     """
     try:
         if not sys.platform.startswith('linux'):
-            raise StorageError('removal_generation_unavailable', 503)
-        call = ctypes.CDLL(None, use_errno=True).name_to_handle_at
+            raise GenerationUnavailable(role, 'platform_unavailable')
+        try:
+            call = ctypes.CDLL(None, use_errno=True).name_to_handle_at
+        except (OSError, AttributeError):
+            raise GenerationUnavailable(role, 'libc_unavailable') from None
         call.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.POINTER(_FileHandle),
                          ctypes.POINTER(ctypes.c_int), ctypes.c_int]
         call.restype = ctypes.c_int
         handle = _FileHandle()
         handle.handle_bytes = 128
         mount = ctypes.c_int()
+        ctypes.set_errno(0)
         result = call(directory, os.fsencode(name), ctypes.byref(handle),
                       ctypes.byref(mount), 0 if name else 0x1000)  # AT_EMPTY_PATH
-        if result != 0 or mount.value <= 0 or handle.handle_type != 1 or handle.handle_bytes != 8:
-            raise StorageError('removal_generation_unavailable', 503)
+        if result != 0:
+            observations = {'errno': ctypes.get_errno()}
+            # On EOVERFLOW the kernel reports the required buffer size; other
+            # failed calls do not provide usable handle/mount observations.
+            if observations['errno'] == errno.EOVERFLOW:
+                observations['handle_bytes'] = handle.handle_bytes
+            raise GenerationUnavailable(role, 'syscall_failed', **observations)
+        observations = {'mount_positive': mount.value > 0, 'handle_type': handle.handle_type,
+                        'handle_bytes': handle.handle_bytes}
+        if mount.value <= 0 or handle.handle_type != 1 or handle.handle_bytes != 8:
+            raise GenerationUnavailable(role, 'handle_format_unaccepted', **observations)
         raw = bytes(handle.f_handle[:8])
-        info = os.stat(name, dir_fd=directory, follow_symlinks=False) if name else os.fstat(directory)
-        if (int.from_bytes(raw[:4], sys.byteorder) != info.st_ino
-                or int.from_bytes(raw[4:], sys.byteorder) == 0):
-            raise StorageError('removal_generation_unavailable', 503)
+        try:
+            info = os.stat(name, dir_fd=directory, follow_symlinks=False) if name else os.fstat(directory)
+        except OSError as error:
+            raise GenerationUnavailable(role, 'stat_failed', errno=error.errno) from None
+        observations.update(inode_matches=int.from_bytes(raw[:4], sys.byteorder) == info.st_ino,
+                            generation_nonzero=int.from_bytes(raw[4:], sys.byteorder) != 0)
+        if not observations['inode_matches'] or not observations['generation_nonzero']:
+            raise GenerationUnavailable(role, 'identity_unverified', **observations)
         return {'version': 1, 'provider': 'linux-fileid-ino32-gen',
                 'mount': mount.value, 'type': handle.handle_type,
                 'handle': raw.hex()}
     except (OSError, AttributeError, TypeError, ValueError):
-        raise StorageError('removal_generation_unavailable', 503) from None
+        raise GenerationUnavailable(role, 'provider_error') from None
 
 
 def _context(parent, directory):
     with open_directory() as root, open_directory(parent) as fresh:
         if _identity(os.fstat(directory)) != _identity(os.fstat(fresh)):
             raise StorageError('removal_parent_changed', 409)
-        generation = _generation(directory)
-        if generation != _generation(fresh):
+        generation = _generation(directory, role='parent')
+        if generation != _generation(fresh, role='parent'):
             raise StorageError('removal_parent_changed', 409)
         marker = os.stat(settings.BACKSTORY_IDENTITY_PATH, dir_fd=root, follow_symlinks=False)
-        return {'root': _identity(os.fstat(root)), 'root_generation': _generation(root),
+        return {'root': _identity(os.fstat(root)), 'root_generation': _generation(root, role='root'),
                 'marker': _fingerprint(marker), 'parent': [*_identity(os.fstat(fresh)), generation],
                 'policy': policy_version()}
 
@@ -366,15 +392,15 @@ def commit_removal(actor, operation_id):
         return _inspect(operation)
 
 
-def _owned_generation(operation, directory, name):
+def _owned_generation(operation, directory, name, *, role='restore_stage'):
     return ('restore_generation' in operation.plan
-            and _generation(directory, name) == operation.plan['restore_generation'])
+            and _generation(directory, name, role=role) == operation.plan['restore_generation'])
 
 
 def _verify_restored(operation, directory, *, allow_stage=False):
     info = _info(operation.path.rpartition('/')[2], directory)
     if (info is None or _identity(info) != operation.plan.get('restore_identity')
-            or not _owned_generation(operation, directory, operation.path.rpartition('/')[2])):
+            or not _owned_generation(operation, directory, operation.path.rpartition('/')[2], role='restored_target')):
         raise StorageError('removal_restore_collision', 409)
     if operation.kind == 'note':
         stage = _info(operation.plan.get('temporary', ''), directory) if allow_stage and operation.plan.get('temporary') else None
@@ -407,7 +433,7 @@ def _restore_stage(operation, directory):
     if operation.kind == 'folder':
         os.mkdir(temporary, mode=0o700, dir_fd=directory)
         operation.plan['restore_identity'] = _identity(os.stat(temporary, dir_fd=directory, follow_symlinks=False))
-        operation.plan['restore_generation'] = _generation(directory, temporary)
+        operation.plan['restore_generation'] = _generation(directory, temporary, role='restore_stage')
         operation.plan['stage_ready'] = True
         operation.save(update_fields=['plan'])
     else:
@@ -415,7 +441,7 @@ def _restore_stage(operation, directory):
                              0o600, dir_fd=directory)
         try:
             operation.plan['restore_identity'] = _identity(os.fstat(descriptor))
-            operation.plan['restore_generation'] = _generation(descriptor)
+            operation.plan['restore_generation'] = _generation(descriptor, role='restore_stage')
             operation.save(update_fields=['plan'])
         finally:
             os.close(descriptor)

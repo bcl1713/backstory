@@ -156,6 +156,48 @@ from a development host. Mount changes invalidate the witness. Other handle form
 zero generations, malformed lengths and inode/payload mismatches fail clearly
 with `removal_generation_unavailable`; no timestamp fallback is used.
 
+`wiki_status.capabilities.recoverable_removal.notes` and `empty_folders` describe
+implemented operation kinds. They do not establish support on the current
+storage. `identity_requirement` names the required provider, handle type and
+length, with `verification: per_entry` and `availability: not_probed`. Status
+does not probe entries or create a disposable target. Linux, a readable note, a
+ready marker, or a filesystem name alone does not prove provider acceptance.
+The root, actual parent, target and any restore stage must each supply an
+accepted witness in the application's mount context at the time of use. A
+supported root does not establish support for nested mounts or future stages.
+
+A direct provider refusal from preview or pre-mutation commit/restore retains
+HTTP 503 and `removal_generation_unavailable`, and adds `identity_diagnostic`.
+It contains the provider, a role (`root`, `parent`, `target`, `restore_stage` or
+`restored_target`) and a fixed `failure` enum. `syscall_failed` carries numeric
+`errno` (and the required `handle_bytes` on EOVERFLOW); it must not be interpreted
+as an incompatible successful handle. `handle_format_unaccepted` carries
+`mount_positive`, `handle_type` and `handle_bytes`. `identity_unverified` also
+carries `inode_matches` and `generation_nonzero` booleans. Other enums are
+`platform_unavailable`, `libc_unavailable`, `stat_failed` (numeric errno or null)
+and `provider_error`. These observations contain no path, inode number, raw
+handle, note contents or OS exception text. They describe this call, not a
+permanent supported/unsupported storage classification. After mutation intent,
+existing recovery/uncertainty semantics still apply; a provider failure then is
+not a promise that nothing was written. Inspection may report
+`removal_live_unconfirmed` rather than exposing a new direct refusal.
+
+For deployment diagnosis, coordinate one metadata-only observation in the same
+application process/mount namespace, OS identity and syscall/security context as
+the failing preview. On the existing affected disposable target (no new removal
+or queue action), collect only the failing role and the fields above from
+`name_to_handle_at` with the same descriptor-relative flags (AT_EMPTY_PATH for
+an open directory/file descriptor, zero for a named child). If no provider call
+failed, compare root, actual parent and target observations in call order;
+restore-stage observations are needed only for an already authorized restore
+failure. Record whether the observation shares that context and build, and
+whether it was simultaneous with failure. Do not collect raw handles, inode or
+device identifiers, mount paths/sources, note names/content, credentials or
+exception strings. This metadata can distinguish a syscall/security/access
+error from a returned incompatible format or failed identity validation; an
+earlier generic refusal cannot. Do not classify a deployment based on the
+development filesystem or a storage-product name.
+
 Legacy recovery refuses only when the exact parent generation cannot be
 corroborated, preserving the journal and recoverable bytes. Unchanged root-parent
 records remain supported when the original direct-child identity marker's full

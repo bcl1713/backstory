@@ -29,7 +29,11 @@ def preview_removal(request):
     if body.get('kind') not in {'note', 'folder'}:
         raise StorageError('invalid_removal_request')
     path = authorize_content(request, body.get('path'), 'folder' if body['kind'] == 'folder' else 'content')
-    return _json(_invoke(removals.preview_removal, request.user, path, body['kind'], body.get('revision')))
+    try:
+        result = _invoke(removals.preview_removal, request.user, path, body['kind'], body.get('revision'))
+    except removals.GenerationUnavailable as error:
+        return _identity_unavailable(error)
+    return _json(result)
 
 
 @_tool
@@ -62,6 +66,8 @@ def _mutate(request, service):
     authorize_content(request, '', 'folder')
     try:
         result = service(request.user, operation_id)
+    except removals.GenerationUnavailable as error:
+        return _identity_unavailable(error)
     except (OSError, DatabaseError):
         # Filesystem publication can precede a failed terminal journal update.
         # Retain the validated handle for explicit inspection, never infer a
@@ -70,6 +76,11 @@ def _mutate(request, service):
             'reason_code': 'removal_outcome_unknown', 'authoritative': False,
             'inspect_before_retry': True, 'read_before_retry': True}, 503)
     return _json(result)
+
+
+def _identity_unavailable(error):
+    return _json({'state': 'unavailable', 'reason_code': error.reason_code, 'restart': False,
+                  'identity_diagnostic': error.diagnostic}, error.status)
 
 
 def _invoke(service, *args):
