@@ -60,7 +60,7 @@ class Access:
 
 
 def local_access():
-    """Only explicit stdio startup calls this; no user lookup or client actor input."""
+    """Explicit native transports only; no user lookup or client actor input."""
     from .models import LocalActor
     actor, _ = LocalActor.objects.get_or_create(pk=1, defaults={'storage_context': storage_scope()})
     require_actor(actor)
