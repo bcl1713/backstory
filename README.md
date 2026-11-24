@@ -22,6 +22,8 @@ live links and complete-document source access.
 connection list. [Move and archive](docs/relocation.md) covers reviewed note/folder relocation and
 recovery; [browser tools](docs/webmcp.md) describes the WebMCP read and guarded-save
 adapter and the remaining actual-host write verification.
+[Local native MCP](docs/native-mcp.md) documents the optional trusted-client stdio
+adapter, explicit wiki/database launch selection, tool parity and recovery limits.
 
 For source builds or a disposable demo, start with [initial setup](docs/setup.md).
 The [configuration reference](docs/configuration.md) lists every variable.

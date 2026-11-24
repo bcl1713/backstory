@@ -4,6 +4,7 @@ The shared application flock serializes cooperating writers. External filesystem
 writers do not participate: final descriptor and byte checks narrow that race;
 they cannot make unlink a filesystem compare-and-swap.
 """
+from .actors import require_actor, owner_fields, record_owner
 import ctypes
 from datetime import timedelta
 import errno
@@ -38,8 +39,7 @@ def _path_trash(operation):
 
 
 def _actor(actor):
-    if not actor.is_authenticated or not actor.is_active:
-        raise PermissionDenied
+    require_actor(actor)
 
 
 def _validate(path, kind):
@@ -183,7 +183,7 @@ def _restored_parent(operation, expected, current):
     parent = operation.path.rpartition('/')[0]
     if not parent or len(expected) != 3 or not isinstance(expected[2], dict):
         return None
-    candidates = RemovalOperation.objects.filter(actor_id=operation.actor_id,
+    candidates = RemovalOperation.objects.filter(**record_owner(operation),
         path=parent, kind='folder', state='restored').only('plan')
     # Traverse exact generation edges only; ordering and inode reuse cannot
     # manufacture an edge. At most the retained journal capacity is examined.
@@ -252,7 +252,7 @@ def _operation(actor, operation_id):
         canonical = uuid.UUID(str(operation_id))
         if not isinstance(operation_id, str) or operation_id != str(canonical):
             raise StorageError('invalid_removal_request')
-        operation = RemovalOperation.objects.get(pk=canonical, actor=actor)
+        operation = RemovalOperation.objects.get(pk=canonical, **owner_fields(actor))
     except RemovalOperation.DoesNotExist:
         raise StorageError('not_found', 404) from None
     except (ValueError, TypeError, AttributeError):
@@ -328,7 +328,7 @@ def preview_removal(actor, path, kind, revision=None):
                     original = b''
                 plan = {**context, 'contract': _TRASH_CONTRACT,
                         'identity': _fingerprint(info), 'mode': stat.S_IMODE(info.st_mode) & 0o777}
-                operation = RemovalOperation(actor=actor, path=path, kind=kind,
+                operation = RemovalOperation(**owner_fields(actor), path=path, kind=kind,
                     base_revision=revision, original=original, plan=plan)
                 _verify_context(operation, directory)
                 _exact_original(operation, directory)

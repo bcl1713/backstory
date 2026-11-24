@@ -182,7 +182,7 @@ def test_preview_cap_fails_closed_and_plan_cannot_be_committed(reader, wiki, mon
 
 def test_readback_failure_is_uncertain_and_inspect_does_not_replay(reader, wiki, monkeypatch):
     from wiki.contracts import StorageError
-    module = importlib.import_module('wiki.management_tools')
+    module = importlib.import_module('wiki.management_service')
     (wiki / 'From.md').write_text('original')
     review = json.loads(preview().content)
     real = module.read_note

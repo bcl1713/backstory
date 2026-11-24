@@ -24,6 +24,14 @@ from .storage import open_directory, read_note
 from .tool_views import _json, _paging, _tool
 from . import move_previews, relocations
 
+from . import management_service as service
+from .actors import Access
+
+
+def _access(request):
+    return Access(request.user, lambda path, purpose='content': authorize_content(request, path, purpose))
+
+
 MAX_REVIEW_BYTES = 512 * 1024
 MAX_REQUEST_BYTES = 16 * 1024
 _REVIEW_SALT = 'backstory.tool.move-review.v1'
@@ -54,117 +62,27 @@ def _query(request, allowed, required):
 
 
 def _eligible(request, path):
-    """Reapply current policy and no-follow checks before disclosing old paths."""
-    authorize_content(request, path)
-    parent, _, name = path.rpartition('/')
-    try:
-        with open_directory(parent) as directory:
-            try:
-                info = os.stat(name, dir_fd=directory, follow_symlinks=False)
-            except FileNotFoundError:
-                return
-            if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
-                raise PathDenied()
-    except StorageError as error:
-        if error.reason_code != 'not_found':
-            raise
+    return service._eligible(_access(request), path)
 
 
 def _operation(request, value):
-    try:
-        if not isinstance(value, str) or len(value) != 36:
-            raise ValueError
-        operation_id = uuid.UUID(value)
-    except (ValueError, TypeError, AttributeError):
-        raise StorageError('invalid_operation_id') from None
-    try:
-        try:
-            return MovePreviewJob.objects.get(pk=operation_id, actor=request.user)
-        except MovePreviewJob.DoesNotExist:
-            # Publication replaces job -> operation atomically. Looking for the
-            # job first permits a stale preparing read, never an absent handle.
-            return MoveOperation.objects.get(pk=operation_id, actor=request.user)
-    except MoveOperation.DoesNotExist:
-        raise StorageError('not_found', 404) from None
-    except DatabaseError:
-        raise StorageError('move_unavailable', 503) from None
+    return service._operation(_access(request), value)
 
 
 def _review(request, operation):
-    plan = operation.plan
-    source, destination = operation.source, operation.destination
-    inventory = [{'path': row['path'], 'destination': destination + row['path'][len(source):],
-                  'kind': row['kind'], 'size': row['size']} for row in plan['inventory']]
-    changes = [{key: row[key] for key in ('path', 'destination', 'links', 'diff')} for row in plan['changes']]
-    affected = sorted({source, destination} | {row[key] for row in inventory + changes for key in ('path', 'destination')})
-    for path in affected:
-        _eligible(request, path)
-    if plan['policy'] != policy_version():
-        raise StorageError('move_policy_changed', 409)
-    if operation.state == 'preview' and operation.created_at < timezone.now() - timedelta(minutes=30):
-        raise StorageError('move_preview_expired', 409)
-    data = {'operation_id': str(operation.pk), 'source': source, 'source_path': source, 'destination': destination,
-            'kind': 'note' if stat.S_ISREG(plan['source_identity'][2]) else 'folder',
-            'inventory': inventory, 'changes': changes, 'affected_paths': affected}
-    # Reserve room for token, envelope, state and readback metadata. Source
-    # readback is separate from the review budget and uses the normal note cap.
-    if len(json.dumps(data, ensure_ascii=True).encode()) + 2048 > MAX_REVIEW_BYTES:
-        raise StorageError('move_review_too_large', 413)
-    return data
+    return service._review(_access(request), operation, max_review_bytes=MAX_REVIEW_BYTES)
 
 
 def _review_binding(request, operation, review):
-    digest = hashlib.sha256(json.dumps(review, sort_keys=True, ensure_ascii=True).encode()).hexdigest()
-    return {'actor': str(request.user.pk), 'operation_id': str(operation.pk),
-            'policy': policy_version(), 'digest': digest}
+    return service._review_binding(_access(request), operation, review)
 
 
 def _move_data(request, operation, *, expected_revision=None):
-    if isinstance(operation, MovePreviewJob):
-        return _preparation_data(request, operation)
-    review = _review(request, operation)
-    data = {**review, 'state': operation.state, 'reason_code': operation.reason_code,
-            'index_state': operation.index_state, 'authoritative': False,
-            'review_token': signing.dumps(_review_binding(request, operation, review), salt=_REVIEW_SALT)}
-    if operation.state in {'completed', 'cancelled'}:
-        path = operation.destination if operation.state == 'completed' else operation.source
-        try:
-            if review['kind'] == 'note':
-                note = read_note(path)
-                if expected_revision and note.revision != expected_revision:
-                    raise StorageError('move_readback_changed', 503)
-                data.update(path=path, href=reverse('wiki:note', args=[path]), source=note.source,
-                            revision=note.revision, bom=note.bom, newline=note.newline, authoritative=True)
-            else:
-                with open_directory(path) as directory:
-                    identity = operation.plan['source_identity']
-                    info = os.fstat(directory)
-                    if [info.st_dev, info.st_ino] != identity[:2]:
-                        raise StorageError('move_readback_changed', 503)
-                data.update(path=path, verified=True, authoritative=True)
-        except StorageError:
-            data.update(state='uncertain', operation_state=operation.state,
-                        reason_code='move_readback_unconfirmed', inspect_before_retry=True)
-    elif operation.state != 'preview':
-        data['inspect_before_retry'] = True
-    return data
+    return service._move_data(_access(request), operation, expected_revision=expected_revision, max_review_bytes=MAX_REVIEW_BYTES)
 
 
 def _preparation_data(request, job):
-    for path in (job.source, job.destination):
-        _eligible(request, path)
-    if job.context['policy'] != policy_version():
-        raise StorageError('move_policy_changed', 409)
-    move_previews.assert_preview_storage_context(job)
-    state = {'queued': 'preparing', 'running': 'preparing',
-             'failed': 'preview_failed', 'cancelled': 'cancelled'}[job.state]
-    data = {'operation_id': str(job.pk), 'source': job.source, 'source_path': job.source,
-            'destination': job.destination, 'kind': job.context['kind'],
-            'affected_paths': [job.source, job.destination], 'state': state,
-            'reason_code': job.reason_code, 'authoritative': False}
-    if state == 'preparing':
-        data.update(poll_after_ms=1000, next_action='get_move')
-    return data
+    return service._preparation_data(_access(request), job)
 
 
 def _move_response(data):
@@ -269,28 +187,14 @@ def _history_path(request, path, *, query=False):
     return recovery_path(path)
 
 
-def _revision_id(value):
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
-        raise StorageError('invalid_revision_id')
-    spelling = str(value)
-    if not spelling.isascii() or not spelling.isdigit() or len(spelling) > 18 or int(spelling) < 1:
-        raise StorageError('invalid_revision_id')
-    return int(spelling)
+_revision_id = service._revision_id
 
 
 def _record(request, value):
-    try:
-        row = SavedRevision.objects.get(pk=_revision_id(value))
-    except SavedRevision.DoesNotExist:
-        raise StorageError('not_found', 404) from None
-    except DatabaseError:
-        raise StorageError('history_unavailable', 503) from None
-    _history_path(request, row.path)
-    return row
+    return service.history_record(_access(request), value)
 
 
-def _metadata(row):
-    return {'revision_id': row.pk, 'created_at': row.created_at.isoformat(), 'base_revision': row.base_revision}
+_metadata = service._metadata
 
 
 @_tool
@@ -298,44 +202,10 @@ def list_note_history(request):
     query = _query(request, {'path', 'limit', 'cursor'}, {'path'})
     path = _history_path(request, query['path'], query=True)
     cursor, limit = _paging(request, 30)
-    try:
-        rows = SavedRevision.objects.filter(path=path)
-        generation = rows.aggregate(count=Count('pk'), latest=Max('pk'))
-        binding = {'actor': str(request.user.pk), 'path': path, 'policy': policy_version(), 'generation': generation}
-        after = None
-        if cursor:
-            try:
-                decoded = signing.loads(cursor, salt=_HISTORY_SALT, max_age=900)
-                if not isinstance(decoded, dict) or decoded.get('binding') != binding:
-                    raise ValueError
-                after = _revision_id(decoded.get('after'))
-            except (signing.BadSignature, ValueError, TypeError, StorageError):
-                raise StorageError('cursor_invalid') from None
-        if after is not None:
-            rows = rows.filter(pk__lt=after)
-        # Defer payloads: history discovery must not read note bodies.
-        page = list(rows.only('pk', 'created_at', 'base_revision').order_by('-pk')[:limit + 1])
-        more = len(page) > limit
-        page = page[:limit]
-        next_cursor = signing.dumps({'binding': binding, 'after': page[-1].pk}, salt=_HISTORY_SALT) if more else None
-        return _json({'state': 'ok', 'path': path, 'items': [_metadata(row) for row in page],
-                      'next_cursor': next_cursor, 'authoritative': False})
-    except DatabaseError:
-        raise StorageError('history_unavailable', 503) from None
+    return _json(service.list_history(_access(request), path, cursor=cursor, limit=limit))
 
 
-def _historical_source(row):
-    raw = bytes(row.original)
-    if len(raw) > settings.BACKSTORY_NOTE_MAX_BYTES:
-        raise StorageError('note_too_large', 413)
-    bom = raw.startswith(b'\xef\xbb\xbf')
-    try:
-        source = (raw[3:] if bom else raw).decode('utf-8')
-    except UnicodeError:
-        raise StorageError('history_source_invalid', 422) from None
-    newline = '\r\n' if '\r\n' in source else '\r' if '\r' in source else '\n'
-    return {'source': source, 'bom': bom, 'newline': newline,
-            'revision': '"' + hashlib.sha256(raw).hexdigest() + '"'}
+_historical_source = service._historical_source
 
 
 @_tool

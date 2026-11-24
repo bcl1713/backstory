@@ -233,4 +233,4 @@ def read_many(request):
             raise ValueError
     except (ValueError, UnicodeError, RequestDataTooBig):
         raise StorageError('invalid_read_many_request') from None
-    return _json(read_batch(request, body['paths']))
+    return _json(read_batch(body['paths'], authorize=lambda path: authorize_content(request, path)))
