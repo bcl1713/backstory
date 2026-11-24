@@ -34,3 +34,19 @@ def saved_result(result, path, *, create=False, include_index=True):
         except Exception:
             data['index'] = {'state': 'unavailable'}
     return data, status
+
+
+def edited_result(result, path):
+    """Reuse authoritative save readback; project no source/diff/formatter text."""
+    data, _ = saved_result(result, path)
+    compact = {key: data[key] for key in ('state', 'revision', 'authoritative', 'reason_code') if key in data}
+    compact['index'] = {'state': data.get('index', {}).get('state', 'unavailable')}
+    compact['indexing'] = {'state': {'saved': 'queued', 'saved_index_delayed': 'delayed',
+        'noop': 'unchanged'}.get(result.state, 'not_confirmed' if result.state in {'uncertain', 'current'} else 'not_requested')}
+    uncertain = data['state'] in {'uncertain', 'current'} or any(
+        item.get('code') == 'durability_uncertain' for item in data.get('diagnostics', []))
+    if uncertain:
+        compact.update(read_before_retry=True, inspect_before_retry=True)
+    if any(item.get('code') == 'durability_uncertain' for item in data.get('diagnostics', [])):
+        compact['durability_confirmed'] = False
+    return compact

@@ -17,7 +17,7 @@ including guarded mutations. The peer-IP restriction is an additional boundary,
 not identity by itself. A successful request still uses the same server-owned,
 storage-bound `LocalActor`/`Access`, path policy, revisions, collision refusal,
 cooperative locks, formatter/backups, recovery journals and indexing outcomes as
-stdio. All 27 tool names/schemas/results are shared. Native clients cannot see
+stdio. All 28 tool names/schemas/results are shared. Native clients cannot see
 unsaved browser buffers. Untrusted note content never grants tool authority.
 
 ## Required operator facts
