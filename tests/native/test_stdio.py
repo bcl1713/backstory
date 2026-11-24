@@ -33,6 +33,90 @@ def parameters(wiki, data, env):
         cwd=str(REPO), env=env)
 
 
+@pytest.mark.parametrize('newline,bom', [('\n', False), ('\r\n', True)])
+def test_targeted_large_note_edit_over_stdio(tmp_path, newline, bom):
+    import hashlib
+    import json
+    import sqlite3
+    wiki, data, env = environment(tmp_path)
+    if newline == '\r\n':
+        (wiki / '.prettierrc.json').write_text('{"endOfLine":"crlf"}')
+
+    def backup_rows():
+        with sqlite3.connect(data / 'backstory.sqlite3') as db:
+            return db.execute('SELECT base_revision, original FROM wiki_savedrevision ORDER BY id').fetchall()
+
+    async def check():
+        async with stdio_client(parameters(wiki, data, env)) as (read, write):
+            async with ClientSession(read, write) as client:
+                await client.initialize()
+                tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+                assert 'edit_note' in tools, 'registered bounded literal edit is missing'
+                assert tools['edit_note'].annotations.read_only_hint is False
+
+                async def call(name, args):
+                    result = await client.call_tool(name, args)
+                    return result, json.loads(result.content[0].text)
+
+                source = ('# Synthetic large note\n\n' + 'A stable synthetic sentence.\n\n' * 1280 + 'MARKER-A\n').replace('\n', newline)
+                await call('create_note', {'path': 'large.md', 'source': ('\ufeff' if bom else '') + source})
+                _, initial = await call('read_note', {'path': 'large.md'})
+                before = (wiki / 'large.md').read_bytes()
+                assert 36 * 1024 <= len(before) <= 42 * 1024
+                assert initial['authoritative'] and initial['revision'] == '"' + hashlib.sha256(before).hexdigest() + '"'
+                assert before.startswith(b'\xef\xbb\xbf') == bom
+                rows = backup_rows()
+                result, edited = await call('edit_note', {'path': 'large.md', 'revision': initial['revision'],
+                                                        'old_text': 'MARKER-A', 'new_text': 'MARKER-B'})
+                assert not result.is_error and edited['authoritative']
+                assert edited['state'] in {'saved', 'saved_index_delayed'}
+                assert edited['indexing']['state'] in {'queued', 'delayed'}
+                assert edited['index']['state'] in {'ready', 'partial', 'stale', 'backoff', 'unavailable'}
+                assert len(json.dumps(edited)) < 768
+                assert not {'source', 'diff', 'diagnostics', 'recovery_token', 'old_text', 'new_text'} & edited.keys()
+                expected = before.replace(b'MARKER-A', b'MARKER-B', 1)
+                assert (wiki / 'large.md').read_bytes() == expected
+                _, readback = await call('read_note', {'path': 'large.md'})
+                assert readback['authoritative'] and readback['revision'] == edited['revision']
+                assert edited['revision'] == '"' + hashlib.sha256(expected).hexdigest() + '"'
+                assert len(backup_rows()) == len(rows) + 1
+                assert backup_rows()[-1] == (initial['revision'], before)
+
+                async def refused(args, reason):
+                    path = args.get('path', 'large.md')
+                    old_bytes = (wiki / path).read_bytes() if path in {'large.md', 'overlap.md', 'format.md', 'metadata.md'} else None
+                    old_rows = backup_rows()
+                    outcome, value = await call('edit_note', args)
+                    assert outcome.is_error and value['reason_code'] == reason
+                    assert not {'source', 'diff', 'diagnostics', 'recovery_token', 'old_text', 'new_text'} & value.keys()
+                    assert len(json.dumps(value)) < 768 and backup_rows() == old_rows
+                    if args.get('path') in {'large.md', 'overlap.md', 'format.md', 'metadata.md'}:
+                        assert (wiki / args['path']).read_bytes() == old_bytes
+                    return value
+
+                args = {'path': 'large.md', 'revision': edited['revision'], 'old_text': 'MARKER-B', 'new_text': 'MARKER-C'}
+                await refused({**args, 'revision': initial['revision']}, 'revision_conflict')
+                await refused({**args, 'old_text': 'absent-needle'}, 'edit_no_match')
+                await refused({**args, 'old_text': 'synthetic'}, 'edit_ambiguous')
+                for change in ({'old_text': ''}, {'old_text': 'x' * 4097}, {'new_text': 'é' * 4096},
+                               {'revision': '*'}, {'actor': 'browser'}):
+                    await refused({**args, **change}, 'invalid_arguments')
+                await refused({**args, 'path': '../outside.md'}, 'path_denied')
+                for path, body, needle, reason in (
+                    ('overlap.md', '# Overlap\n\naaaa\n', 'aaa', 'edit_ambiguous'),
+                    ('format.md', '# Format\n\n-   unstable\n\nMARKER-A\n', 'MARKER-A', 'edit_would_change_other_content'),
+                    ('metadata.md', '---\nmodified: 2000-01-01\n---\n\n# Metadata\n\nMARKER-A\n', 'MARKER-A', 'edit_would_change_other_content')):
+                    (wiki / path).write_bytes(body.replace('\n', newline).encode())
+                    _, current = await call('read_note', {'path': path})
+                    await refused({'path': path, 'revision': current['revision'], 'old_text': needle, 'new_text': 'replacement'}, reason)
+                print(json.dumps({'note_bytes': len(before), 'bom': bom, 'newline': 'crlf' if bom else 'lf',
+                    'discovered_edit': True, 'authoritative_new_revision': True, 'outside_span_bytes_unchanged': True,
+                    'normal_backup_count_delta': 1, 'indexing': edited['indexing']['state'],
+                    'observed_index': edited['index']['state'], 'compact_reply_bytes': len(json.dumps(edited)),
+                    'stale_missing_ambiguous_overlap_and_normalization_refused_without_backup': True}))
+    asyncio.run(check())
+
+
 def test_initialize_and_discover(tmp_path):
     wiki, data, env = environment(tmp_path)
 
@@ -58,7 +142,7 @@ def test_guarded_lifecycle_over_stdio(tmp_path):
     import json
     wiki, data, env = environment(tmp_path)
     expected = {'wiki_status', 'list_notes', 'search_notes', 'read_note', 'read_notes',
-                'create_folder', 'create_note', 'save_note', 'preview_move', 'get_move',
+                'create_folder', 'create_note', 'save_note', 'edit_note', 'preview_move', 'get_move',
                 'commit_move', 'rollback_move', 'preview_removal', 'get_removal',
                 'commit_removal', 'restore_removal', 'list_note_history',
                 'read_note_revision', 'restore_note_revision', 'get_note_links',
@@ -210,7 +294,7 @@ else:
                 assert (await call('inspect_upload', filename='proof.bin', sha256=digest))['state'] == 'confirmed'
                 assert len(list((wiki / 'assets').iterdir())) == 1
                 assert (await call('upload_file', filename='proof.bin', data_base64='Zg==='))['state'] == 'error'
-                print('lifecycle: 27 tools, authoritative disk/recovery checks, stale/path/collision refusals')
+                print('lifecycle: 28 tools, authoritative disk/recovery checks, stale/path/collision refusals')
     asyncio.run(check())
 
 

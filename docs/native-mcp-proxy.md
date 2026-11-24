@@ -110,7 +110,7 @@ before deliberate retry; no automatic replay or recovery loop is introduced.
 The local ASGI proof uses the production app and real SDK messages with synthetic
 socket peers. It is not an NPM/TLS or deployed-containment proof. The single
 representative real fixture uses disposable Nginx1.28.3+Backstory over two internal
-networks: verified frontend HTTPS/Basic, admitted initialize/list27/status, missing
+networks: verified frontend HTTPS/Basic, admitted initialize/list/status, missing
 credentials401 with no actor dispatch, and frontend-only client unable to connect
 to the unpublished backend. It does not repeat the retained operator edge-policy
 campaign for bad credentials or outside-LAN clients.

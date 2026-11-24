@@ -113,12 +113,27 @@ def _saved(source, revision, diagnostics, diff, mode, *, uncertain=False, path):
     return SaveResult(state, source, revision, diagnostics, diff)
 
 
-def save_note(actor, path, submitted_source, base_revision, mode="formatted", recovery_token=None, *, restore_bom=None, restore_revision_id=None):
+def edit_note(actor, path, old_text, new_text, revision):
+    """One bounded literal span; construction and normal save share the same locks."""
+    for text, minimum in ((old_text, 1), (new_text, 0)):
+        try:
+            if not isinstance(text, str) or not minimum <= len(text.encode('utf-8')) <= 4096:
+                raise ValueError
+        except (ValueError, UnicodeError):
+            raise StorageError('invalid_arguments') from None
+    base = parse_precondition(revision, None)
+    return save_note(actor, path, '', base, literal_edit=(old_text, new_text))
+
+
+def save_note(actor, path, submitted_source, base_revision, mode="formatted", recovery_token=None, *, restore_bom=None, restore_revision_id=None, literal_edit=None):
     submitted = validate_save(actor, path, submitted_source)
     if base_revision is not None and not re.fullmatch(r'"[0-9a-f]{64}"', base_revision):
         raise StorageError("invalid_precondition")
     if not isinstance(mode, str) or mode not in {"formatted", "source_recovery"}:
         raise StorageError("invalid_save_mode")
+    if literal_edit is not None and (base_revision is None or mode != 'formatted'
+            or recovery_token is not None or restore_bom is not None or restore_revision_id is not None):
+        raise StorageError('invalid_save_mode')
     try:
         with wiki_write_lock(), application_lock("note:" + path):
             if restore_revision_id is not None:
@@ -130,6 +145,15 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
             conflict = _check_base(current, base_revision, submitted_source)
             if conflict:
                 return conflict
+            if literal_edit is not None:
+                old_text, new_text = literal_edit
+                start = current.source.find(old_text)
+                if start < 0:
+                    raise StorageError('edit_no_match', 412)
+                if current.source.find(old_text, start + 1) >= 0:
+                    raise StorageError('edit_ambiguous', 412)
+                submitted_source = current.source[:start] + new_text + current.source[start + len(old_text):]
+                submitted = validate_save(actor, path, submitted_source)
             if recovery is not None:
                 candidate, diagnostics, diff = submitted_source, recovery[0], recovery[1]
                 result = None
@@ -137,12 +161,20 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                 try:
                     prepared = prepare_save_metadata(submitted_source, current.source if current else None, wiki_date())
                 except MetadataError as error:
+                    if literal_edit is not None:
+                        return SaveResult('refused', '', base_revision, reason_code='edit_format_unavailable', status=422)
                     failure = FormatResult(submitted_source, (error.diagnostic,), "", "failed", "")
                     return failed_format(actor, path, submitted_source, base_revision, failure)
                 result = format_source(path, prepared, current)
                 if result.outcome == "failed":
+                    if literal_edit is not None:
+                        return SaveResult('refused', '', base_revision, reason_code='edit_format_unavailable', status=422)
                     return failed_format(actor, path, submitted_source, base_revision, result)
                 candidate, diagnostics = result.source, result.diagnostics
+                if literal_edit is not None and candidate != submitted_source:
+                    # Conservative: even a formatter change inside the requested
+                    # span refuses. Never normalize any unmanaged source bytes.
+                    return SaveResult('refused', '', base_revision, reason_code='edit_would_change_other_content', status=422)
                 diff = "".join(difflib.unified_diff(submitted_source.splitlines(keepends=True),
                     candidate.splitlines(keepends=True), fromfile="submitted", tofile="saved"))
             # NoteSnapshot separates the encoding BOM; every source character
@@ -172,7 +204,7 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                         staged.write(output)
                         staged.flush()
                         os.fsync(staged.fileno())
-                    if output != original or current is None:
+                    if literal_edit is None and (output != original or current is None):
                         store_required_backup(actor, path, base_revision, original, submitted)
                     require_ready()
                     if result is not None:
@@ -181,6 +213,8 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                         except FormatFailure:
                             digest = None
                         if digest != result.config_digest:
+                            if literal_edit is not None:
+                                return SaveResult('refused', '', base_revision, reason_code='edit_config_changed', status=412)
                             failure = FormatResult(submitted_source, diagnostics + (Diagnostic("config_changed", "Formatting configuration changed. Retry formatting or recover the submitted source."),), diff, "failed", result.config_digest)
                             return failed_format(actor, path, submitted_source, base_revision, failure)
                     conflict = _check_base(_current(path), base_revision, submitted_source)
@@ -192,6 +226,10 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                             raise StorageError("parent_changed", 503)
                     if current and output == original:
                         return SaveResult("noop", source, current.revision, diagnostics, diff)
+                    if literal_edit is not None:
+                        # Known stale/config/parent refusals above create no
+                        # backup. Cooperative locks remain held through publish.
+                        store_required_backup(actor, path, base_revision, original, submitted)
                     attempted = True
                     if current is None:
                         # Atomic publication cannot overwrite an existing name.

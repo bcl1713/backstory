@@ -7,6 +7,7 @@ from pathlib import Path
 _MUTATION_SUCCESS = {
     'create_note': {'created', 'created_index_delayed'},
     'save_note': {'saved', 'saved_index_delayed', 'noop'},
+    'edit_note': {'saved', 'saved_index_delayed', 'noop'},
     'create_folder': {'created', 'already_exists'},
     'preview_move': {'preview'}, 'commit_move': {'completed'}, 'rollback_move': {'cancelled'},
     'preview_removal': {'preview'}, 'commit_removal': {'removed'},

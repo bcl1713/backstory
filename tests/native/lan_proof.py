@@ -59,7 +59,7 @@ async def proof():
                 async with streamable_http_client(selected.endpoint, http_client=http) as streams:
                     async with ClientSession(*streams) as client:
                         initialized = await client.initialize()
-                        assert len((await client.list_tools()).tools) == 27
+                        assert len((await client.list_tools()).tools) == 28
 
                         async def call(name, args):
                             result = await client.call_tool(name, args)
@@ -116,10 +116,10 @@ async def proof():
                     response = await http.post(selected.endpoint, json={'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'})
                 assert response.status_code == expected
                 if expected == 200:
-                    assert len(response.json()['result']['tools']) == 27
+                    assert len(response.json()['result']['tools']) == 28
                 else:
                     assert response.json()['reason_code'] == 'peer_or_tls_denied'
-        print(json.dumps({'protocol': protocol, 'tls': tls, 'lan_clients': 2, 'tools': 27,
+        print(json.dumps({'protocol': protocol, 'tls': tls, 'lan_clients': 2, 'tools': 28,
             'negative_requests_before_access': len(denials), 'guarded_save_readback': True,
             'cross_peer_stale_no_mutation': True, 'forge_mode_still_restricted': True,
             'proof': 'SDK ASGI plus separate production-context MemoryBIO TLS; no TCP/listener'}))

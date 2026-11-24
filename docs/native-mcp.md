@@ -80,7 +80,8 @@ The current source inventory is `static/src/wiki-tools.js`, `wiki/tool_urls.py`,
 `wiki/tool_views.py`, `wiki/management_tools.py`, `wiki/removal_tools.py`,
 `wiki/graph_views.py`, and `wiki/file_uploads.py`. All **26 registered WebMCP tools**
 are discoverable under the same native names. The native-only `list_operations`
-adds bounded journal-handle recovery, for **27 native tools** total. The native input schemas are in
+adds bounded journal-handle recovery, and native-only `edit_note` adds a guarded
+literal-span edit, for **28 native tools** total. The native input schemas are in
 `backstory/native_tools.json`; arguments reject extra properties and wrong types.
 Results are JSON text with `state` and `untrusted_content: true`. Fixed reason
 codes, authoritative flags, revisions, cursors and recovery handles retain their
@@ -96,6 +97,7 @@ have changed disk. Never infer filesystem absence or replay permission from this
 | `read_note`, `read_notes` | `/tools/read/`, `/tools/read-many/` | Current complete UTF-8 source, BOM/newlines and quoted raw-byte hash; 2 MiB/note. Batch: 1–8 unique paths, 4 MiB aggregate, two-second budget between reads; explicit partial/unprocessed results. |
 | `create_folder`, `create_note` | `/tools/create-folder/`, `/tools/create-note/` | One exact path in existing parent. Exclusive publication; no overwrites/ancestors. Note metadata/formatting follows ordinary saves. Existing folder is `already_exists`, with no creator claim. |
 | `save_note` | `/tools/save/` | Exact current revision and complete replacement; same formatter, metadata, backups, locks, final revision checks and readback. No force or arbitrary formatting-recovery mode. |
+| `edit_note` | Native only; no web route | One exact-match literal span and strong current revision; old/new text at most4096 UTF-8 bytes each, old nonempty, overlaps count. Same normal save path; refuses when metadata/formatting would alter any other bytes. Compact verified revision/index outcome, no body/diff. See safe steps below. |
 | `list_operations` | Native only; no web route | Inspection-only move/removal journal metadata for the local actor, 1–100 examined records/page (default 30). No plans, bodies, recovery bytes or commit tokens. Signed 15-minute cursors bind actor/root/marker/policy, selection and observed membership. Continue empty pages; restart changed/expired cursors. |
 | `preview_move`, `get_move`, `commit_move`, `rollback_move` | `/tools/moves/preview/`, `get/`, `commit/`, `rollback/` | Same move/rename/folder/archive planner, signed complete-review token, witnesses, collision refusal, journal, indexing and readback. Native preview plans synchronously; browser preview still queues its supervised worker. Public review is capped at 512 KiB and expires in 30 minutes. |
 | `preview_removal`, `get_removal`, `commit_removal`, `restore_removal` | `/tools/removals/preview/`, `get/`, `commit/`, `restore/` | One exact-revision Markdown note or verified empty ordinary folder. Durable recovery bytes/journal, verified absence, explicit no-overwrite restore. No recursive removal or permanent purge. |
@@ -103,6 +105,71 @@ have changed disk. Never infer filesystem absence or replay permission from this
 | `get_note_links`, `get_note_graph`, `get_graph_snapshot`, `find_link_issues` | `/tools/links/`, `/tools/graph/`, `/tools/graph/snapshot/`, `/tools/link-issues/` | Same saved-index relations. Neighborhood depth 1–8, at most 200 nodes/500 edges; occurrence/issue pages 1–100. Snapshot uses the existing whole-index budget; not an unlimited export. Respect freshness, scope, completeness, boundaries and continuation evidence. |
 | `get_index_diagnostics` | `/tools/index-diagnostics/` | Same bounded source-free diagnostic records, 1–100 results/300 examined candidates, generation/scope-bound cursors. Reads never rebuild or repair content. |
 | `upload_file`, `inspect_upload` | `/tools/files/encoded/`, `/tools/files/inspect/` | Canonical base64 up to 256 KiB decoded, <=349528 encoded characters; existing root `assets` required. Same opaque identity, exclusive byte publication/quota/locks/digest readback. Inspect exact filename/SHA-256 without reading bodies/listing files; optional existing note gives relative link. Never edits a note. |
+
+## Small lossless edits on large notes
+
+After this revision is deliberately shipped, a native client can use registered
+`edit_note` without constructing or resubmitting the complete note. A worker must
+first discover that tool; an older27-tool runtime has no equivalent small-edit
+workflow. Do not use shell, execute_code, another bridge, source-recovery mode or
+an automatic whole-replacement fallback as a job method.
+
+1. Call `read_note` with `{"path":"notes/daily.md"}`. Require authoritative=true;
+   retain the returned exact quoted revision and select the precise literal text.
+   Existing read_note returns the body; the job does not submit that body again.
+2. Call `edit_note` with path, that revision copied verbatim, old_text and new_text.
+   For example the argument shape is:
+
+```json
+{
+  "path": "notes/daily.md",
+  "revision": "\"<64 lowercase hex characters copied from read_note>\"",
+  "old_text": "One unique existing sentence.",
+  "new_text": "One corrected sentence."
+}
+```
+
+The revision above is a placeholder: copy the actual entire read_note.revision
+string, including its quote characters; never hash a search snippet or use a
+wildcard. old_text must be nonempty. Each text is limited to4096 UTF-8 bytes and
+4096 Unicode characters; new_text may be empty. Matching is exact/case-sensitive,
+not regex/normalized/fuzzy. Exactly one occurrence is required, counting overlaps:
+`aaa` in `aaaa` is ambiguous and refuses. No multi-edit language or actor argument.
+
+The server checks current revision under the existing wiki/note locks, builds
+the splice internally and runs ordinary metadata+formatter processing. It requires
+the resulting source to equal the requested splice exactly before staging. Even
+additional formatting *inside* the span is conservatively refused. A modified-date,
+title/alias update, CRLF normalization, wrapping or unrelated formatting change
+therefore returns `edit_would_change_other_content` without publication/backup.
+Formatter/metadata failure is `edit_format_unavailable`; no recovery grant or raw
+bypass is offered. Use a separately authorized editor workflow when normalization
+is needed; do not broaden the unattended job's permissions or retry automatically.
+
+On success, every byte outside the span, including encoding BOM/newlines, is
+preserved. Supported LF and configured formatter-stable BOM+CRLF are tested on
+synthetic large notes. Existing notes without a modified field, or whose normal
+metadata is already current and unchanged, can remain lossless; a stale modified
+date can intentionally prevent an otherwise valid small edit. Nothing silently
+updates unmanaged metadata or formatter configuration.
+
+The compact result includes state, verified revision/authoritative flag and
+independent indexing status, with no full source/diff/formatter messages or
+literal echoes. `saved`/`saved_index_delayed` with authoritative=true means readback
+matched the new raw-byte hash. `indexing.state=queued` is not an indexed/ready
+claim; index.state is the separate current observation. `noop` leaves bytes and
+backup unchanged. A normal published edit has the usual original/submitted
+backup and ownership. Known stale, missing/ambiguous and normalization refusals
+leave note bytes/backup count unchanged. Final config/revision/parent checks run
+before the targeted backup. As with all saves, unrelated external filesystem
+writers do not honor cooperative locks; this is not filesystem compare-and-swap.
+
+After a missed reply, uncertain readback or unconfirmed durability, read current
+source/revision (and inspect normal history if necessary) before any deliberate
+next decision. A backup or queued index does not authorize replay. Reusing the
+pre-edit revision after successful publication refuses as stale. Native clients
+still cannot see unsaved editor buffers. No WebMCP tool or existing complete-save
+schema/behavior changes; the new tool is additive across shared native transports.
 
 Unregistered UI routes are explicit boundaries: `/tools/complete/` is browser
 editor autocomplete (native uses bounded search); `/tools/images/` validates and
