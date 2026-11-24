@@ -1,5 +1,9 @@
 # Authenticated private LAN HTTPS MCP
 
+For an NPM-authenticated, contained private backend hop, use the separate explicit
+[proxy-only mode](native-mcp-proxy.md). This page describes direct TLS+bearer mode;
+its existing Forge/LAN selectors and forwarding-header refusals remain unchanged.
+
 This optional process adds authenticated private HTTPS to the shipped
 [native tools](native-mcp.md). Stdio remains available. Ordinary web startup,
 WebMCP/session/CSRF authorization and the default web container command do not

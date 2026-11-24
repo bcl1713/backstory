@@ -44,7 +44,7 @@ EXPOSE 8000
 CMD ["sh", "docker/entrypoint.sh"]
 
 # Explicit optional artifact: locked SDK added at build time, never live-installed.
-# No selector defaults; invoking this target without explicit HTTPS flags refuses.
+# No selector defaults; invoking this target without explicit transport flags refuses.
 FROM runtime-base AS native-mcp
 USER 0:0
 RUN --mount=type=secret,id=proxy_ca \

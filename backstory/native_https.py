@@ -39,6 +39,37 @@ def _private_lan(value):
     return network
 
 
+def _validate_location(settings, *, proxy=False):
+    _private_ip(settings.bind_ip)
+    if type(settings.port) is not int or not 1 <= settings.port <= 65535:
+        raise ValueError('an exact port is required')
+    url = urlsplit(settings.endpoint)
+    host = url.hostname or ''
+    client_port = (url.port or 443) if proxy else settings.port
+    authority = host if proxy and client_port == 443 else f'{host}:{client_port}'
+    if (url.scheme != 'https' or url.path != '/mcp' or url.query or url.fragment
+            or url.username is not None or url.password is not None
+            or not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?', host)
+            or '..' in host or url.netloc != authority or not 1 <= client_port <= 65535
+            or (not proxy and url.port != settings.port)):
+        raise ValueError('a canonical exact client HTTPS /mcp endpoint is required')
+    if not proxy:
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            if str(address) != settings.bind_ip:
+                raise ValueError('literal endpoint address must equal bind address')
+    if not all(path.is_absolute() for path in (settings.wiki_root, settings.data_dir)):
+        raise ValueError('storage paths must be explicit and absolute')
+    if not settings.wiki_root.is_dir() or not (settings.data_dir / 'backstory.sqlite3').is_file():
+        raise ValueError('select an existing wiki and migrated application database')
+    wiki, data = settings.wiki_root.resolve(), settings.data_dir.resolve()
+    if wiki.is_relative_to(data) or data.is_relative_to(wiki):
+        raise ValueError('wiki and application data must be disjoint')
+
+
 @dataclass(frozen=True)
 class HttpsSettings:
     wiki_root: Path
@@ -63,30 +94,10 @@ class HttpsSettings:
             _private_ip(self.forge_ip)
             if self.bind_ip == self.forge_ip:
                 raise ValueError('Forge source must differ from the listener address')
-        if type(self.port) is not int or not 1 <= self.port <= 65535:
-            raise ValueError('an exact port is required')
-        url = urlsplit(self.endpoint)
-        host = url.hostname or ''
-        if (url.scheme != 'https' or url.path != '/mcp' or url.query or url.fragment
-                or url.username is not None or url.password is not None
-                or not re.fullmatch(r'[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?', host)
-                or '..' in host or url.netloc != f'{host}:{self.port}' or url.port != self.port):
-            raise ValueError('endpoint must be canonical https://exact-host:port/mcp without userinfo/query/fragment')
-        try:
-            address = ipaddress.ip_address(host)
-        except ValueError:
-            pass  # exact operator-supplied DNS name; no DNS lookup at configuration time
-        else:
-            if str(address) != self.bind_ip:
-                raise ValueError('literal endpoint address must equal bind address')
-        paths = (self.wiki_root, self.data_dir, self.token_file, self.cert_file, self.key_file)
-        if not all(path.is_absolute() for path in paths):
-            raise ValueError('all paths must be explicit and absolute')
-        if not self.wiki_root.is_dir() or not (self.data_dir / 'backstory.sqlite3').is_file():
-            raise ValueError('select an existing wiki and migrated application database')
-        wiki, data = self.wiki_root.resolve(), self.data_dir.resolve()
-        if wiki.is_relative_to(data) or data.is_relative_to(wiki):
-            raise ValueError('wiki and application data must be disjoint')
+        _validate_location(self)
+        if not all(isinstance(path, Path) and path.is_absolute()
+                   for path in (self.token_file, self.cert_file, self.key_file)):
+            raise ValueError('direct HTTPS requires explicit absolute bearer/certificate/key paths')
         return self
 
 
@@ -102,19 +113,52 @@ class HttpsSettings:
         return str(peer) == value and peer in _private_lan(self.lan_cidr)
 
 
+@dataclass(frozen=True)
+class ProxySettings:
+    wiki_root: Path
+    data_dir: Path
+    bind_ip: str
+    port: int
+    endpoint: str
+    npm_ip: str
+
+    def validate(self):
+        _validate_location(self, proxy=True)
+        _private_ip(self.npm_ip)
+        if self.bind_ip == self.npm_ip:
+            raise ValueError('NPM transport peer must differ from backend bind')
+        return self
+
+    def allows_peer(self, value):
+        return isinstance(value, str) and value == self.npm_ip
+
+
 def parse_settings(argv=None):
-    parser = argparse.ArgumentParser(description='Opt-in authenticated private HTTPS MCP; explicit LAN or Forge peer, no anonymous/proxy mode.')
-    parser.add_argument('--https', action='store_true', required=True)
-    for flag in ('wiki-root', 'data-dir', 'token-file', 'tls-cert', 'tls-key'):
+    parser = argparse.ArgumentParser(description='Explicit direct HTTPS or NPM-contained private HTTP MCP; no public backend.')
+    modes = parser.add_mutually_exclusive_group(required=True)
+    modes.add_argument('--https', action='store_true')
+    modes.add_argument('--proxy-only', action='store_true')
+    for flag in ('wiki-root', 'data-dir'):
         parser.add_argument('--' + flag, type=Path, required=True)
+    for flag in ('token-file', 'tls-cert', 'tls-key'):
+        parser.add_argument('--' + flag, type=Path)
     for flag in ('bind-ip', 'endpoint'):
         parser.add_argument('--' + flag, required=True)
-    peers = parser.add_mutually_exclusive_group(required=True)
+    peers = parser.add_mutually_exclusive_group()
     peers.add_argument('--forge-ip')
     peers.add_argument('--lan-cidr')
+    parser.add_argument('--npm-ip')
     parser.add_argument('--port', type=int, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.proxy_only:
+            if (not args.npm_ip or any(value is not None for value in
+                    (args.forge_ip, args.lan_cidr, args.token_file, args.tls_cert, args.tls_key))):
+                raise ValueError('proxy mode requires exact NPM peer and forbids direct-mode selectors')
+            return ProxySettings(args.wiki_root, args.data_dir, args.bind_ip, args.port,
+                                 args.endpoint, args.npm_ip).validate()
+        if args.npm_ip is not None:
+            raise ValueError('NPM peer is only supported in explicit proxy mode')
         return HttpsSettings(args.wiki_root, args.data_dir, args.bind_ip, args.port, args.endpoint,
                              args.forge_ip, args.token_file, args.tls_cert, args.tls_key, lan_cidr=args.lan_cidr).validate()
     except (ValueError, OSError):
@@ -162,8 +206,9 @@ class PrivateHttpsApp:
         from .native_dispatch import NativeDispatcher
 
         self.settings = settings.validate()
-        self._credential_digest = token_digest(settings.token_file)
-        self.dispatcher = NativeDispatcher(transport='streamable_https')
+        self._proxy = isinstance(settings, ProxySettings)
+        self._credential_digest = None if self._proxy else token_digest(settings.token_file)
+        self.dispatcher = NativeDispatcher(transport='streamable_http_proxy' if self._proxy else 'streamable_https')
         self._request_active = False
         self.security_settings = TransportSecuritySettings(enable_dns_rebinding_protection=True,
                             allowed_hosts=[urlsplit(settings.endpoint).netloc], allowed_origins=[])
@@ -205,13 +250,18 @@ class PrivateHttpsApp:
         if scope['type'] != 'http':
             return
         peer = scope.get('client')
-        if scope.get('scheme') != 'https' or not peer or not self.settings.allows_peer(peer[0]):
-            return await self._reject(scope, receive, send, 403, 'peer_or_tls_denied')
+        if (scope.get('scheme') != ('http' if self._proxy else 'https')
+                or not peer or not self.settings.allows_peer(peer[0])):
+            return await self._reject(scope, receive, send, 403,
+                                      'proxy_peer_or_transport_denied' if self._proxy else 'peer_or_tls_denied')
         pairs = scope.get('headers', [])
-        if any(key == b'forwarded' or key == b'x-real-ip' or key.startswith(b'x-forwarded-') for key, _ in pairs):
+        if not self._proxy and any(key == b'forwarded' or key == b'x-real-ip' or key.startswith(b'x-forwarded-') for key, _ in pairs):
             return await self._reject(scope, receive, send, 403, 'forwarded_peer_denied')
         credentials = [value for key, value in pairs if key == b'authorization']
-        valid = (len(credentials) == 1 and credentials[0].startswith(b'Bearer ')
+        if self._proxy and credentials:
+            return await self._reject(scope, receive, send, 403, 'upstream_credentials_denied')
+        # Proxy forwarding/identity headers are ignored, never authentication.
+        valid = self._proxy or (len(credentials) == 1 and credentials[0].startswith(b'Bearer ')
                  and len(credentials[0]) <= 264
                  and hmac.compare_digest(hashlib.sha256(credentials[0][7:]).digest(), self._credential_digest))
         if not valid:
@@ -280,9 +330,12 @@ def create_app(settings):
 def server_config(app, settings):
     import uvicorn
     settings.validate()
-    context = tls_context(settings)
+    tls = {}
+    if not isinstance(settings, ProxySettings):
+        context = tls_context(settings)
+        tls['ssl_context_factory'] = lambda config, default: context
     return uvicorn.Config(app, host=settings.bind_ip, port=settings.port,
-                          ssl_context_factory=lambda config, default: context,
+                          **tls,
                           proxy_headers=False, forwarded_allow_ips='', access_log=False,
                           ws='none', workers=1, limit_concurrency=8, backlog=8,
                           timeout_keep_alive=5, timeout_graceful_shutdown=30, log_level='warning')
