@@ -24,6 +24,9 @@ from .staging import register_stage, finish_stage
 from .storage import open_directory, read_note, require_ready
 from .tool_views import _tool, _json
 
+from . import file_service
+from .file_service import display_name, asset_name, original_name, _result, _quota, _observe
+
 MAX_BYTES = 8 * 1024 * 1024
 MAX_FILES = 1000
 MAX_STORAGE_BYTES = 256 * 1024 * 1024
@@ -37,40 +40,6 @@ _DIGEST = re.compile(r'[0-9a-f]{64}\Z')
 _NAME = re.compile(r'file-([0-9a-f]{64})-([A-Za-z0-9_-]{2,160})\.attachment\Z')
 _RASTER = re.compile(r'upload-[0-9a-f]{64}\.(png|jpg|webp)\Z')
 _FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
-
-
-def display_name(value):
-    if not isinstance(value, str) or not value or value in {'.', '..'}:
-        raise StorageError('invalid_file_name')
-    try:
-        encoded = value.encode('utf-8', errors='strict')
-    except UnicodeError:
-        raise StorageError('invalid_file_name') from None
-    if len(encoded) > 120 or any(ord(c) < 32 or ord(c) == 127 or c in '/\\' for c in value):
-        raise StorageError('invalid_file_name')
-    return value
-
-
-def asset_name(filename, digest):
-    display_name(filename)
-    if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
-        raise StorageError('invalid_file_digest')
-    encoded = base64.urlsafe_b64encode(filename.encode()).decode().rstrip('=')
-    return 'file-' + digest + '-' + encoded + '.attachment'
-
-
-def original_name(path):
-    """Decode only canonical root upload identities, never arbitrary path metadata."""
-    if not path.startswith('assets/') or path.count('/') != 1:
-        return None
-    match = _NAME.fullmatch(path[7:])
-    if not match:
-        return None
-    try:
-        name = base64.urlsafe_b64decode(match[2] + '=' * (-len(match[2]) % 4)).decode('utf-8')
-        return name if asset_name(name, match[1]) == path[7:] else None
-    except (ValueError, UnicodeError, StorageError):
-        return None
 
 
 def _identity(request, values=None):
@@ -98,58 +67,6 @@ def _identity(request, values=None):
         read_note(note)
     require_ready()
     return filename, values['sha256'], path, note
-
-
-def _result(filename, digest, path, note, state, size=None):
-    relative = posixpath.relpath(path, posixpath.dirname(note) or '.') if note else path
-    # Every punctuation character significant to Markdown is escaped in labels;
-    # destinations use percent encoding rather than raw punctuation/parentheses.
-    label = re.sub(r'([\\`*_{}\[\]()#+.!<>|~-])', r'\\\1', filename)
-    return {'state': state, 'authoritative': state in {'created', 'already_exists', 'confirmed', 'absent'},
-            'path': path, 'href': '/attachments/' + quote(path, safe='/'),
-            'original_filename': filename, 'bytes': size, 'sha256': digest,
-            'markdown': '[' + label + '](' + quote(relative, safe='/.-_') + ')',
-            'inspect_before_retry': state == 'uncertain'}
-
-
-def _quota(directory, additional, *, max_files=MAX_FILES, max_bytes=MAX_STORAGE_BYTES, max_entries=MAX_ENTRIES):
-    count = size = 0
-    with os.scandir(directory) as entries:
-        for index, entry in enumerate(entries):
-            if index >= max_entries:
-                raise StorageError('file_storage_scan_limit', 413)
-            if _NAME.fullmatch(entry.name) or _RASTER.fullmatch(entry.name):
-                info = entry.stat(follow_symlinks=False)
-                count += 1
-                size += info.st_size
-    if count >= max_files or size + additional > max_bytes:
-        raise StorageError('file_storage_full', 413)
-    return max_bytes - size
-
-
-def _observe(directory, name, digest, maximum):
-    try:
-        fd = os.open(name, _FLAGS, dir_fd=directory)
-    except FileNotFoundError:
-        return None
-    with os.fdopen(fd, 'rb') as stream:
-        info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_size > maximum:
-            raise StorageError('file_destination_conflict', 409)
-        hashed = hashlib.sha256()
-        size = 0
-        while chunk := stream.read(min(CHUNK_BYTES, maximum + 1 - size)):
-            size += len(chunk)
-            if size > maximum:
-                raise StorageError('file_destination_conflict', 409)
-            hashed.update(chunk)
-        final = os.fstat(stream.fileno())
-        current = os.stat(name, dir_fd=directory, follow_symlinks=False)
-        fingerprint = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
-        if (size != info.st_size or hashed.hexdigest() != digest or
-                fingerprint(info) != fingerprint(final) or fingerprint(info) != fingerprint(current)):
-            raise StorageError('file_destination_conflict', 409)
-        return size
 
 
 @contextmanager
@@ -214,53 +131,11 @@ def _receive(request, directory, temporary, maximum, source=None):
 
 
 def _upload(request, filename, digest, path, note, *, source=None, receiver_locked=False):
-    maximum = min(MAX_BYTES, _limit('BACKSTORY_ATTACHMENT_MAX_BYTES', _MAX_FILE_BYTES))
-    name = path[7:]
-    temporary = '.backstory-tmp-' + secrets.token_hex(16)
-    attempted = registered = False
-    with (nullcontext() if receiver_locked else application_lock('file-upload', blocking=False)), wiki_write_lock(blocking=False), application_lock('note:' + path, blocking=False), open_directory('assets') as directory:
-        require_ready()
-        if not _same_parent('assets', directory):
-            raise StorageError('parent_changed', 409)
-        existing = _observe(directory, name, digest, maximum)
-        allowance = maximum if existing is not None else min(maximum, _quota(directory, 0, max_files=MAX_FILES, max_bytes=MAX_STORAGE_BYTES, max_entries=MAX_ENTRIES))
-        try:
-            register_stage(path, temporary)
-            registered = True
-            size, observed = _receive(request, directory, temporary, allowance, **({'source': source} if source is not None else {}))
-            if observed != digest:
-                raise StorageError('file_digest_mismatch', 409)
-            require_ready()
-            _revalidate_session(request)
-            if not _same_parent('assets', directory):
-                raise StorageError('parent_changed', 409)
-            if existing is not None:
-                if _observe(directory, name, digest, maximum) != size:
-                    raise StorageError('file_destination_conflict', 409)
-                state = 'already_exists'
-            else:
-                attempted = True
-                os.link(temporary, name, src_dir_fd=directory, dst_dir_fd=directory, follow_symlinks=False)
-                os.fsync(directory)
-                if not _same_parent('assets', directory) or _observe(directory, name, digest, maximum) != size:
-                    raise StorageError('file_readback_unconfirmed', 409)
-                state = 'created'
-            result = _result(filename, digest, path, note, state, size)
-        except (OSError, StorageError):
-            if not attempted:
-                raise
-            result = _result(filename, digest, path, note, 'uncertain')
-            result['reason_code'] = 'file_upload_unconfirmed'
-        finally:
-            if registered:
-                try:
-                    os.unlink(temporary, dir_fd=directory)
-                except FileNotFoundError:
-                    finish_stage(path)
-                except OSError:
-                    pass  # Existing registered-stage startup cleanup owns retry.
-                else:
-                    finish_stage(path)
+    result = file_service.publish(filename, digest, path, note,
+        receive=lambda directory, temporary, maximum: _receive(request, directory, temporary, maximum, source=source),
+        revalidate=lambda: _revalidate_session(request), receiver_locked=receiver_locked,
+        maximum=min(MAX_BYTES, _limit('BACKSTORY_ATTACHMENT_MAX_BYTES', _MAX_FILE_BYTES)),
+        max_files=MAX_FILES, max_bytes=MAX_STORAGE_BYTES, max_entries=MAX_ENTRIES)
     return _json(result, 201 if result['state'] == 'created' else 409 if result['state'] == 'uncertain' else 200)
 
 

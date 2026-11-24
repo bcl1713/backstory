@@ -1,4 +1,5 @@
 """Exclusive, non-recursive folder creation under the shared wiki write lock."""
+from .actors import require_actor
 import os
 import stat
 from urllib.parse import urlencode
@@ -24,8 +25,7 @@ def create_folder(path, actor):
 
 
 def _create_folder(path, actor):
-    if not actor.is_authenticated or not actor.is_active:
-        raise PermissionDenied
+    require_actor(actor)
     validate_path(path, 'folder')
     if not path:
         raise PathDenied()

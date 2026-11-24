@@ -3,7 +3,6 @@ import time
 from django.urls import reverse
 from django.utils import timezone
 from .contracts import PathDenied, StorageError
-from .policy import authorize_content
 from .storage import read_note
 
 MAX_PATHS = 8
@@ -11,7 +10,7 @@ MAX_TOTAL_BYTES = 4 * 1024 * 1024
 MAX_SECONDS = 2
 
 
-def read_many(request, paths):
+def read_many(paths, *, authorize):
     if (not isinstance(paths, list) or not 1 <= len(paths) <= MAX_PATHS
             or any(not isinstance(path, str) or not 1 <= len(path) <= 4096 for path in paths)
             or len(set(paths)) != len(paths)):
@@ -25,7 +24,7 @@ def read_many(request, paths):
             results.append({'path': path, 'state': 'unprocessed', 'reason_code': stopped})
             continue
         try:
-            authorize_content(request, path)
+            authorize(path)
             if not path.lower().endswith('.md'):
                 raise PathDenied()
             note = read_note(path)

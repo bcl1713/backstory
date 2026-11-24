@@ -3,6 +3,7 @@
 Application flock coordinates web processes. External writers do not participate;
 final hashes narrow that residual race but cannot promise filesystem CAS.
 """
+from .actors import require_actor
 import errno
 import difflib
 import hashlib
@@ -26,8 +27,7 @@ from .relocations import wiki_write_lock
 
 
 def validate_save(actor, path, source):
-    if not actor.is_authenticated or not actor.is_active:
-        raise PermissionDenied
+    require_actor(actor)
     validate_path(path, "content")
     if not path.lower().endswith(".md"):
         raise PathDenied()

@@ -3,6 +3,7 @@
 Application writers cooperate through wiki-write. Arbitrary external filesystem
 writers do not; final hashes narrow that residual race, never promise FS CAS.
 """
+from .actors import require_actor, owner_fields, record_owner
 import base64
 from contextlib import contextmanager
 import ctypes
@@ -38,8 +39,7 @@ MAX_BYTES = 64 * 1024 * 1024
 
 
 def _actor(actor):
-    if not actor.is_authenticated or not actor.is_active:
-        raise PermissionDenied
+    require_actor(actor)
 
 
 def assert_writes_available():
@@ -327,7 +327,7 @@ def preview_move(actor, source, destination):
             from .move_previews import _capacity
             _capacity()
             plan = _plan(source, destination)
-            operation = MoveOperation(actor=actor, source=source, destination=destination, plan=plan)
+            operation = MoveOperation(**owner_fields(actor), source=source, destination=destination, plan=plan)
             with application_lock('revision-quota'), transaction.atomic():
                 # Reserve SQLite's writer before quota reads. The new UUID
                 # matches no row, but UPDATE still prevents a session/index
@@ -429,7 +429,7 @@ def _start(operation):
         _check_quota(charge)
         for item in plan['changes']:
             original, output = _raw(item['before']), _raw(item['after'])
-            SavedRevision.objects.create(actor=operation.actor, path=item['path'], base_revision='"' + hashlib.sha256(original).hexdigest() + '"', original=original, submitted=output)
+            SavedRevision.objects.create(**record_owner(operation), path=item['path'], base_revision='"' + hashlib.sha256(original).hexdigest() + '"', original=original, submitted=output)
         operation.state = 'applying'
         operation.save(update_fields=['state'])
 
@@ -510,7 +510,7 @@ def commit_move(actor, operation_id):
     _actor(actor)
     with application_lock('wiki-write'):
         try:
-            operation = MoveOperation.objects.get(pk=operation_id, actor=actor)
+            operation = MoveOperation.objects.get(pk=operation_id, **owner_fields(actor))
         except (MoveOperation.DoesNotExist, ValueError):
             raise StorageError('not_found', 404) from None
         if operation.state in {'completed', 'cancelled'}:
@@ -605,7 +605,7 @@ def rollback_move(actor, operation_id):
     _actor(actor)
     with application_lock('wiki-write'):
         try:
-            operation = MoveOperation.objects.get(pk=operation_id, actor=actor)
+            operation = MoveOperation.objects.get(pk=operation_id, **owner_fields(actor))
         except (MoveOperation.DoesNotExist, ValueError):
             raise StorageError('not_found', 404) from None
         if operation.state in {'completed', 'cancelled'}:

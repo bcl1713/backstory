@@ -1,4 +1,5 @@
 """Bounded required backups and short-lived, source-bound recovery grants."""
+from .actors import require_actor, owner_fields
 from contextlib import contextmanager
 from datetime import timedelta
 import fcntl
@@ -32,7 +33,7 @@ def store_required_backup(actor, path, base_revision, original, submitted):
         with application_lock("revision-quota"), transaction.atomic():
             _prune(timezone.now())
             _check_quota(_record_charge(path, base_revision, original, submitted))
-            SavedRevision.objects.create(actor=actor, path=path, base_revision=base_revision, original=original, submitted=submitted)
+            SavedRevision.objects.create(**owner_fields(actor), path=path, base_revision=base_revision, original=original, submitted=submitted)
     except (DatabaseError, OSError):
         raise StorageError("backup_unavailable", 503) from None
 
@@ -45,7 +46,7 @@ def issue_recovery(actor, path, base_revision, source, result):
             if FormatRecovery.objects.count() >= 1024:
                 raise StorageError("recovery_capacity", 503)
             token = secrets.token_urlsafe(32)
-            FormatRecovery.objects.create(token_digest=hashlib.sha256(token.encode()).hexdigest(), actor=actor, path=path,
+            FormatRecovery.objects.create(token_digest=hashlib.sha256(token.encode()).hexdigest(), **owner_fields(actor), path=path,
                 base_revision=base_revision, source_digest=hashlib.sha256(source.encode()).hexdigest(),
                 diagnostics=[asdict(item) for item in result.diagnostics], diff=result.diff[:65536],
                 expires_at=timezone.now() + timedelta(minutes=30))
@@ -58,7 +59,7 @@ def get_recovery(actor, path, base_revision, source, token):
     if not isinstance(token, str) or not 20 <= len(token) <= 128:
         raise StorageError("invalid_source_recovery")
     try:
-        grant = FormatRecovery.objects.get(token_digest=hashlib.sha256(token.encode()).hexdigest(), actor=actor, path=path,
+        grant = FormatRecovery.objects.get(token_digest=hashlib.sha256(token.encode()).hexdigest(), **owner_fields(actor), path=path,
             base_revision=base_revision, source_digest=hashlib.sha256(source.encode()).hexdigest(), expires_at__gt=timezone.now())
     except FormatRecovery.DoesNotExist:
         raise StorageError("invalid_source_recovery") from None
@@ -180,8 +181,7 @@ def restore_revision(actor, revision_id, current_base_revision, *, expected_path
     from django.core.exceptions import PermissionDenied
     from .contracts import FormatResult
     from .saves import save_note
-    if not actor.is_authenticated or not actor.is_active:
-        raise PermissionDenied
+    require_actor(actor)
     try:
         record = SavedRevision.objects.get(pk=revision_id)
     except SavedRevision.DoesNotExist:
