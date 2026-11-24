@@ -11,7 +11,7 @@ COPY scripts/build-assets.mjs scripts/build-mermaid-frame.mjs scripts/build-grap
 RUN npm run build && npm prune --omit=dev --ignore-scripts --no-audit --no-fund && mkdir /node-libs && cp /usr/lib/*-linux-gnu/libstdc++.so.6 /node-libs/
 
 FROM ghcr.io/astral-sh/uv:0.12.19 AS uv
-FROM python:3.14.9-slim-bookworm AS runtime
+FROM python:3.14.9-slim-bookworm AS runtime-base
 ARG BACKSTORY_VERSION=unknown
 ARG BACKSTORY_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/bcl1713/backstory" \
@@ -42,3 +42,17 @@ RUN python -m wiki.build_identity "$BACKSTORY_VERSION" "$BACKSTORY_REVISION" \
 USER 10001:10001
 EXPOSE 8000
 CMD ["sh", "docker/entrypoint.sh"]
+
+# Explicit optional artifact: locked SDK added at build time, never live-installed.
+# No selector defaults; invoking this target without explicit HTTPS flags refuses.
+FROM runtime-base AS native-mcp
+USER 0:0
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    uv sync --frozen --no-dev --extra native-mcp --no-cache
+USER 10001:10001
+ENTRYPOINT ["python", "-m", "backstory.native_https"]
+CMD []
+
+# The default build/output keeps the ordinary web image and command unchanged.
+FROM runtime-base AS runtime

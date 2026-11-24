@@ -1,9 +1,10 @@
 """Explicit local stdio entry point. Never imported by web startup."""
 import argparse
 import asyncio
-import json
 import os
 from pathlib import Path
+
+from .native_dispatch import action_error
 
 
 def configure(argv=None):
@@ -42,76 +43,14 @@ class BoundedInput:
         return line
 
 
-_MUTATION_SUCCESS = {
-    'create_note': {'created', 'created_index_delayed'},
-    'save_note': {'saved', 'saved_index_delayed', 'noop'},
-    'create_folder': {'created', 'already_exists'},
-    'preview_move': {'preview'}, 'commit_move': {'completed'}, 'rollback_move': {'cancelled'},
-    'preview_removal': {'preview'}, 'commit_removal': {'removed'},
-    'restore_removal': {'restored', 'cancelled'},
-    'restore_note_revision': {'saved', 'saved_index_delayed', 'saved_source', 'saved_source_index_delayed', 'noop'},
-    'upload_file': {'created', 'already_exists'},
-}
-
-
-def action_error(name, data):
-    """MCP action success is separate from certainty about published disk state."""
-    if data.get('request_started') is False:
-        return True
-    if name in _MUTATION_SUCCESS:
-        return data.get('state') not in _MUTATION_SUCCESS[name] or bool(data.get('reason_code'))
-    return data.get('state') in {'error', 'unavailable'}
-
-
 async def serve():
     import sys
-    from asgiref.sync import sync_to_async
-    from django.core.serializers.json import DjangoJSONEncoder
-    from jsonschema import Draft202012Validator
-    from mcp import types
-    from mcp.server.lowlevel import Server
     from mcp.server.stdio import stdio_server
-    from wiki.actors import local_access
-    from wiki.native_service import invoke
+    from .native_dispatch import NativeDispatcher
 
-    access = await sync_to_async(local_access, thread_sensitive=True)()
-    definitions = json.loads(Path(__file__).with_name('native_tools.json').read_text())
-    schemas = {d['name']: Draft202012Validator(d['input_schema']) for d in definitions}
-    tools = [types.Tool(name=d['name'], description=d['description'], input_schema=d['input_schema'],
-                        annotations=types.ToolAnnotations(read_only_hint=not d['write'],
-                            destructive_hint=d['write'], idempotent_hint=False, open_world_hint=False)) for d in definitions]
-    writes = {d['name'] for d in definitions if d['write']}
-    active = False
-
-    def reply(name, data):
-        data = {'untrusted_content': True, **data}
-        # JSON text is the stable cross-version tool result contract.
-        return types.CallToolResult(content=[types.TextContent(type='text', text=json.dumps(data, cls=DjangoJSONEncoder))],
-                                    is_error=action_error(name, data))
-
-    async def list_tools(ctx, params):
-        return types.ListToolsResult(tools=tools)
-
-    async def call_tool(ctx, params):
-        nonlocal active
-        args = params.arguments or {}
-        validator = schemas.get(params.name)
-        if validator is None or not validator.is_valid(args):
-            return reply(params.name, {'state': 'error', 'reason_code': 'invalid_arguments', 'request_started': False})
-        if active:
-            return reply(params.name, {'state': 'save_in_progress', 'request_started': False, 'queued': False})
-        active = True
-        work = asyncio.create_task(sync_to_async(invoke, thread_sensitive=True)(access, params.name, args, write=params.name in writes))
-
-        def finished(task):
-            nonlocal active
-            active = False
-        work.add_done_callback(finished)
-        # Client cancellation cannot release the guard while synchronous storage
-        # work is still running. Nothing is queued or replayed after completion.
-        return reply(params.name, await asyncio.shield(work))
-
-    server = Server('Backstory local', version='1', on_list_tools=list_tools, on_call_tool=call_tool)
+    dispatcher = NativeDispatcher()
+    await dispatcher.check_access()
+    server = dispatcher.server()
     incoming = os.fdopen(os.dup(sys.stdin.fileno()), encoding='utf-8', errors='strict')
     try:
         async with stdio_server(stdin=BoundedInput(incoming)) as (read, write):

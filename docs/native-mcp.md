@@ -1,5 +1,10 @@
 # Local native MCP
 
+The shipped stdio option below remains available. A separate explicit
+[authenticated private LAN HTTPS process](native-mcp-https.md) is opt-in,
+requires TLS, a bearer file and an explicit LAN subnet or exact Forge peer, and changes no WebMCP or
+default web startup behavior.
+
 Backstory has an **opt-in, unauthenticated local stdio subprocess** adapter. EDITH
 or another trusted local client owns its start/stop lifecycle. It opens no HTTP
 listener and is never imported by web startup. It is not a remote connector.
