@@ -222,7 +222,7 @@ async def proof():
                     async with ClientSession(*streams) as client:
                         negotiated = await client.initialize()
                         tools = await client.list_tools()
-                        assert len(tools.tools) == 28
+                        assert len(tools.tools) == 29
                         checks.append('sdk_initialize_discovery')
 
                         async def call(name, arguments):

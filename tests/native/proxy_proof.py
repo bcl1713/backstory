@@ -62,7 +62,7 @@ async def proof():
                 async with streamable_http_client(url, http_client=http) as streams:
                     async with ClientSession(*streams) as client:
                         initialized = await client.initialize()
-                        assert len((await client.list_tools()).tools) == 28
+                        assert len((await client.list_tools()).tools) == 29
 
                         async def call(name, args):
                             result = await client.call_tool(name, args)
@@ -86,7 +86,7 @@ async def proof():
                         assert (wiki / 'proxy.md').read_bytes() == before
                         _, denied = await call('read_note', {'path': '../outside.md'})
                         assert denied['state'] == 'error'
-        print(json.dumps({'protocol': initialized.protocol_version, 'tools': 28,
+        print(json.dumps({'protocol': initialized.protocol_version, 'tools': 29,
             'pre_access_denials': len(denials), 'forwarding_headers': 'ignored, not authority',
             'backend_credentials': 'absent', 'guarded_save_readback_stale': True,
             'body_bound_before_access': True, 'proof': 'ASGI production app; no listener or Nginx/TLS claim'}))

@@ -23,7 +23,7 @@ def invoke(access, name, arguments, *, write=False):
         data = {'state': 'unavailable' if error.status == 503 else 'error',
                 'reason_code': error.reason_code,
                 'restart': error.reason_code in {'cursor_invalid', 'search_cursor_expired', 'graph_cursor_expired'}}
-        if hasattr(error, 'diagnostic') and name != 'edit_note':
+        if hasattr(error, 'diagnostic') and name not in {'edit_note', 'preview_edit_note'}:
             data['identity_diagnostic'] = error.diagnostic
     except Exception:
         # A failure after publication is not evidence of a failed mutation.
@@ -84,6 +84,10 @@ def _dispatch(access, name, args):
     if name == 'create_folder':
         from .folders import create_folder
         return create_folder(access.authorize(args['path'], 'folder'), access.actor)
+    if name == 'preview_edit_note':
+        from .edit_preview import preview_edit_note
+        path = access.authorize(args['path'])
+        return preview_edit_note(access.actor, path, args['old_text'], args['new_text'], args['revision'])
     if name == 'edit_note':
         from .saves import edit_note
         from .tool_results import edited_result

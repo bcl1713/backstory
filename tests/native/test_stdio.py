@@ -142,7 +142,7 @@ def test_guarded_lifecycle_over_stdio(tmp_path):
     import json
     wiki, data, env = environment(tmp_path)
     expected = {'wiki_status', 'list_notes', 'search_notes', 'read_note', 'read_notes',
-                'create_folder', 'create_note', 'save_note', 'edit_note', 'preview_move', 'get_move',
+                'create_folder', 'create_note', 'save_note', 'edit_note', 'preview_edit_note', 'preview_move', 'get_move',
                 'commit_move', 'rollback_move', 'preview_removal', 'get_removal',
                 'commit_removal', 'restore_removal', 'list_note_history',
                 'read_note_revision', 'restore_note_revision', 'get_note_links',
@@ -294,7 +294,7 @@ else:
                 assert (await call('inspect_upload', filename='proof.bin', sha256=digest))['state'] == 'confirmed'
                 assert len(list((wiki / 'assets').iterdir())) == 1
                 assert (await call('upload_file', filename='proof.bin', data_base64='Zg==='))['state'] == 'error'
-                print('lifecycle: 28 tools, authoritative disk/recovery checks, stale/path/collision refusals')
+                print('lifecycle: 29 tools, authoritative disk/recovery checks, stale/path/collision refusals')
     asyncio.run(check())
 
 

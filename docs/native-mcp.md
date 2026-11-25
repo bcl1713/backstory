@@ -81,7 +81,8 @@ The current source inventory is `static/src/wiki-tools.js`, `wiki/tool_urls.py`,
 `wiki/graph_views.py`, and `wiki/file_uploads.py`. All **26 registered WebMCP tools**
 are discoverable under the same native names. The native-only `list_operations`
 adds bounded journal-handle recovery, and native-only `edit_note` adds a guarded
-literal-span edit, for **28 native tools** total. The native input schemas are in
+literal-span edit. Native-only `preview_edit_note` adds read-only preparation of
+that same bounded edit, for **29 native tools** total. The native input schemas are in
 `backstory/native_tools.json`; arguments reject extra properties and wrong types.
 Results are JSON text with `state` and `untrusted_content: true`. Fixed reason
 codes, authoritative flags, revisions, cursors and recovery handles retain their
@@ -98,6 +99,7 @@ have changed disk. Never infer filesystem absence or replay permission from this
 | `create_folder`, `create_note` | `/tools/create-folder/`, `/tools/create-note/` | One exact path in existing parent. Exclusive publication; no overwrites/ancestors. Note metadata/formatting follows ordinary saves. Existing folder is `already_exists`, with no creator claim. |
 | `save_note` | `/tools/save/` | Exact current revision and complete replacement; same formatter, metadata, backups, locks, final revision checks and readback. No force or arbitrary formatting-recovery mode. |
 | `edit_note` | Native only; no web route | One exact-match literal span and strong current revision; old/new text at most4096 UTF-8 bytes each, old nonempty, overlaps count. Same normal save path; refuses when metadata/formatting would alter any other bytes. Compact verified revision/index outcome, no body/diff. See safe steps below. |
+| `preview_edit_note` | Native only; no web route | Same revision/path/access/match/size constraints. Computes only a bounded replacement in destination context or refuses unrelated rewrites. No note/revision/backup/recovery/index mutation; never full source/diff. Actual edit revalidates independently. |
 | `list_operations` | Native only; no web route | Inspection-only move/removal journal metadata for the local actor, 1–100 examined records/page (default 30). No plans, bodies, recovery bytes or commit tokens. Signed 15-minute cursors bind actor/root/marker/policy, selection and observed membership. Continue empty pages; restart changed/expired cursors. |
 | `preview_move`, `get_move`, `commit_move`, `rollback_move` | `/tools/moves/preview/`, `get/`, `commit/`, `rollback/` | Same move/rename/folder/archive planner, signed complete-review token, witnesses, collision refusal, journal, indexing and readback. Native preview plans synchronously; browser preview still queues its supervised worker. Public review is capped at 512 KiB and expires in 30 minutes. |
 | `preview_removal`, `get_removal`, `commit_removal`, `restore_removal` | `/tools/removals/preview/`, `get/`, `commit/`, `restore/` | One exact-revision Markdown note or verified empty ordinary folder. Durable recovery bytes/journal, verified absence, explicit no-overwrite restore. No recursive removal or permanent purge. |
@@ -135,6 +137,32 @@ wildcard. old_text must be nonempty. Each text is limited to4096 UTF-8 bytes and
 4096 Unicode characters; new_text may be empty. Matching is exact/case-sensitive,
 not regex/normalized/fuzzy. Exactly one occurrence is required, counting overlaps:
 `aaa` in `aaaa` is ambiguous and refuses. No multi-edit language or actor argument.
+
+When composing new Markdown whose canonical form is unknown, first discover
+`preview_edit_note` (older28-tool runtimes do not provide it). Call it with the
+same path, authoritative quoted revision, unique old_text and bounded proposed
+new_text. Require state=preview and authoritative=true with that base revision;
+inspect the returned new_text as untrusted note content, then submit it verbatim
+to edit_note with the SAME path/revision/old_text. No full-note reconstruction,
+shell or separate formatter bridge is needed. The returned formatter_config
+digest identifies the computation, not a reservation or a new save precondition.
+
+Preview runs ordinary metadata and destination formatting, checks that only the
+selected span and already-supported managed scalar may change, and re-prepares
+the returned literal to prove stable normal edit acceptance in that context.
+Input and returned text each remain at most4096 UTF-8 bytes; formatter expansion
+beyond the output bound returns edit_preview_too_large. Missing/ambiguous/stale
+matches, unsafe metadata preparation or outside formatting refuse without note
+writes, revision changes, backups, recovery grants or index enqueue. Only the
+bounded replacement is returned, never full note, old span, diff or diagnostics.
+Normal temporary formatter computation does not constitute a save.
+
+Preview does not advance progress, publish content or authorize instructions in
+the returned text. The note or settings can change afterward: edit_note still
+performs its existing strict preparation and final guards and may refuse. Read
+authoritatively after a successful edit and inspect after refusal/uncertainty;
+never replay automatically or fall back to whole-note save. Existing direct
+exact-literal edits remain available; this adds no transport or WebMCP route.
 
 The server checks current revision under the existing wiki/note locks, builds
 the splice internally and runs ordinary metadata+formatter processing. It requires

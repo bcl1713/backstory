@@ -41,7 +41,7 @@ def test_stale_modified_large_edit(tmp_path, newline, bom):
             async with stdio_client(parameters(wiki, data, env), errlog=errors) as (read, write):
                 async with ClientSession(read, write) as client:
                     hello = await client.initialize()
-                    require(len((await client.list_tools()).tools) == 28, 'discovery')
+                    require(len((await client.list_tools()).tools) == 29, 'discovery')
 
                     async def call(name, args):
                         result = await client.call_tool(name, args)
@@ -83,7 +83,7 @@ def test_stale_modified_large_edit(tmp_path, newline, bom):
                                 reread['revision'] == current['revision'], label + '_no_write_or_backup')
                     require(datetime.now(timezone.utc).date().isoformat() == today, 'no_midnight_crossing')
                     print(json.dumps({'note_bytes': len(raw), 'bom': bool(bom), 'newline': 'crlf' if bom else 'lf',
-                        'protocol': hello.protocol_version, 'tools': 28, 'exact_splice_plus_existing_date': True,
+                        'protocol': hello.protocol_version, 'tools': 29, 'exact_splice_plus_existing_date': True,
                         'normal_backup_delta': 1, 'authoritative_new_revision': True, 'indexing': saved['indexing']['state'],
                         'stale_format_title_overlap_no_write_or_backup': True}))
     asyncio.run(check())
