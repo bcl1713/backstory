@@ -113,15 +113,43 @@ def _saved(source, revision, diagnostics, diff, mode, *, uncertain=False, path):
     return SaveResult(state, source, revision, diagnostics, diff)
 
 
-def edit_note(actor, path, old_text, new_text, revision):
-    """One bounded literal span; construction and normal save share the same locks."""
+def _literal_arguments(old_text, new_text, revision):
     for text, minimum in ((old_text, 1), (new_text, 0)):
         try:
             if not isinstance(text, str) or not minimum <= len(text.encode('utf-8')) <= 4096:
                 raise ValueError
         except (ValueError, UnicodeError):
             raise StorageError('invalid_arguments') from None
-    base = parse_precondition(revision, None)
+    return parse_precondition(revision, None)
+
+
+def _literal_submission(current, old_text, new_text):
+    start = current.source.find(old_text)
+    if start < 0:
+        raise StorageError('edit_no_match', 412)
+    if current.source.find(old_text, start + 1) >= 0:
+        raise StorageError('edit_ambiguous', 412)
+    return current.source[:start] + new_text + current.source[start + len(old_text):], start
+
+
+def _prepare_formatted(path, source, current, today):
+    prepared = prepare_save_metadata(source, current.source if current else None, today)
+    return format_source(path, prepared, current)
+
+
+def _literal_matches(current, start, old_text, new_text, submitted, candidate, today):
+    if candidate == submitted:
+        return True
+    try:
+        expected = literal_edit_with_modified(current.source, start, start + len(old_text), new_text, today)
+    except MetadataError:
+        expected = None
+    return candidate == expected
+
+
+def edit_note(actor, path, old_text, new_text, revision):
+    """One bounded literal span; construction and normal save share the same locks."""
+    base = _literal_arguments(old_text, new_text, revision)
     return save_note(actor, path, '', base, literal_edit=(old_text, new_text))
 
 
@@ -147,12 +175,7 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                 return conflict
             if literal_edit is not None:
                 old_text, new_text = literal_edit
-                start = current.source.find(old_text)
-                if start < 0:
-                    raise StorageError('edit_no_match', 412)
-                if current.source.find(old_text, start + 1) >= 0:
-                    raise StorageError('edit_ambiguous', 412)
-                submitted_source = current.source[:start] + new_text + current.source[start + len(old_text):]
+                submitted_source, start = _literal_submission(current, old_text, new_text)
                 submitted = validate_save(actor, path, submitted_source)
             if recovery is not None:
                 candidate, diagnostics, diff = submitted_source, recovery[0], recovery[1]
@@ -160,27 +183,20 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
             else:
                 try:
                     today = wiki_date()
-                    prepared = prepare_save_metadata(submitted_source, current.source if current else None, today)
+                    result = _prepare_formatted(path, submitted_source, current, today)
                 except MetadataError as error:
                     if literal_edit is not None:
                         return SaveResult('refused', '', base_revision, reason_code='edit_format_unavailable', status=422)
                     failure = FormatResult(submitted_source, (error.diagnostic,), "", "failed", "")
                     return failed_format(actor, path, submitted_source, base_revision, failure)
-                result = format_source(path, prepared, current)
                 if result.outcome == "failed":
                     if literal_edit is not None:
                         return SaveResult('refused', '', base_revision, reason_code='edit_format_unavailable', status=422)
                     return failed_format(actor, path, submitted_source, base_revision, result)
                 candidate, diagnostics = result.source, result.diagnostics
-                if literal_edit is not None and candidate != submitted_source:
-                    try:
-                        expected = literal_edit_with_modified(current.source, start, start + len(old_text), new_text, today)
-                    except MetadataError:
-                        expected = None
-                    if candidate != expected:
-                        # No formatter normalization, even within the span. Only
-                        # the original safe modified scalar may also change.
-                        return SaveResult('refused', '', base_revision, reason_code='edit_would_change_other_content', status=422)
+                if literal_edit is not None and not _literal_matches(current, start, old_text, new_text,
+                                                                     submitted_source, candidate, today):
+                    return SaveResult('refused', '', base_revision, reason_code='edit_would_change_other_content', status=422)
                 diff = "".join(difflib.unified_diff(submitted_source.splitlines(keepends=True),
                     candidate.splitlines(keepends=True), fromfile="submitted", tofile="saved"))
             # NoteSnapshot separates the encoding BOM; every source character

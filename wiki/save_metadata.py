@@ -60,8 +60,8 @@ def _slug(title):
     return re.sub(r'[^\w]+', '-', text, flags=re.UNICODE).replace('_', '-').strip('-')
 
 
-def literal_edit_with_modified(previous, start, end, replacement, today):
-    """Exact original-position splice plus one existing scalar, or no allowance.
+def literal_edit_context(previous, start, end, replacement, today):
+    """Approved exterior slices with one existing scalar, or no allowance.
 
     Deliberately accept only a plain block key and one unwrapped single-line
     string token. References anywhere in the header fail closed. The caller
@@ -114,11 +114,18 @@ def literal_edit_with_modified(previous, start, end, replacement, today):
     if _title(previous, fields) != _title(submitted, new_fields):
         return None
     value = json.dumps(today) if node.style == '"' else "'" + today + "'" if node.style == "'" else today
-    expected = previous
-    for left, right, value in sorted([(start, end, replacement),
-            (offset + node.start_mark.index, offset + node.end_mark.index, value)], reverse=True):
-        expected = expected[:left] + value + expected[right:]
-    return expected
+    left, right = offset + node.start_mark.index, offset + node.end_mark.index
+    if right <= start:
+        return previous[:left] + value + previous[right:start], previous[end:]
+    if left >= end:
+        return previous[:start], previous[end:left] + value + previous[right:]
+    return None
+
+
+def literal_edit_with_modified(previous, start, end, replacement, today):
+    """Exact original-position splice plus the same eligible existing scalar."""
+    context = literal_edit_context(previous, start, end, replacement, today)
+    return context[0] + replacement + context[1] if context is not None else None
 
 
 def prepare_save_metadata(source, previous, today):

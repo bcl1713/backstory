@@ -95,7 +95,7 @@ async def exercise_shipped_helpers(app, endpoint, peer, token, scratch, source):
         async with ClientSession(*streams) as session:
             result = await session.initialize()
             assert result.protocol_version
-            assert len((await session.list_tools()).tools) == 28
+            assert len((await session.list_tools()).tools) == 29
 
     # Exercise the actual shipped redirect-header stripper without network.
     observed = []

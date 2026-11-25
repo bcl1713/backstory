@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 _MUTATION_SUCCESS = {
+    'preview_edit_note': {'preview'},
     'create_note': {'created', 'created_index_delayed'},
     'save_note': {'saved', 'saved_index_delayed', 'noop'},
     'edit_note': {'saved', 'saved_index_delayed', 'noop'},

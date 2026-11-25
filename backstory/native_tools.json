@@ -579,6 +579,22 @@
     }
   },
   {
+    "name": "preview_edit_note",
+    "description": "Read-only preview of one exact-revision bounded literal edit in its destination formatting context. Same unique-match/path/access/4096 UTF-8-byte input limits as edit_note. Returns only bounded new_text to inspect and submit verbatim via edit_note, or refuses unrelated rewrites/output growth. No note write, backup, recovery grant or indexing. Preview is not a reservation: edit_note revalidates independently; never replay automatically.",
+    "write": false,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "revision": {"type": "string", "minLength": 66, "maxLength": 66, "pattern": "^\"[0-9a-f]{64}\"$"},
+        "old_text": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "new_text": {"type": "string", "maxLength": 4096}
+      },
+      "required": ["path", "revision", "old_text", "new_text"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "edit_note",
     "description": "Replace exactly one nonempty literal old_text span with new_text, each at most 4096 UTF-8 bytes, using exact current authoritative read_note revision. Overlapping matches count: missing/ambiguous/stale text refuses without a note write or backup. Uses normal guarded save/metadata/formatter; refuses before publishing if normal processing would change any other bytes (even additional normalization within the span refuses). Compact result has verified revision/index status, no body/diff. Read/inspect unknown outcomes before a deliberate retry; never replay automatically. Unsaved browser buffers are invisible.",
     "write": true,
