@@ -105,7 +105,7 @@ def test_targeted_large_note_edit_over_stdio(tmp_path, newline, bom):
                 for path, body, needle, reason in (
                     ('overlap.md', '# Overlap\n\naaaa\n', 'aaa', 'edit_ambiguous'),
                     ('format.md', '# Format\n\n-   unstable\n\nMARKER-A\n', 'MARKER-A', 'edit_would_change_other_content'),
-                    ('metadata.md', '---\nmodified: 2000-01-01\n---\n\n# Metadata\n\nMARKER-A\n', 'MARKER-A', 'edit_would_change_other_content')):
+                    ('metadata.md', '---\ntitle: Before\nmodified: 2000-01-01\n---\n\n# Metadata\n\nMARKER-A\n', 'Before', 'edit_would_change_other_content')):
                     (wiki / path).write_bytes(body.replace('\n', newline).encode())
                     _, current = await call('read_note', {'path': path})
                     await refused({'path': path, 'revision': current['revision'], 'old_text': needle, 'new_text': 'replacement'}, reason)

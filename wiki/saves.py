@@ -21,7 +21,7 @@ from .policy import validate_path
 from .revisions import application_lock, get_recovery, issue_recovery, store_required_backup
 from .staging import finish_stage, register_stage
 from .metadata import MetadataError
-from .save_metadata import prepare_save_metadata, wiki_date
+from .save_metadata import literal_edit_with_modified, prepare_save_metadata, wiki_date
 from .storage import _os_error, open_directory, read_note, require_ready
 from .relocations import wiki_write_lock
 
@@ -159,7 +159,8 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                 result = None
             else:
                 try:
-                    prepared = prepare_save_metadata(submitted_source, current.source if current else None, wiki_date())
+                    today = wiki_date()
+                    prepared = prepare_save_metadata(submitted_source, current.source if current else None, today)
                 except MetadataError as error:
                     if literal_edit is not None:
                         return SaveResult('refused', '', base_revision, reason_code='edit_format_unavailable', status=422)
@@ -172,9 +173,14 @@ def save_note(actor, path, submitted_source, base_revision, mode="formatted", re
                     return failed_format(actor, path, submitted_source, base_revision, result)
                 candidate, diagnostics = result.source, result.diagnostics
                 if literal_edit is not None and candidate != submitted_source:
-                    # Conservative: even a formatter change inside the requested
-                    # span refuses. Never normalize any unmanaged source bytes.
-                    return SaveResult('refused', '', base_revision, reason_code='edit_would_change_other_content', status=422)
+                    try:
+                        expected = literal_edit_with_modified(current.source, start, start + len(old_text), new_text, today)
+                    except MetadataError:
+                        expected = None
+                    if candidate != expected:
+                        # No formatter normalization, even within the span. Only
+                        # the original safe modified scalar may also change.
+                        return SaveResult('refused', '', base_revision, reason_code='edit_would_change_other_content', status=422)
                 diff = "".join(difflib.unified_diff(submitted_source.splitlines(keepends=True),
                     candidate.splitlines(keepends=True), fromfile="submitted", tofile="saved"))
             # NoteSnapshot separates the encoding BOM; every source character

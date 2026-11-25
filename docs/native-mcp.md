@@ -138,20 +138,32 @@ not regex/normalized/fuzzy. Exactly one occurrence is required, counting overlap
 
 The server checks current revision under the existing wiki/note locks, builds
 the splice internally and runs ordinary metadata+formatter processing. It requires
-the resulting source to equal the requested splice exactly before staging. Even
-additional formatting *inside* the span is conservatively refused. A modified-date,
+the resulting source to equal the requested splice exactly before staging, with
+one narrow exception: the normal server-computed wiki date may replace the value
+of one existing, safely identified frontmatter `modified` scalar outside the
+original span. The field must have a plain block key and one unwrapped single-line
+string value; its entire line (including key/comment/newline) must be untouched
+by the caller. No missing field, caller-created/overlapped field, flow mapping,
+tag, anchor or reference is eligible. Quote style, comments, BOM and newlines
+must remain exact. The server captures its configured wiki date once; no client
+date or metadata authority is accepted.
+
+Additional formatting *inside* the span is still conservatively refused. A
 title/alias update, CRLF normalization, wrapping or unrelated formatting change
 therefore returns `edit_would_change_other_content` without publication/backup.
 Formatter/metadata failure is `edit_format_unavailable`; no recovery grant or raw
 bypass is offered. Use a separately authorized editor workflow when normalization
 is needed; do not broaden the unattended job's permissions or retry automatically.
 
-On success, every byte outside the span, including encoding BOM/newlines, is
-preserved. Supported LF and configured formatter-stable BOM+CRLF are tested on
-synthetic large notes. Existing notes without a modified field, or whose normal
-metadata is already current and unchanged, can remain lossless; a stale modified
-date can intentionally prevent an otherwise valid small edit. Nothing silently
-updates unmanaged metadata or formatter configuration.
+On success, every byte outside the span and that optional existing scalar value,
+including encoding BOM/newlines, is preserved. Supported LF and configured
+formatter-stable BOM+CRLF are tested on synthetic large dated notes. Existing
+notes without a modified field, or whose normal metadata is already current and
+unchanged, keep the exact-splice behavior. An ineligible modified field still
+refuses if normal processing would change it. No formatter configuration or other
+unmanaged content is normalized. Submit a canonical literal replacement with the
+note's exact newline sequence and surrounding blank lines; no whole-note
+reconstruction or separate metadata call is needed for an eligible stale date.
 
 The compact result includes state, verified revision/authoritative flag and
 independent indexing status, with no full source/diff/formatter messages or
