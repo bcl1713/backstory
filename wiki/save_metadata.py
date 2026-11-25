@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import yaml
 from yaml.nodes import MappingNode, ScalarNode, SequenceNode
-from yaml.tokens import AliasToken, AnchorToken, FlowEntryToken, FlowMappingEndToken, FlowSequenceEndToken
+from yaml.tokens import AliasToken, AnchorToken, FlowEntryToken, FlowMappingEndToken, FlowSequenceEndToken, ScalarToken, TagToken
 
 from .metadata import MetadataError, RestrictedLoader, parse_front_matter
 
@@ -58,6 +58,67 @@ def _title(source, fields):
 def _slug(title):
     text = unicodedata.normalize('NFKC', title).lower()
     return re.sub(r'[^\w]+', '-', text, flags=re.UNICODE).replace('_', '-').strip('-')
+
+
+def literal_edit_with_modified(previous, start, end, replacement, today):
+    """Exact original-position splice plus one existing scalar, or no allowance.
+
+    Deliberately accept only a plain block key and one unwrapped single-line
+    string token. References anywhere in the header fail closed. The caller
+    cannot touch the field's whole line, including its key/comment/newline.
+    """
+    header = _header(previous)
+    if header is None:
+        return None
+    offset, _, text, root, fields = header
+    if not isinstance(root, MappingNode) or root.flow_style or 'modified' not in fields:
+        return None
+    key, node = fields['modified']
+    if (key.tag != 'tag:yaml.org,2002:str' or key.style is not None
+            or text[key.start_mark.index:key.end_mark.index] != 'modified'
+            or not isinstance(node, ScalarNode) or node.tag != 'tag:yaml.org,2002:str'
+            or node.style not in {None, "'", '"'} or not node.value
+            or key.end_mark.line != node.start_mark.line or node.start_mark.line != node.end_mark.line):
+        return None
+    tokens = list(yaml.scan(text, Loader=RestrictedLoader))
+    if any(isinstance(token, (AnchorToken, AliasToken, TagToken)) for token in tokens):
+        return None
+    if not any(isinstance(token, ScalarToken) and token.start_mark.index == node.start_mark.index
+               and token.end_mark.index == node.end_mark.index for token in tokens):
+        return None  # Tags/wrappers are not part of an eligible scalar value.
+    line_start = offset + text.rfind('\n', 0, key.start_mark.index) + 1
+    newline = text.find('\n', node.end_mark.index)
+    line_end = offset + (newline + 1 if newline >= 0 else len(text))
+    if not (end <= line_start or start >= line_end):
+        return None
+    submitted = previous[:start] + replacement + previous[end:]
+    changed = _header(submitted)
+    if changed is None or not isinstance(changed[3], MappingNode) or changed[3].flow_style:
+        return None
+    new_offset, _, new_text, _, new_fields = changed
+    shift = len(replacement) - (end - start) if end <= line_start else 0
+    new_pair = new_fields.get('modified')
+    if (new_pair is None or new_offset + new_pair[0].start_mark.index != offset + key.start_mark.index + shift
+            or new_offset + new_pair[1].start_mark.index != offset + node.start_mark.index + shift
+            or new_offset + new_pair[1].end_mark.index != offset + node.end_mark.index + shift):
+        return None  # Do not bind a caller-created/moved/reinterpreted field.
+    if any(isinstance(token, (AnchorToken, AliasToken, TagToken))
+           for token in yaml.scan(new_text, Loader=RestrictedLoader)):
+        return None
+    for name in ('title', 'alias', 'aliases'):
+        old_pair, pair = fields.get(name), new_fields.get(name)
+        old_value = text[old_pair[0].start_mark.index:old_pair[1].end_mark.index] if old_pair else None
+        value = new_text[pair[0].start_mark.index:pair[1].end_mark.index] if pair else None
+        if value != old_value:
+            return None
+    if _title(previous, fields) != _title(submitted, new_fields):
+        return None
+    value = json.dumps(today) if node.style == '"' else "'" + today + "'" if node.style == "'" else today
+    expected = previous
+    for left, right, value in sorted([(start, end, replacement),
+            (offset + node.start_mark.index, offset + node.end_mark.index, value)], reverse=True):
+        expected = expected[:left] + value + expected[right:]
+    return expected
 
 
 def prepare_save_metadata(source, previous, today):
